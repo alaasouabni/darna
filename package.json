@@ -19,6 +19,8 @@
     "uploader",
     "play/packages/iframe-api-typings",
     "tests",
+    "admin/api",
+    "admin/ui",
     "contrib/tools/generate-env-docs"
   ],
   "overrides": {

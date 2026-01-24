@@ -1,0 +1,118 @@
+version: "3.6"
+services:
+  admin-db:
+    image: postgres:16
+    restart: ${RESTART_POLICY}
+    environment:
+      POSTGRES_DB: ${ADMIN_DB_NAME}
+      POSTGRES_USER: ${ADMIN_DB_USER}
+      POSTGRES_PASSWORD: ${ADMIN_DB_PASSWORD}
+    volumes:
+      - admin-db-data:/var/lib/postgresql/data
+
+  admin-api:
+    image: lightency201/darna-admin-api:latest
+    environment:
+      - NODE_ENV=production
+      - ADMIN_PORT=3100
+      - ADMIN_HOST=0.0.0.0
+      - ADMIN_PUBLIC_URL=https://${ADMIN_DOMAIN}
+      - ADMIN_API_TOKEN
+      - ADMIN_ALLOWED_ORIGINS=https://${ADMIN_DOMAIN}
+      - ADMIN_ALLOWED_DOMAINS=${DOMAIN}
+      - ADMIN_LOG_LEVEL=${ADMIN_LOG_LEVEL}
+      - ADMIN_JWT_ISSUER
+      - ADMIN_JWT_AUDIENCE
+      - ADMIN_JWT_JWKS_URI
+      - ADMIN_JWT_RESOURCE
+      - ADMIN_JWT_ROLE_MAPPING
+      - ADMIN_JWT_ROLE_CLAIMS
+      - ADMIN_KEYCLOAK_URL
+      - ADMIN_KEYCLOAK_REALM
+      - ADMIN_KEYCLOAK_CLIENT_ID
+      - ADMIN_KEYCLOAK_CLIENT_SECRET
+      - ADMIN_SOCKET_JWT_SECRET
+      - ADMIN_SOCKET_TTL_SECONDS
+      - DATABASE_URL=postgresql://${ADMIN_DB_USER}:${ADMIN_DB_PASSWORD}@admin-db:5432/${ADMIN_DB_NAME}
+      - ASSETS_BASE_URL=https://${DOMAIN}/
+      - LIVEKIT_HOST
+      - LIVEKIT_API_KEY
+      - LIVEKIT_API_SECRET
+      - STUN_SERVER
+      - TURN_SERVER
+      - TURN_USER
+      - TURN_PASSWORD
+      - TURN_STATIC_AUTH_SECRET
+      - ROOM_API_KEYS
+      - PUBLIC_MAP_STORAGE_URL=https://${DOMAIN}/map-storage
+      - INTERNAL_MAP_STORAGE_URL=http://map-storage:3000
+      - CF_CHALLENGE_TOKEN
+      - START_ROOM_URL
+      - ENABLE_MAP_EDITOR
+      - MAP_EDITOR_ALLOW_ALL_USERS
+      - MAP_EDITOR_ALLOWED_USERS
+      - DISABLE_ANONYMOUS
+      - OPENID_WOKA_NAME_POLICY
+      - OPENID_LOGOUT_REDIRECT_URL
+      - ENABLE_CHAT
+      - ENABLE_CHAT_UPLOAD
+      - ENABLE_CHAT_ONLINE_LIST
+      - ENABLE_CHAT_DISCONNECTED_LIST
+      - ENABLE_SAY
+      - ENABLE_ISSUE_REPORT
+      - ENABLE_REPORT_ISSUES_MENU
+      - REPORT_ISSUES_URL
+      - ENTITY_COLLECTION_URLS
+      - JITSI_URL
+      - JITSI_ISS
+      - JITSI_SECRET
+      - BBB_URL
+      - BBB_SECRET
+      - MATRIX_API_URI
+      - MATRIX_PUBLIC_URI
+      - MATRIX_ADMIN_USER
+      - MATRIX_ADMIN_PASSWORD
+      - MATRIX_DOMAIN
+      - KLAXOON_ENABLED
+      - YOUTUBE_ENABLED
+      - GOOGLE_DRIVE_ENABLED
+      - GOOGLE_DOCS_ENABLED
+      - GOOGLE_SHEETS_ENABLED
+      - GOOGLE_SLIDES_ENABLED
+      - ERASER_ENABLED
+      - EXCALIDRAW_ENABLED
+      - CARDS_ENABLED
+      - TLDRAW_ENABLED
+    depends_on:
+      - admin-db
+    labels:
+      traefik.enable: "true"
+      traefik.http.middlewares.strip-admin-api.stripprefix.prefixes: "/api"
+      traefik.http.routers.admin-api.rule: "Host(`${ADMIN_DOMAIN}`) && PathPrefix(`/api`)"
+      traefik.http.routers.admin-api.middlewares: "strip-admin-api@docker"
+      traefik.http.routers.admin-api.entryPoints: "web"
+      traefik.http.services.admin-api.loadbalancer.server.port: "3100"
+      traefik.http.routers.admin-api-ssl.rule: "Host(`${ADMIN_DOMAIN}`) && PathPrefix(`/api`)"
+      traefik.http.routers.admin-api-ssl.middlewares: "strip-admin-api@docker"
+      traefik.http.routers.admin-api-ssl.entryPoints: "websecure"
+      traefik.http.routers.admin-api-ssl.service: "admin-api"
+      traefik.http.routers.admin-api-ssl.tls: "true"
+      traefik.http.routers.admin-api-ssl.tls.certresolver: "myresolver"
+    restart: ${RESTART_POLICY}
+
+  admin-ui:
+    image: lightency201/darna-admin-ui:latest
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.admin-ui.rule: "Host(`${ADMIN_DOMAIN}`)"
+      traefik.http.routers.admin-ui.entryPoints: "web"
+      traefik.http.services.admin-ui.loadbalancer.server.port: "80"
+      traefik.http.routers.admin-ui-ssl.rule: "Host(`${ADMIN_DOMAIN}`)"
+      traefik.http.routers.admin-ui-ssl.entryPoints: "websecure"
+      traefik.http.routers.admin-ui-ssl.tls: "true"
+      traefik.http.routers.admin-ui-ssl.tls.certresolver: "myresolver"
+      traefik.http.routers.admin-ui-ssl.service: "admin-ui"
+    restart: ${RESTART_POLICY}
+
+volumes:
+  admin-db-data:

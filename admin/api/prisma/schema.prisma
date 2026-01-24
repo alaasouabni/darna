@@ -1,0 +1,196 @@
+// Prisma schema for the WorkAdventure admin service.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model World {
+  id            String   @id @default(uuid())
+  slug          String   @unique
+  name          String
+  domain        String?
+  defaultRoomId String?
+  settings      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rooms         Room[]
+  defaultRoom   Room?    @relation("WorldDefaultRoom", fields: [defaultRoomId], references: [id])
+  tags          WorldTag[]
+  livekitConfig LivekitConfig?
+  iceConfig     IceConfig?
+  reports       Report[]
+  bans          Ban[]
+}
+
+model Room {
+  id        String   @id @default(uuid())
+  worldId   String
+  slug      String
+  roomUrl   String   @unique
+  mapUrl    String?
+  wamUrl    String?
+  tags      String[]
+  isActive  Boolean  @default(true)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  world     World    @relation(fields: [worldId], references: [id])
+  defaultForWorlds World[] @relation("WorldDefaultRoom")
+  tagsTable RoomTag[]
+  loginTokens LoginToken[]
+}
+
+model Member {
+  id           String   @id @default(uuid())
+  externalId   String   @unique
+  email        String?
+  displayName  String?
+  visitCardUrl String?
+  chatId       String?
+  characterTextureIds String[] @default([])
+  companionTextureId  String?
+  lastSeenAt  DateTime?
+  lastRoomUrl String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tags         MemberTag[]
+  reportsReceived Report[] @relation("ReportedMember")
+  reportsSent     Report[] @relation("ReporterMember")
+  bansCreated     Ban[]
+  loginTokens     LoginToken[]
+}
+
+model MemberTag {
+  memberId String
+  tag      String
+
+  member   Member @relation(fields: [memberId], references: [id])
+
+  @@id([memberId, tag])
+}
+
+model WorldTag {
+  worldId String
+  tag     String
+
+  world   World @relation(fields: [worldId], references: [id])
+
+  @@id([worldId, tag])
+}
+
+model RoomTag {
+  roomId String
+  tag    String
+
+  room   Room @relation(fields: [roomId], references: [id])
+
+  @@id([roomId, tag])
+}
+
+model Report {
+  id               String   @id @default(uuid())
+  worldId          String
+  reportedMemberId String
+  reporterMemberId String
+  comment          String
+  status           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  world            World    @relation(fields: [worldId], references: [id])
+  reportedMember   Member   @relation("ReportedMember", fields: [reportedMemberId], references: [id])
+  reporterMember   Member   @relation("ReporterMember", fields: [reporterMemberId], references: [id])
+}
+
+model Ban {
+  id                String   @id @default(uuid())
+  worldId           String
+  targetIdentifier  String
+  ipAddress         String?
+  reason            String?
+  expiresAt         DateTime?
+  createdByMemberId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  world             World    @relation(fields: [worldId], references: [id])
+  createdByMember   Member?  @relation(fields: [createdByMemberId], references: [id])
+}
+
+model LoginToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  memberId  String
+  roomId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  member    Member   @relation(fields: [memberId], references: [id])
+  room      Room     @relation(fields: [roomId], references: [id])
+}
+
+model WokaCollection {
+  id       String   @id @default(uuid())
+  name     String
+  worldId  String?
+
+  textures WokaTexture[]
+}
+
+model WokaTexture {
+  id           String @id @default(uuid())
+  collectionId String
+  name         String
+  url          String
+  tintable     Boolean @default(false)
+
+  collection   WokaCollection @relation(fields: [collectionId], references: [id])
+}
+
+model CompanionCollection {
+  id       String   @id @default(uuid())
+  name     String
+  worldId  String?
+
+  textures CompanionTexture[]
+}
+
+model CompanionTexture {
+  id           String @id @default(uuid())
+  collectionId String
+  name         String
+  url          String
+  behavior     String?
+
+  collection   CompanionCollection @relation(fields: [collectionId], references: [id])
+}
+
+model LivekitConfig {
+  id        String @id @default(uuid())
+  worldId   String @unique
+  host      String
+  apiKey    String
+  apiSecret String
+
+  world     World  @relation(fields: [worldId], references: [id])
+}
+
+model IceConfig {
+  id                   String   @id @default(uuid())
+  worldId              String   @unique
+  stunUrls             String[]
+  turnUrls             String[]
+  turnUser             String?
+  turnPassword         String?
+  turnStaticAuthSecret String?
+
+  world                World    @relation(fields: [worldId], references: [id])
+}

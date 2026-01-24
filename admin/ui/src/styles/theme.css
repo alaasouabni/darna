@@ -1,0 +1,17 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+:root {
+  --font-sans: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-serif: "Fraunces", "Georgia", serif;
+  --bg-0: #f7f2e8;
+  --bg-1: #efe6d6;
+  --bg-2: #e3d5c1;
+  --ink-0: #1a1612;
+  --ink-1: #3a332d;
+  --ink-2: #6b5f55;
+  --accent-0: #0f766e;
+  --accent-1: #d97706;
+  --accent-2: #0c4a6e;
+  --card: #ffffffcc;
+  --shadow: 0 18px 60px rgba(26, 22, 18, 0.08);
+}

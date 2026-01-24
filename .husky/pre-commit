@@ -1,38 +1,48 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
+
+run_npm() {
+  # On Windows/MSYS, running via cmd avoids path-resolution issues
+  if command -v cmd.exe >/dev/null 2>&1; then
+    cmd.exe /c npm "$@"
+  else
+    npm "$@"
+  fi
+}
+
 (
-cd messages || exit
-npm run precommit
+  cd messages || exit
+  run_npm run precommit
 )
 (
-cd play || exit
-npm run precommit
+  cd play || exit
+  run_npm run precommit
 )
 (
-cd back || exit
-npm run precommit
+  cd back || exit
+  run_npm run precommit
 )
 (
-cd map-storage || exit
-npm run precommit
+  cd map-storage || exit
+  run_npm run precommit
 )
 (
-cd tests || exit
-npm run precommit
+  cd tests || exit
+  run_npm run precommit
 )
 (
-cd libs/map-editor || exit
-npm run precommit
+  cd libs/map-editor || exit
+  run_npm run precommit
 )
 (
-cd libs/shared-utils || exit
-npm run precommit
+  cd libs/shared-utils || exit
+  run_npm run precommit
 )
 (
-cd libs/store-utils || exit
-npm run precommit
+  cd libs/store-utils || exit
+  run_npm run precommit
 )
 (
-cd contrib/tools/generate-env-docs || exit
-npm run generate
+  cd contrib/tools/generate-env-docs || exit
+  run_npm run generate
 )
