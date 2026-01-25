@@ -3,6 +3,7 @@ import { AppShell } from "../layouts/AppShell";
 import { DashboardPage } from "../pages/Dashboard";
 import { RoomsPage } from "../pages/Rooms";
 import { MembersPage } from "../pages/Members";
+import { MemberDetailsPage } from "../pages/MemberDetails";
 import { ModerationPage } from "../pages/Moderation";
 import { IntegrationsPage } from "../pages/Integrations";
 import { SettingsPage } from "../pages/Settings";
@@ -16,6 +17,7 @@ export const appRouter = createBrowserRouter([
       { index: true, element: <DashboardPage /> },
       { path: "rooms", element: <RoomsPage /> },
       { path: "members", element: <MembersPage /> },
+      { path: "members/:memberUUID", element: <MemberDetailsPage /> },
       { path: "moderation", element: <ModerationPage /> },
       { path: "integrations", element: <IntegrationsPage /> },
       { path: "settings", element: <SettingsPage /> },

@@ -77,6 +77,16 @@ export async function accessRoutes(app: FastifyInstance) {
             },
         });
 
+        if (tokenUser?.tags.length) {
+            await app.db.memberTag.createMany({
+                data: tokenUser.tags.map((tag) => ({
+                    memberId: member.id,
+                    tag,
+                })),
+                skipDuplicates: true,
+            });
+        }
+
         const memberTags = await app.db.memberTag.findMany({
             where: { memberId: member.id },
         });

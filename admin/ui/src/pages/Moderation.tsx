@@ -66,12 +66,21 @@ export function ModerationPage() {
   const reports = reportsQuery.data?.reports ?? [];
   const bans = bansQuery.data?.bans ?? [];
 
+  const handleReviewQueue = () => {
+    reportsQuery.refetch();
+    bansQuery.refetch();
+  };
+
   return (
     <section className="page">
       <PageHeader
         title="Moderation"
         subtitle="Reports, bans, and safety workflows."
-        actions={<button className="button solid">Review queue</button>}
+        actions={
+          <button className="button solid" type="button" onClick={handleReviewQueue}>
+            Review queue
+          </button>
+        }
       />
 
       <div className="grid-two">

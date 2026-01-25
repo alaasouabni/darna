@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { errorData } from "../../lib/error-response";
+import { extractWorldSlug, normalizeRoomPath } from "../../lib/room-url";
 import { requireAdminAuth } from "../../plugins/auth";
 
 const bodySchema = z.object({
@@ -62,7 +63,23 @@ export async function reportRoutes(app: FastifyInstance) {
 
     app.post("/report", { preHandler: requireAdminAuth }, async (request, reply) => {
         const body = bodySchema.parse(request.body);
-        const world = await app.db.world.findUnique({ where: { slug: body.reportWorldSlug } });
+        const worldHint = body.reportWorldSlug.trim();
+        let world = await app.db.world.findUnique({ where: { slug: worldHint } });
+
+        if (!world) {
+            const normalizedPath = normalizeRoomPath(worldHint);
+            const extractedSlug = extractWorldSlug(normalizedPath);
+            if (extractedSlug) {
+                world = await app.db.world.findUnique({ where: { slug: extractedSlug } });
+            }
+            if (!world) {
+                const room = await app.db.room.findUnique({
+                    where: { roomUrl: normalizedPath },
+                    include: { world: true },
+                });
+                world = room?.world ?? null;
+            }
+        }
 
         if (!world) {
             reply.code(404).send(
@@ -70,7 +87,7 @@ export async function reportRoutes(app: FastifyInstance) {
                     "WORLD_NOT_FOUND",
                     "World not found",
                     "The requested world does not exist.",
-                    `No world found for slug ${body.reportWorldSlug}.`
+                    `No world found for slug or room ${body.reportWorldSlug}.`
                 )
             );
             return;

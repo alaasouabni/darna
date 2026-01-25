@@ -1,12 +1,20 @@
 import { PageHeader } from "../components/PageHeader";
 
 export function SettingsPage() {
+  const handleSave = () => {
+    window.alert("Settings are not writable from the admin console yet.");
+  };
+
   return (
     <section className="page">
       <PageHeader
         title="Settings"
         subtitle="World defaults and branding."
-        actions={<button className="button solid">Save</button>}
+        actions={
+          <button className="button solid" type="button" onClick={handleSave}>
+            Save
+          </button>
+        }
       />
 
       <div className="grid-two">

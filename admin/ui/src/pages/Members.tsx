@@ -1,8 +1,12 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
+import { copyText } from "../clipboard";
+import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
+import { StatCard } from "../components/StatCard";
 
 type ActiveMember = {
   id: string;
@@ -64,8 +68,11 @@ function formatDisplayName(user: KeycloakUser) {
 }
 
 export function MembersPage() {
+  const { context } = useAdminContext();
+  const queryClient = useQueryClient();
   const [activeSearch, setActiveSearch] = useState("");
   const [directorySearch, setDirectorySearch] = useState("");
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   const activeQuery = useQuery({
     queryKey: ["members", "active", activeSearch],
@@ -93,14 +100,59 @@ export function MembersPage() {
 
   const activeMembers = activeQuery.data?.members ?? [];
   const directoryUsers = directoryQuery.data?.users ?? [];
+  const activeTotal = activeQuery.data?.total ?? 0;
+  const directoryTotal = directoryQuery.data?.total ?? 0;
+  const activeWithChat = activeMembers.filter((member) => member.chatID).length;
+  const inviteLabel = inviteCopied ? "Invite copied" : "Invite";
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["members", "active"] });
+    queryClient.invalidateQueries({ queryKey: ["keycloak", "users"] });
+  };
+
+  const handleInvite = async () => {
+    if (!context.playUri) {
+      window.alert("Set a Play URL in the context card first.");
+      return;
+    }
+    const copied = await copyText(context.playUri);
+    if (!copied) {
+      window.prompt("Copy invite link", context.playUri);
+      return;
+    }
+    setInviteCopied(true);
+    window.setTimeout(() => setInviteCopied(false), 2000);
+  };
 
   return (
     <section className="page">
       <PageHeader
         title="Members"
         subtitle="Search users, manage tags, and view activity."
-        actions={<button className="button ghost">Invite</button>}
+        actions={
+          <>
+            <button className="button ghost" type="button" onClick={handleRefresh}>
+              Refresh
+            </button>
+            <button className="button solid" type="button" onClick={handleInvite}>
+              {inviteLabel}
+            </button>
+          </>
+        }
       />
+
+      <div className="stats-grid">
+        <StatCard
+          label="Active (2h)"
+          value={activeQuery.isLoading ? "â€”" : String(activeTotal)}
+          trend={`${activeWithChat} with chat ID`}
+        />
+        <StatCard
+          label="Keycloak directory"
+          value={directoryQuery.isLoading ? "â€”" : String(directoryTotal)}
+          trend="Users synced from Keycloak"
+        />
+      </div>
 
       <div className="grid-two">
         <div className="card">
@@ -129,6 +181,7 @@ export function MembersPage() {
                 <th>Email</th>
                 <th>Last room</th>
                 <th>Last seen</th>
+                <th>Details</th>
               </tr>
             </thead>
             <tbody>
@@ -138,11 +191,16 @@ export function MembersPage() {
                   <td>{member.email ?? "—"}</td>
                   <td>{member.lastRoomUrl ?? "—"}</td>
                   <td>{formatRelativeTime(member.lastSeenAt)}</td>
+                  <td>
+                    <Link className="button ghost" to={`/members/${encodeURIComponent(member.id)}`}>
+                      View
+                    </Link>
+                  </td>
                 </tr>
               ))}
               {!activeMembers.length && !activeQuery.isLoading && (
                 <tr>
-                  <td colSpan={4} className="muted">
+                  <td colSpan={5} className="muted">
                     No recent activity yet.
                   </td>
                 </tr>
@@ -177,6 +235,7 @@ export function MembersPage() {
                 <th>Email</th>
                 <th>Status</th>
                 <th>Created</th>
+                <th>Details</th>
               </tr>
             </thead>
             <tbody>
@@ -190,11 +249,20 @@ export function MembersPage() {
                     </span>
                   </td>
                   <td>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}</td>
+                  <td>
+                    {user.email ? (
+                      <Link className="button ghost" to={`/members/${encodeURIComponent(user.email)}`}>
+                        View
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                 </tr>
               ))}
               {!directoryUsers.length && !directoryQuery.isLoading && (
                 <tr>
-                  <td colSpan={4} className="muted">
+                  <td colSpan={5} className="muted">
                     No directory results.
                   </td>
                 </tr>

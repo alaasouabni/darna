@@ -1,6 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
+import { copyText } from "../clipboard";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
@@ -15,6 +18,9 @@ type ReportsResponse = {
 
 export function DashboardPage() {
   const { context, updateContext } = useAdminContext();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   const activeMembersQuery = useQuery({
     queryKey: ["members", "active", "summary"],
@@ -71,13 +77,48 @@ export function DashboardPage() {
   const roomsCount = roomsQuery.data?.length ?? 0;
   const reportsCount = reportsQuery.data?.total ?? 0;
   const livekitStatus = livekitQuery.data?.livekitHost ? "Connected" : "Missing";
+  const inviteLabel = inviteCopied ? "Invite copied" : "Generate invite";
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["members"] });
+    queryClient.invalidateQueries({ queryKey: ["keycloak"] });
+    queryClient.invalidateQueries({ queryKey: ["rooms"] });
+    queryClient.invalidateQueries({ queryKey: ["reports"] });
+    queryClient.invalidateQueries({ queryKey: ["livekit"] });
+  };
+
+  const handleBroadcast = () => {
+    window.alert("Broadcast from the admin console is not wired yet.");
+  };
+
+  const handleOpenReports = () => {
+    navigate("/moderation");
+  };
+
+  const handleGenerateInvite = async () => {
+    if (!context.playUri) {
+      window.alert("Set a Play URL in the context card first.");
+      return;
+    }
+    const copied = await copyText(context.playUri);
+    if (!copied) {
+      window.prompt("Copy invite link", context.playUri);
+      return;
+    }
+    setInviteCopied(true);
+    window.setTimeout(() => setInviteCopied(false), 2000);
+  };
 
   return (
     <section className="page">
       <PageHeader
         title="Operational overview"
         subtitle="Live rooms, active members, and system status."
-        actions={<button className="button ghost">Refresh</button>}
+        actions={
+          <button className="button ghost" type="button" onClick={handleRefresh}>
+            Refresh
+          </button>
+        }
       />
 
       <div className="card">
@@ -139,9 +180,15 @@ export function DashboardPage() {
         <div className="card">
           <h2 className="section-title">Quick actions</h2>
           <div className="button-stack">
-            <button className="button solid">Send broadcast</button>
-            <button className="button ghost">Open reports</button>
-            <button className="button ghost">Generate invite</button>
+            <button className="button solid" type="button" onClick={handleBroadcast}>
+              Send broadcast
+            </button>
+            <button className="button ghost" type="button" onClick={handleOpenReports}>
+              Open reports
+            </button>
+            <button className="button ghost" type="button" onClick={handleGenerateInvite}>
+              {inviteLabel}
+            </button>
           </div>
         </div>
       </div>

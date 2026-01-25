@@ -4,6 +4,10 @@ export function Topbar() {
   const { state, login, logout } = useAuth();
   const isAuthed = state.status === "authenticated";
 
+  const handleBroadcast = () => {
+    window.alert("Broadcast from the admin console is not wired yet.");
+  };
+
   return (
     <header className="topbar">
       <div>
@@ -11,7 +15,9 @@ export function Topbar() {
         <div className="topbar-subtitle">Operations and world management</div>
       </div>
       <div className="topbar-actions">
-        <button className="button ghost">Broadcast</button>
+        <button className="button ghost" type="button" onClick={handleBroadcast}>
+          Broadcast
+        </button>
         <button
           className="button solid"
           onClick={isAuthed ? logout : login}

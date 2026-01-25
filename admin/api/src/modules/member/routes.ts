@@ -48,6 +48,32 @@ function serializeMember(member: {
     };
 }
 
+function serializeMemberDetails(member: {
+    id: string;
+    displayName: string | null;
+    email: string | null;
+    visitCardUrl: string | null;
+    chatId: string | null;
+    lastSeenAt: Date | null;
+    lastRoomUrl: string | null;
+    externalId: string;
+    tags: { tag: string }[];
+    characterTextureIds: string[];
+    companionTextureId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+}) {
+    return {
+        ...serializeMember(member),
+        externalId: member.externalId,
+        tags: member.tags.map((tag) => tag.tag),
+        characterTextureIds: member.characterTextureIds,
+        companionTextureId: member.companionTextureId ?? null,
+        createdAt: member.createdAt.toISOString(),
+        updatedAt: member.updatedAt.toISOString(),
+    };
+}
+
 export async function memberRoutes(app: FastifyInstance) {
     app.get("/members", { preHandler: requireAdminAuth }, async (request, reply) => {
         const query = searchQuery.parse(request.query);
@@ -74,6 +100,9 @@ export async function memberRoutes(app: FastifyInstance) {
             where: {
                 OR: [{ id: params.memberUUID }, { externalId: params.memberUUID }],
             },
+            include: {
+                tags: true,
+            },
         });
 
         if (!member) {
@@ -88,7 +117,7 @@ export async function memberRoutes(app: FastifyInstance) {
             return;
         }
 
-        reply.send(serializeMember(member));
+        reply.send(serializeMemberDetails(member));
     });
 
     app.put("/members/:userIdentifier/chatId", { preHandler: requireAdminAuth }, async (request, reply) => {

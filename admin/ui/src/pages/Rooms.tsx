@@ -59,12 +59,24 @@ export function RoomsPage() {
   const worldTags = worldTagsQuery.data ?? [];
   const roomTags = roomTagsQuery.data ?? [];
 
+  const handleNewRoom = () => {
+    if (!context.playUri) {
+      window.alert("Set a Play URL in the context card first.");
+      return;
+    }
+    window.open(context.playUri, "_blank", "noopener");
+  };
+
   return (
     <section className="page">
       <PageHeader
         title="Rooms & maps"
         subtitle="Manage access, tags, and map sources across worlds."
-        actions={<button className="button solid">New room</button>}
+        actions={
+          <button className="button solid" type="button" onClick={handleNewRoom}>
+            New room
+          </button>
+        }
       />
 
       <div className="grid-two">

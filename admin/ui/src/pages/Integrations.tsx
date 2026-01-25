@@ -54,12 +54,21 @@ export function IntegrationsPage() {
   const livekit = livekitQuery.data;
   const iceServers = iceQuery.data ?? [];
 
+  const handleSyncStatus = () => {
+    livekitQuery.refetch();
+    iceQuery.refetch();
+  };
+
   return (
     <section className="page">
       <PageHeader
         title="Integrations"
         subtitle="Livekit, TURN, and external services."
-        actions={<button className="button ghost">Sync status</button>}
+        actions={
+          <button className="button ghost" type="button" onClick={handleSyncStatus}>
+            Sync status
+          </button>
+        }
       />
 
       <div className="grid-two">
