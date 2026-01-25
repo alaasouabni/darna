@@ -55,7 +55,7 @@ export async function accessRoutes(app: FastifyInstance) {
         }
 
         const tokenUser = query.accessToken ? await decodeAccessToken(query.accessToken) : null;
-        const externalId = tokenUser?.subject || query.userIdentifier;
+        const externalId = tokenUser?.email ?? query.userIdentifier;
         const identifierEmail = externalId.includes("@") ? externalId : null;
 
         const member = await app.db.member.upsert({

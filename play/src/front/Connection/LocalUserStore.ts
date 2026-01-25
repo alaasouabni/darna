@@ -612,10 +612,15 @@ class LocalUserStore {
     }
 
     setMatrixUserId(value: string | null) {
+        const previousValue = localStorage.getItem(matrixUserId);
         if (value !== null) {
             localStorage.setItem(matrixUserId, value);
         } else {
             localStorage.removeItem(matrixUserId);
+        }
+
+        if (typeof window !== "undefined" && previousValue !== value) {
+            window.dispatchEvent(new CustomEvent("wa:chat-id-changed", { detail: value }));
         }
     }
 

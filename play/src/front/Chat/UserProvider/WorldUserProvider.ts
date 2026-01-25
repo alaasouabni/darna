@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "svelte/store";
-import { derived, writable } from "svelte/store";
+import { derived, readable, writable } from "svelte/store";
 import type { PartialAdminUser } from "../Connection/ChatConnection";
 import type { SpaceInterface } from "../../Space/SpaceInterface";
 import type { UserProviderInterface } from "./UserProviderInterface";
@@ -11,9 +11,21 @@ export class WorldUserProvider implements UserProviderInterface {
     private filter: Writable<string> = writable("");
 
     constructor(allUsersInWorldSpace: SpaceInterface) {
+        const updateTick = readable(0, (set) => {
+            let tick = 0;
+            const subscription = allUsersInWorldSpace.observeUserUpdated.subscribe(() => {
+                tick += 1;
+                set(tick);
+            });
+
+            return () => {
+                subscription.unsubscribe();
+            };
+        });
+
         this.users = derived(
-            [allUsersInWorldSpace.usersStore, this.filter],
-            ([users, filter]) => {
+            [allUsersInWorldSpace.usersStore, this.filter, updateTick],
+            ([users, filter, _updateTick]) => {
                 return Array.from(users.values())
                     .filter((user) => user.name.toLowerCase().includes(filter.toLowerCase()))
                     .map(mapExtendedSpaceUserToChatUser);

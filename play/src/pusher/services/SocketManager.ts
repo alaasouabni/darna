@@ -581,6 +581,9 @@ export class SocketManager implements ZoneEventListener {
     // Useless now, will be useful again if we allow editing details in game
     async handleSetPlayerDetails(client: Socket, playerDetailsMessage: SetPlayerDetailsMessage): Promise<void> {
         const socketData = client.getUserData();
+        if (playerDetailsMessage.chatID !== undefined) {
+            socketData.chatID = playerDetailsMessage.chatID;
+        }
         const pusherToBackMessage: PusherToBackMessage["message"] = {
             $case: "setPlayerDetailsMessage",
             setPlayerDetailsMessage: playerDetailsMessage,

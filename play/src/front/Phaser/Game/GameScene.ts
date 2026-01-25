@@ -987,16 +987,35 @@ export class GameScene extends DirtyScene {
                 errorScreenStore.setException(e);
             });
 
+        const emitChatIdIfReady = () => {
+            const connection = this.connection;
+            const chatId = localUserStore.getChatId();
+            if (!connection || !chatId) {
+                return;
+            }
+
+            const email = localUserStore.getLocalUser()?.email;
+            if (email) {
+                connection.emitUpdateChatId(email, chatId);
+            }
+            connection.emitPlayerChatID(chatId);
+        };
+
+        const chatIdChangedHandler = () => {
+            emitChatIdIfReady();
+        };
+
+        if (typeof window !== "undefined") {
+            window.addEventListener("wa:chat-id-changed", chatIdChangedHandler);
+            this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+                window.removeEventListener("wa:chat-id-changed", chatIdChangedHandler);
+            });
+        }
+
         gameManager
             .getChatConnection()
             .then(() => {
-                const connection = this.connection;
-                const chatId = localUserStore.getChatId();
-                const email: string | null = localUserStore.getLocalUser()?.email || null;
-                if (email && chatId && connection) {
-                    connection.emitUpdateChatId(email, chatId);
-                    connection.emitPlayerChatID(chatId);
-                }
+                emitChatIdIfReady();
             })
             .catch((e) => {
                 console.error(e);
