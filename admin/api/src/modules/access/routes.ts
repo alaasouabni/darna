@@ -69,7 +69,29 @@ export async function accessRoutes(app: FastifyInstance) {
         }
 
         const tokenUser = query.accessToken ? await decodeAccessToken(query.accessToken) : null;
-        const externalId = tokenUser?.email ?? query.userIdentifier;
+        const tokenExpiresAt =
+            tokenUser?.claims?.exp && Number.isFinite(tokenUser.claims.exp)
+                ? Number(tokenUser.claims.exp)
+                : null;
+        const tokenExpired = tokenExpiresAt !== null ? tokenExpiresAt < Math.floor(Date.now() / 1000) : false;
+
+        if (config.DISABLE_ANONYMOUS) {
+            if (!tokenUser || tokenExpired || !tokenUser.email) {
+                reply.code(401).send(
+                    unauthorizedData("Authentication required. Please sign in again.")
+                );
+                return;
+            }
+        }
+
+        const externalId = (tokenUser?.email ?? query.userIdentifier).trim();
+        if (!externalId || externalId === "-") {
+            reply.code(401).send(
+                unauthorizedData("Authentication required. Please sign in again.")
+            );
+            return;
+        }
+
         const identifierEmail = externalId.includes("@") ? externalId : null;
 
         const now = new Date();
