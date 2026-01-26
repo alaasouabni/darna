@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api/client";
@@ -21,6 +21,47 @@ export function DashboardPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [liveCount, setLiveCount] = useState<number | null>(null);
+  const [liveStatus, setLiveStatus] = useState<"idle" | "connecting" | "live" | "error">("idle");
+  const liveUsersRef = useRef<Set<string>>(new Set());
+
+  const resolvedRoomId = useMemo(() => {
+    const playTarget = context.roomUrl || context.playUri;
+    if (!playTarget) {
+      return "";
+    }
+    if (context.playUri) {
+      try {
+        const playHost = new URL(context.playUri).host;
+        const targetUrl = new URL(playTarget, context.playUri);
+        if (targetUrl.host === window.location.host && playHost !== window.location.host) {
+          const suffix = `${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`;
+          return new URL(suffix, context.playUri).toString();
+        }
+        return targetUrl.toString();
+      } catch {
+        return "";
+      }
+    }
+    try {
+      return new URL(playTarget).toString();
+    } catch {
+      return "";
+    }
+  }, [context.playUri, context.roomUrl]);
+
+  const adminSocketUrl = useMemo(() => {
+    if (!resolvedRoomId) {
+      return "";
+    }
+    try {
+      const url = new URL(resolvedRoomId);
+      const protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      return `${protocol}//${url.host}/ws/admin/rooms`;
+    } catch {
+      return "";
+    }
+  }, [resolvedRoomId]);
 
   const activeMembersQuery = useQuery({
     queryKey: ["members", "active", "summary"],
@@ -78,6 +119,100 @@ export function DashboardPage() {
   const reportsCount = reportsQuery.data?.total ?? 0;
   const livekitStatus = livekitQuery.data?.livekitHost ? "Connected" : "Missing";
   const inviteLabel = inviteCopied ? "Invite copied" : "Generate invite";
+
+  useEffect(() => {
+    if (!resolvedRoomId || !adminSocketUrl) {
+      setLiveCount(null);
+      setLiveStatus("idle");
+      return;
+    }
+
+    let socket: WebSocket | null = null;
+    let mounted = true;
+
+    const connect = async () => {
+      setLiveStatus("connecting");
+      liveUsersRef.current = new Set();
+      setLiveCount(0);
+
+      try {
+        const tokenResponse = await apiRequest<{ token: string }>(
+          buildQuery("/admin-sockets/token", { roomId: resolvedRoomId })
+        );
+
+        if (!mounted) {
+          return;
+        }
+
+        socket = new WebSocket(adminSocketUrl);
+
+        socket.onopen = () => {
+          if (!socket) {
+            return;
+          }
+          socket.send(
+            JSON.stringify({
+              event: "listen",
+              roomIds: [resolvedRoomId],
+              jwt: tokenResponse.token,
+            })
+          );
+          setLiveStatus("live");
+        };
+
+        socket.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data as string) as {
+              type?: string;
+              data?: { uuid?: string; roomId?: string };
+            };
+            const type = payload.type;
+            if (!payload.data?.uuid) {
+              return;
+            }
+            const userId = payload.data.uuid;
+            if (type === "MemberJoin") {
+              liveUsersRef.current.add(userId);
+              setLiveCount(liveUsersRef.current.size);
+            } else if (type === "MemberLeave") {
+              liveUsersRef.current.delete(userId);
+              setLiveCount(liveUsersRef.current.size);
+            }
+          } catch {
+            // Ignore malformed admin socket payloads.
+          }
+        };
+
+        socket.onerror = () => {
+          if (!mounted) {
+            return;
+          }
+          setLiveStatus("error");
+        };
+
+        socket.onclose = () => {
+          if (!mounted) {
+            return;
+          }
+          setLiveStatus("idle");
+        };
+      } catch {
+        if (!mounted) {
+          return;
+        }
+        setLiveStatus("error");
+      }
+    };
+
+    connect();
+
+    return () => {
+      mounted = false;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      }
+    };
+  }, [adminSocketUrl, resolvedRoomId]);
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["members"] });
@@ -152,11 +287,23 @@ export function DashboardPage() {
           trend={context.roomUrl ? "Based on room URL" : "Set a room URL"}
         />
         <StatCard
-          label="Active users (60m)"
-          value={activeMembersQuery.isLoading ? "—" : String(activeCount)}
-          trend="Last hour"
-          status="Recent"
-          statusTone="muted"
+          label="Live users"
+          value={
+            liveStatus === "live"
+              ? String(liveCount ?? 0)
+              : context.roomUrl || context.playUri
+              ? "—"
+              : "—"
+          }
+          trend={
+            liveStatus === "live"
+              ? "Live via admin socket"
+              : context.roomUrl || context.playUri
+              ? "Connecting…"
+              : "Set a play or room URL"
+          }
+          status={liveStatus === "live" ? "Live" : "Offline"}
+          statusTone={liveStatus === "live" ? "live" : "muted"}
         />
         <StatCard
           label="Open reports"
@@ -175,6 +322,11 @@ export function DashboardPage() {
           <h2 className="section-title">Live activity</h2>
           <ul className="list">
             <li>{directoryQuery.isLoading ? "Loading directory..." : `${directoryCount} users in Keycloak.`}</li>
+            <li>
+              {liveStatus === "live"
+                ? `${liveCount ?? 0} live right now.`
+                : "Live users unavailable. Set a play or room URL."}
+            </li>
             <li>{activeMembersQuery.isLoading ? "Loading members..." : `${activeCount} active in last hour.`}</li>
             <li>{reportsQuery.isLoading ? "Loading reports..." : `${reportsCount} open reports.`}</li>
           </ul>
