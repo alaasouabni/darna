@@ -14,6 +14,9 @@ import {
     CreateAreaCommand,
     CreateEntityCommand,
     EntityPermissions,
+    GameMapAreas,
+    PersonalAreaAccessClaimMode,
+    PersonalAreaPropertyData,
     UpdateWAMMetadataCommand,
     UpdateWAMSettingCommand,
 } from "@workadventure/map-editor";
@@ -57,6 +60,8 @@ const COMMANDS_ACCESSIBLE_WITHOUT_CAN_EDIT = new Set<string>([
     "deleteCustomEntityMessage",
     "uploadFileMessage",
 ]);
+
+const DEBUG_PERSONAL_AREA = process.env.MAP_STORAGE_DEBUG_PERSONAL_AREA === "true";
 
 const mapStorageServer: MapStorageServer = {
     ping(call: ServerUnaryCall<PingMessage, Empty>, callback: sendUnaryData<PingMessage>): void {
@@ -135,7 +140,25 @@ const mapStorageServer: MapStorageServer = {
 
                 const commandId = editMapCommandMessage.id;
 
-                if (!userCanEdit && !COMMANDS_ACCESSIBLE_WITHOUT_CAN_EDIT.has(editMapMessage.$case)) {
+                const canClaimPersonalArea =
+                    editMapMessage.$case === "modifyAreaMessage" &&
+                    canModifyPersonalArea(editMapMessage.modifyAreaMessage, gameMapAreas, connectedUserTags, userUUID);
+
+                if (DEBUG_PERSONAL_AREA && editMapMessage.$case === "modifyAreaMessage") {
+                    debugPersonalArea("edit-map-command", {
+                        areaId: editMapMessage.modifyAreaMessage.id,
+                        userUUID,
+                        connectedUserTags,
+                        userCanEdit,
+                        canClaimPersonalArea,
+                    });
+                }
+
+                if (
+                    !userCanEdit &&
+                    !COMMANDS_ACCESSIBLE_WITHOUT_CAN_EDIT.has(editMapMessage.$case) &&
+                    !canClaimPersonalArea
+                ) {
                     // A user tried to bypass security!
                     throw new Error(
                         `User ${userUUID} is not allowed to edit the map but tried to execute command: ${editMapMessage.$case} on map ${mapUrl}`
@@ -422,3 +445,161 @@ function getEntityCenterCoordinates(entityCoordinates: EntityCoordinates, entity
 }
 
 export { mapStorageServer };
+
+function getPersonalAreaProperty(properties?: AreaDataProperties): PersonalAreaPropertyData | null {
+    if (!properties) {
+        return null;
+    }
+    const candidate = properties.find((property) => property.type === "personalAreaPropertyData");
+    if (!candidate) {
+        return null;
+    }
+    const parsed = PersonalAreaPropertyData.safeParse(candidate);
+    return parsed.success ? parsed.data : null;
+}
+
+function stripPersonalAreaProperty(properties: AreaDataProperties): AreaDataProperties {
+    return properties.filter((property) => property.type !== "personalAreaPropertyData");
+}
+
+function canModifyPersonalArea(
+    message: AtLeast<AreaData, "id">,
+    gameMapAreas: GameMapAreas | undefined,
+    connectedUserTags: string[],
+    userUUID: string
+): boolean {
+    if (!gameMapAreas || !message.properties || !userUUID) {
+        debugPersonalArea("missing-input", {
+            hasGameMapAreas: Boolean(gameMapAreas),
+            hasProperties: Boolean(message.properties),
+            userUUID,
+        });
+        return false;
+    }
+
+    const currentArea = gameMapAreas.getArea(message.id);
+    if (!currentArea) {
+        debugPersonalArea("area-not-found", { areaId: message.id });
+        return false;
+    }
+
+    const currentPersonal = getPersonalAreaProperty(currentArea.properties);
+    const nextPersonal = getPersonalAreaProperty(message.properties);
+    if (!currentPersonal || !nextPersonal) {
+        debugPersonalArea("personal-prop-missing", {
+            areaId: message.id,
+            hasCurrent: Boolean(currentPersonal),
+            hasNext: Boolean(nextPersonal),
+        });
+        return false;
+    }
+
+    if (currentPersonal.accessClaimMode !== PersonalAreaAccessClaimMode.enum.dynamic) {
+        debugPersonalArea("claim-mode-not-dynamic", {
+            areaId: message.id,
+            accessClaimMode: currentPersonal.accessClaimMode,
+        });
+        return false;
+    }
+
+    const isOwner = currentPersonal.ownerId === userUUID;
+    const hasAllowedTag =
+        currentPersonal.allowedTags.length === 0 ||
+        currentPersonal.allowedTags.some((tag) => connectedUserTags.includes(tag));
+
+    if (!isOwner && !hasAllowedTag) {
+        debugPersonalArea("tag-mismatch", {
+            areaId: message.id,
+            userUUID,
+            connectedUserTags,
+            allowedTags: currentPersonal.allowedTags,
+        });
+        return false;
+    }
+
+    if (currentPersonal.ownerId && !isOwner) {
+        debugPersonalArea("owned-by-other", {
+            areaId: message.id,
+            ownerId: currentPersonal.ownerId,
+            userUUID,
+        });
+        return false;
+    }
+
+    const ownerTransitionOk =
+        (currentPersonal.ownerId === null && nextPersonal.ownerId === userUUID) ||
+        (isOwner && (nextPersonal.ownerId === null || nextPersonal.ownerId === userUUID));
+
+    if (!ownerTransitionOk) {
+        debugPersonalArea("invalid-owner-transition", {
+            areaId: message.id,
+            currentOwner: currentPersonal.ownerId,
+            nextOwner: nextPersonal.ownerId,
+            userUUID,
+        });
+        return false;
+    }
+
+    if (
+        (message.x !== undefined && message.x !== currentArea.x) ||
+        (message.y !== undefined && message.y !== currentArea.y) ||
+        (message.width !== undefined && message.width !== currentArea.width) ||
+        (message.height !== undefined && message.height !== currentArea.height) ||
+        (message.visible !== undefined && message.visible !== currentArea.visible)
+    ) {
+        debugPersonalArea("geometry-changed", {
+            areaId: message.id,
+            current: {
+                x: currentArea.x,
+                y: currentArea.y,
+                width: currentArea.width,
+                height: currentArea.height,
+                visible: currentArea.visible,
+            },
+            next: {
+                x: message.x,
+                y: message.y,
+                width: message.width,
+                height: message.height,
+                visible: message.visible,
+            },
+        });
+        return false;
+    }
+
+    const currentPersonalMeta = {
+        accessClaimMode: currentPersonal.accessClaimMode,
+        allowedTags: currentPersonal.allowedTags,
+    };
+    const nextPersonalMeta = {
+        accessClaimMode: nextPersonal.accessClaimMode,
+        allowedTags: nextPersonal.allowedTags,
+    };
+
+    if (!_.isEqual(currentPersonalMeta, nextPersonalMeta)) {
+        debugPersonalArea("personal-meta-changed", {
+            areaId: message.id,
+            current: currentPersonalMeta,
+            next: nextPersonalMeta,
+        });
+        return false;
+    }
+
+    const otherPropsMatch = _.isEqual(
+        stripPersonalAreaProperty(currentArea.properties),
+        stripPersonalAreaProperty(message.properties)
+    );
+
+    if (!otherPropsMatch) {
+        debugPersonalArea("other-properties-changed", { areaId: message.id });
+    }
+
+    return otherPropsMatch;
+}
+
+function debugPersonalArea(reason: string, details: Record<string, unknown>) {
+    if (!DEBUG_PERSONAL_AREA) {
+        return;
+    }
+    console.info("[map-storage] personal-area-check", { reason, ...details });
+}
