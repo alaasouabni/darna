@@ -129,19 +129,38 @@ export function requireUserAuth(request: FastifyRequest, reply: FastifyReply) {
     }
 }
 
-export function requireAdminUserAuth(request: FastifyRequest, reply: FastifyReply) {
+export function requireAdminUserAuth(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    done?: (err?: Error) => void
+) {
+    request.log.info(
+        {
+            authStage: "require-admin-user:enter",
+            kind: request.adminAuth.kind,
+            hasUser: Boolean(request.adminAuth.user),
+            error: request.adminAuth.error,
+        },
+        "auth check"
+    );
     if (request.adminAuth.kind !== "user") {
+        request.log.info({ authStage: "require-admin-user:deny-kind" }, "auth check");
         reply.code(401).send(unauthorizedData("User token required."));
         return;
     }
 
     if (!request.adminAuth.user) {
         const details = request.adminAuth.error ?? "Invalid user token.";
+        request.log.info({ authStage: "require-admin-user:deny-user", details }, "auth check");
         reply.code(401).send(unauthorizedData(details));
         return;
     }
 
     if (!isAdminUser(request.adminAuth.user)) {
+        request.log.info(
+            { authStage: "require-admin-user:deny-role", tags: request.adminAuth.user.tags },
+            "auth check"
+        );
         reply.code(403).send(
             errorData(
                 "FORBIDDEN",
@@ -151,6 +170,11 @@ export function requireAdminUserAuth(request: FastifyRequest, reply: FastifyRepl
             )
         );
         return;
+    }
+
+    request.log.info({ authStage: "require-admin-user:allow" }, "auth check");
+    if (done) {
+        done();
     }
 }
 

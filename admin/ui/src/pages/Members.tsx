@@ -7,6 +7,7 @@ import { copyText } from "../clipboard";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
+import { EyeIcon } from "../components/icons";
 
 type ActiveMember = {
   id: string;
@@ -80,7 +81,7 @@ export function MembersPage() {
       apiRequest<ActiveMembersResponse>(
         buildQuery("/members/active", {
           minutes: 120,
-          limit: 25,
+          limit: 50,
           searchText: activeSearch.trim() || undefined,
         })
       ),
@@ -103,7 +104,13 @@ export function MembersPage() {
   const activeTotal = activeQuery.data?.total ?? 0;
   const directoryTotal = directoryQuery.data?.total ?? 0;
   const activeWithChat = activeMembers.filter((member) => member.chatID).length;
+  const activePreview = activeMembers.slice(0, 6);
+  const directoryPreview = directoryUsers.slice(0, 6);
   const inviteLabel = inviteCopied ? "Invite copied" : "Invite";
+  const activeViewAllUrl = `/members/active?search=${encodeURIComponent(activeSearch.trim())}`;
+  const directoryViewAllUrl = `/members/directory?search=${encodeURIComponent(
+    directorySearch.trim()
+  )}`;
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["members", "active"] });
@@ -146,6 +153,8 @@ export function MembersPage() {
           label="Active (2h)"
           value={activeQuery.isLoading ? "â€”" : String(activeTotal)}
           trend={`${activeWithChat} with chat ID`}
+          status="Recent"
+          statusTone="muted"
         />
         <StatCard
           label="Keycloak directory"
@@ -156,7 +165,14 @@ export function MembersPage() {
 
       <div className="grid-two">
         <div className="card">
-          <h2 className="section-title">Recent activity</h2>
+          <div className="card-header">
+            <h2 className="section-title">Recent activity</h2>
+            {activeTotal > 6 && (
+              <Link className="button ghost" to={activeViewAllUrl}>
+                View all
+              </Link>
+            )}
+          </div>
           <label className="field">
             <span>Search seen users</span>
             <input
@@ -169,7 +185,7 @@ export function MembersPage() {
           <p className="muted">
             {activeQuery.isLoading
               ? "Loading active members..."
-              : `Showing ${activeMembers.length} of ${activeQuery.data?.total ?? 0} active in the last 2 hours.`}
+              : `Showing ${activePreview.length} of ${activeQuery.data?.total ?? 0} active in the last 2 hours.`}
           </p>
           {activeQuery.isError && (
             <p className="muted">Unable to load recent activity.</p>
@@ -185,20 +201,25 @@ export function MembersPage() {
               </tr>
             </thead>
             <tbody>
-              {activeMembers.map((member) => (
+              {activePreview.map((member) => (
                 <tr key={member.id}>
                   <td>{member.name ?? "—"}</td>
                   <td>{member.email ?? "—"}</td>
                   <td>{member.lastRoomUrl ?? "—"}</td>
                   <td>{formatRelativeTime(member.lastSeenAt)}</td>
                   <td>
-                    <Link className="button ghost" to={`/members/${encodeURIComponent(member.id)}`}>
-                      View
+                    <Link
+                      className="button ghost icon-button"
+                      to={`/members/${encodeURIComponent(member.id)}`}
+                      title="View member"
+                      aria-label="View member"
+                    >
+                      <EyeIcon aria-hidden="true" />
                     </Link>
                   </td>
                 </tr>
               ))}
-              {!activeMembers.length && !activeQuery.isLoading && (
+              {!activePreview.length && !activeQuery.isLoading && (
                 <tr>
                   <td colSpan={5} className="muted">
                     No recent activity yet.
@@ -210,7 +231,14 @@ export function MembersPage() {
         </div>
 
         <div className="card">
-          <h2 className="section-title">Keycloak directory</h2>
+          <div className="card-header">
+            <h2 className="section-title">Keycloak directory</h2>
+            {directoryTotal > 6 && (
+              <Link className="button ghost" to={directoryViewAllUrl}>
+                View all
+              </Link>
+            )}
+          </div>
           <label className="field">
             <span>Search Keycloak</span>
             <input
@@ -223,7 +251,7 @@ export function MembersPage() {
           <p className="muted">
             {directoryQuery.isLoading
               ? "Loading directory..."
-              : `Showing ${directoryUsers.length} of ${directoryQuery.data?.total ?? 0} users.`}
+              : `Showing ${directoryPreview.length} of ${directoryQuery.data?.total ?? 0} users.`}
           </p>
           {directoryQuery.isError && (
             <p className="muted">Directory unavailable. Check Keycloak admin access.</p>
@@ -239,20 +267,25 @@ export function MembersPage() {
               </tr>
             </thead>
             <tbody>
-              {directoryUsers.map((user) => (
+              {directoryPreview.map((user) => (
                 <tr key={user.id}>
                   <td>{formatDisplayName(user)}</td>
                   <td>{user.email ?? "—"}</td>
                   <td>
-                    <span className={`pill ${user.enabled ? "" : "muted"}`}>
+                    <span className={`status-badge ${user.enabled ? "live" : "rejected"}`}>
                       {user.enabled ? "Enabled" : "Disabled"}
                     </span>
                   </td>
                   <td>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}</td>
                   <td>
                     {user.email ? (
-                      <Link className="button ghost" to={`/members/${encodeURIComponent(user.email)}`}>
-                        View
+                      <Link
+                        className="button ghost icon-button"
+                        to={`/members/${encodeURIComponent(user.email)}`}
+                        title="View member"
+                        aria-label="View member"
+                      >
+                        <EyeIcon aria-hidden="true" />
                       </Link>
                     ) : (
                       "—"
@@ -260,7 +293,7 @@ export function MembersPage() {
                   </td>
                 </tr>
               ))}
-              {!directoryUsers.length && !directoryQuery.isLoading && (
+              {!directoryPreview.length && !directoryQuery.isLoading && (
                 <tr>
                   <td colSpan={5} className="muted">
                     No directory results.

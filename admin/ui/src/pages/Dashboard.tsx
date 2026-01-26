@@ -155,6 +155,8 @@ export function DashboardPage() {
           label="Active users (60m)"
           value={activeMembersQuery.isLoading ? "—" : String(activeCount)}
           trend="Last hour"
+          status="Recent"
+          statusTone="muted"
         />
         <StatCard
           label="Open reports"

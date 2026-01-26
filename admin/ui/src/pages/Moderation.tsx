@@ -4,6 +4,7 @@ import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
+import { BanIcon, EyeIcon, RejectIcon, UnbanIcon } from "../components/icons";
 
 type ReportItem = {
   id: string;
@@ -38,6 +39,8 @@ type BansResponse = {
 
 export function ModerationPage() {
   const { context, updateContext } = useAdminContext();
+  const [showAllReports, setShowAllReports] = useState(false);
+  const [showAllBans, setShowAllBans] = useState(false);
   const [banDraft, setBanDraft] = useState<ReportItem | null>(null);
   const [banReason, setBanReason] = useState("");
   const [banError, setBanError] = useState<string | null>(null);
@@ -45,9 +48,11 @@ export function ModerationPage() {
   const [reportActionError, setReportActionError] = useState<string | null>(null);
   const [reportActionSubmitting, setReportActionSubmitting] = useState(false);
   const [reportDetails, setReportDetails] = useState<ReportItem | null>(null);
+  const [rejectDraft, setRejectDraft] = useState<ReportItem | null>(null);
   const [banDetails, setBanDetails] = useState<BanItem | null>(null);
   const [banActionError, setBanActionError] = useState<string | null>(null);
   const [banActionSubmitting, setBanActionSubmitting] = useState(false);
+  const [unbanDraft, setUnbanDraft] = useState<BanItem | null>(null);
 
   const reportsQuery = useQuery({
     queryKey: ["reports", context.worldSlug],
@@ -89,8 +94,11 @@ export function ModerationPage() {
   });
 
   const reports = reportsQuery.data?.reports ?? [];
+  const openReportsDisplay = showAllReports ? reports : reports.slice(0, 6);
   const resolvedReports = resolvedReportsQuery.data?.reports ?? [];
+  const resolvedReportsPreview = resolvedReports.slice(0, 6);
   const bans = bansQuery.data?.bans ?? [];
+  const bansDisplay = showAllBans ? bans : bans.slice(0, 6);
   const banPlayTarget = context.roomUrl || context.playUri;
   const bannedTargets = useMemo(() => {
     const set = new Set<string>();
@@ -134,6 +142,18 @@ export function ModerationPage() {
     setReportDetails(null);
   };
 
+  const openRejectModal = (report: ReportItem) => {
+    setRejectDraft(report);
+    setReportActionError(null);
+  };
+
+  const closeRejectModal = () => {
+    if (reportActionSubmitting) {
+      return;
+    }
+    setRejectDraft(null);
+  };
+
   const openBanDetails = (ban: BanItem) => {
     setBanDetails(ban);
     setBanActionError(null);
@@ -146,7 +166,36 @@ export function ModerationPage() {
     setBanDetails(null);
   };
 
-  const resolveRoomId = (playTarget: string) => {
+  const openUnbanModal = (ban: BanItem) => {
+    setUnbanDraft(ban);
+    setBanActionError(null);
+    setBanDetails(null);
+  };
+
+  const closeUnbanModal = () => {
+    if (banActionSubmitting) {
+      return;
+    }
+    setUnbanDraft(null);
+  };
+
+  const resolveRoomId = (playTarget: string, playUri?: string) => {
+    if (!playTarget) {
+      return "";
+    }
+    if (playUri) {
+      try {
+        const playHost = new URL(playUri).host;
+        const targetUrl = new URL(playTarget, playUri);
+        if (targetUrl.host === window.location.host && playHost !== window.location.host) {
+          const suffix = `${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`;
+          return new URL(suffix, playUri).toString();
+        }
+        return targetUrl.toString();
+      } catch {
+        // Fall through to window origin.
+      }
+    }
     try {
       return new URL(playTarget, window.location.origin).toString();
     } catch {
@@ -165,11 +214,13 @@ export function ModerationPage() {
     return `${protocol}//${url.host}/ws/admin/rooms`;
   };
 
+  const formatStatusLabel = (status: string) =>
+    status ? `${status.charAt(0).toUpperCase()}${status.slice(1).toLowerCase()}` : "Unknown";
+
   const sendLiveBan = async (roomId: string, worldKey: string, targetUuid: string, message: string) => {
-    const tokenResponse = await apiRequest<{ token: string }>("/admin-sockets/token", {
-      method: "POST",
-      body: JSON.stringify({ roomIds: [roomId] }),
-    });
+    const tokenResponse = await apiRequest<{ token: string }>(
+      buildQuery("/admin-sockets/token", { roomId })
+    );
 
     const socketUrl = resolveAdminSocketUrl(roomId);
 
@@ -214,18 +265,19 @@ export function ModerationPage() {
 
     setBanSubmitting(true);
     setBanError(null);
+    const draft = banDraft;
 
     try {
-      const targetLabel = banDraft.reportedMember.email ?? banDraft.reportedMember.id;
+      const targetLabel = draft.reportedMember.email ?? draft.reportedMember.id;
       const byUserUuid = context.userIdentifier || "admin";
       const reason = banReason.trim() || "Banned via report review.";
-      const roomId = resolveRoomId(banPlayTarget);
+      const roomId = resolveRoomId(banPlayTarget, context.playUri);
       const worldKey = resolveSocketWorldKey(roomId);
 
       await apiRequest<boolean>("/ban", {
         method: "POST",
         body: JSON.stringify({
-          uuidToBan: banDraft.reportedMember.id,
+          uuidToBan: draft.reportedMember.id,
           playUri: banPlayTarget,
           name: targetLabel,
           message: reason,
@@ -233,26 +285,25 @@ export function ModerationPage() {
         }),
       });
 
-      if (roomId && worldKey) {
-        try {
-          await sendLiveBan(roomId, worldKey, banDraft.reportedMember.id, reason);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown error";
-          setBanError(`Ban saved, but live kick failed. ${message}`);
-        }
-      }
-
-      await apiRequest<{ status: string }>(`/report/${banDraft.id}`, {
+      await apiRequest<{ status: string }>(`/report/${draft.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "banned" }),
       });
 
-      await Promise.all([
+      setBanDraft(null);
+
+      if (roomId && worldKey) {
+        void sendLiveBan(roomId, worldKey, draft.reportedMember.id, reason).catch((error) => {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          setBanError(`Ban saved, but live kick failed. ${message}`);
+        });
+      }
+
+      void Promise.allSettled([
         reportsQuery.refetch(),
         resolvedReportsQuery.refetch(),
         bansQuery.refetch(),
       ]);
-      setBanDraft(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setBanError(`Unable to ban user. ${message}`);
@@ -265,10 +316,6 @@ export function ModerationPage() {
     if (reportActionSubmitting) {
       return;
     }
-    const target = report.reportedMember.email ?? report.reportedMember.id;
-    if (!window.confirm(`Reject report for ${target}?`)) {
-      return;
-    }
     setReportActionSubmitting(true);
     setReportActionError(null);
     try {
@@ -278,6 +325,7 @@ export function ModerationPage() {
       });
       await Promise.all([reportsQuery.refetch(), resolvedReportsQuery.refetch()]);
       setReportDetails(null);
+      setRejectDraft(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setReportActionError(`Unable to reject report. ${message}`);
@@ -286,11 +334,15 @@ export function ModerationPage() {
     }
   };
 
-  const unbanUser = async (ban: BanItem) => {
-    if (banActionSubmitting) {
+  const confirmReject = async () => {
+    if (!rejectDraft) {
       return;
     }
-    if (!window.confirm(`Unban ${ban.targetIdentifier}?`)) {
+    await rejectReport(rejectDraft);
+  };
+
+  const unbanUser = async (ban: BanItem) => {
+    if (banActionSubmitting) {
       return;
     }
     setBanActionSubmitting(true);
@@ -299,12 +351,20 @@ export function ModerationPage() {
       await apiRequest<{ status: string }>(`/ban/${ban.id}`, { method: "DELETE" });
       await bansQuery.refetch();
       setBanDetails(null);
+      setUnbanDraft(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setBanActionError(`Unable to unban user. ${message}`);
     } finally {
       setBanActionSubmitting(false);
     }
+  };
+
+  const confirmUnban = async () => {
+    if (!unbanDraft) {
+      return;
+    }
+    await unbanUser(unbanDraft);
   };
 
   return (
@@ -319,26 +379,37 @@ export function ModerationPage() {
         }
       />
 
+      <div className="card context-bar">
+        <span className="context-title">Context</span>
+        <label className="context-field">
+          <span>World slug</span>
+          <input
+            className="input"
+            placeholder="darna"
+            value={context.worldSlug}
+            onChange={(event) => updateContext({ worldSlug: event.target.value })}
+          />
+        </label>
+      </div>
+
       <div className="grid-two">
         <div className="card">
-          <h2 className="section-title">Context</h2>
-          <label className="field">
-            <span>World slug</span>
-            <input
-              className="input"
-              placeholder="darna"
-              value={context.worldSlug}
-              onChange={(event) => updateContext({ worldSlug: event.target.value })}
-            />
-          </label>
-        </div>
-
-        <div className="card">
-          <h2 className="section-title">Open reports</h2>
+          <div className="card-header">
+            <h2 className="section-title">Open reports</h2>
+            {reports.length > 6 && (
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => setShowAllReports((value) => !value)}
+              >
+                {showAllReports ? "Show less" : "View all"}
+              </button>
+            )}
+          </div>
           <p className="muted">
             {reportsQuery.isLoading
               ? "Loading reports..."
-              : `Showing ${reports.length} of ${reportsQuery.data?.total ?? 0} open reports.`}
+              : `Showing ${openReportsDisplay.length} of ${reportsQuery.data?.total ?? 0} open reports.`}
           </p>
           {banError && <p className="muted">{banError}</p>}
           {reportActionError && <p className="muted">{reportActionError}</p>}
@@ -356,9 +427,14 @@ export function ModerationPage() {
               </tr>
             </thead>
             <tbody>
-              {reports.map((report) => {
+              {openReportsDisplay.map((report) => {
                 const targetKey = `${report.worldSlug}:${report.reportedMember.id}`;
                 const isAlreadyBanned = bannedTargets.has(targetKey);
+                const banTitle = !banPlayTarget
+                  ? "Set a play URL or room URL first"
+                  : isAlreadyBanned
+                  ? "User already banned"
+                  : "Ban user";
                 return (
                   <tr key={report.id}>
                     <td>{report.reportedMember.email ?? report.reportedMember.id}</td>
@@ -367,38 +443,41 @@ export function ModerationPage() {
                     <td>{new Date(report.createdAt).toLocaleString()}</td>
                     <td>
                       <div className="button-stack">
-                        <button className="button ghost" type="button" onClick={() => openReportDetails(report)}>
-                          View
+                        <button
+                          className="button ghost icon-button"
+                          type="button"
+                          onClick={() => openReportDetails(report)}
+                          title="View report"
+                          aria-label="View report"
+                        >
+                          <EyeIcon aria-hidden="true" />
                         </button>
                         <button
-                          className="button ghost"
+                          className="button ghost icon-button"
                           type="button"
                           onClick={() => openBanModal(report)}
                           disabled={!banPlayTarget || banSubmitting || isAlreadyBanned}
-                          title={
-                            !banPlayTarget
-                              ? "Set a play URL or room URL first"
-                              : isAlreadyBanned
-                              ? "User already banned"
-                              : "Ban user"
-                          }
+                          title={banTitle}
+                          aria-label={banTitle}
                         >
-                          Ban user
+                          <BanIcon aria-hidden="true" />
                         </button>
                         <button
-                          className="button ghost"
+                          className="button ghost icon-button"
                           type="button"
-                          onClick={() => rejectReport(report)}
+                          onClick={() => openRejectModal(report)}
                           disabled={reportActionSubmitting}
+                          title="Reject report"
+                          aria-label="Reject report"
                         >
-                          Reject
+                          <RejectIcon aria-hidden="true" />
                         </button>
                       </div>
                     </td>
                   </tr>
                 );
               })}
-              {!reports.length && !reportsQuery.isLoading && (
+              {!openReportsDisplay.length && !reportsQuery.isLoading && (
                 <tr>
                   <td colSpan={5} className="muted">
                     No open reports.
@@ -409,11 +488,16 @@ export function ModerationPage() {
           </table>
         </div>
         <div className="card">
-          <h2 className="section-title">Resolved reports</h2>
+          <div className="card-header">
+            <h2 className="section-title">Resolved reports</h2>
+            <a className="button ghost" href="/moderation/resolved">
+              View all
+            </a>
+          </div>
           <p className="muted">
             {resolvedReportsQuery.isLoading
               ? "Loading resolved reports..."
-              : `Showing ${resolvedReports.length} of ${resolvedReportsQuery.data?.total ?? 0} resolved reports.`}
+              : `Showing ${resolvedReportsPreview.length} of ${resolvedReportsQuery.data?.total ?? 0} resolved reports.`}
           </p>
           {resolvedReportsQuery.isError && (
             <p className="muted">Unable to load resolved reports.</p>
@@ -429,20 +513,34 @@ export function ModerationPage() {
               </tr>
             </thead>
             <tbody>
-              {resolvedReports.map((report) => (
-                <tr key={report.id}>
-                  <td>{report.reportedMember.email ?? report.reportedMember.id}</td>
-                  <td>{report.worldSlug}</td>
-                  <td>{report.status}</td>
-                  <td>{new Date(report.updatedAt).toLocaleString()}</td>
-                  <td>
-                    <button className="button ghost" type="button" onClick={() => openReportDetails(report)}>
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!resolvedReports.length && !resolvedReportsQuery.isLoading && (
+              {resolvedReportsPreview.map((report) => {
+                const statusKey = report.status?.toLowerCase() ?? "unknown";
+                const statusLabel = formatStatusLabel(report.status);
+                return (
+                  <tr key={report.id}>
+                    <td>{report.reportedMember.email ?? report.reportedMember.id}</td>
+                    <td>{report.worldSlug}</td>
+                    <td>
+                      <span className={`status-badge ${statusKey}`}>
+                        {statusLabel}
+                      </span>
+                    </td>
+                    <td>{new Date(report.updatedAt).toLocaleString()}</td>
+                    <td>
+                      <button
+                        className="button ghost icon-button"
+                        type="button"
+                        onClick={() => openReportDetails(report)}
+                        title="View report"
+                        aria-label="View report"
+                      >
+                        <EyeIcon aria-hidden="true" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!resolvedReportsPreview.length && !resolvedReportsQuery.isLoading && (
                 <tr>
                   <td colSpan={5} className="muted">
                     No resolved reports.
@@ -455,11 +553,22 @@ export function ModerationPage() {
         </div>
 
       <div className="card">
-        <h2 className="section-title">Active bans</h2>
+        <div className="card-header">
+          <h2 className="section-title">Active bans</h2>
+          {bans.length > 6 && (
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => setShowAllBans((value) => !value)}
+            >
+              {showAllBans ? "Show less" : "View all"}
+            </button>
+          )}
+        </div>
         <p className="muted">
           {bansQuery.isLoading
             ? "Loading bans..."
-            : `Showing ${bans.length} of ${bansQuery.data?.total ?? 0} active bans.`}
+            : `Showing ${bansDisplay.length} of ${bansQuery.data?.total ?? 0} active bans.`}
         </p>
         {banActionError && <p className="muted">{banActionError}</p>}
         {bansQuery.isError && <p className="muted">Unable to load bans.</p>}
@@ -474,7 +583,7 @@ export function ModerationPage() {
             </tr>
           </thead>
           <tbody>
-            {bans.map((ban) => (
+            {bansDisplay.map((ban) => (
               <tr key={ban.id}>
                 <td>{ban.targetIdentifier}</td>
                 <td>{ban.worldSlug}</td>
@@ -482,22 +591,30 @@ export function ModerationPage() {
                 <td>{ban.expiresAt ? new Date(ban.expiresAt).toLocaleString() : "Never"}</td>
                 <td>
                   <div className="button-stack">
-                    <button className="button ghost" type="button" onClick={() => openBanDetails(ban)}>
-                      View
+                    <button
+                      className="button ghost icon-button"
+                      type="button"
+                      onClick={() => openBanDetails(ban)}
+                      title="View ban details"
+                      aria-label="View ban details"
+                    >
+                      <EyeIcon aria-hidden="true" />
                     </button>
                     <button
-                      className="button ghost"
+                      className="button ghost icon-button"
                       type="button"
-                      onClick={() => unbanUser(ban)}
+                      onClick={() => openUnbanModal(ban)}
                       disabled={banActionSubmitting}
+                      title="Unban user"
+                      aria-label="Unban user"
                     >
-                      Unban
+                      <UnbanIcon aria-hidden="true" />
                     </button>
                   </div>
                 </td>
               </tr>
             ))}
-            {!bans.length && !bansQuery.isLoading && (
+            {!bansDisplay.length && !bansQuery.isLoading && (
               <tr>
                 <td colSpan={5} className="muted">
                   No active bans.
@@ -565,6 +682,26 @@ export function ModerationPage() {
         </div>
       )}
 
+      {rejectDraft && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <h3 className="modal-title">Reject report</h3>
+            <p className="muted">
+              Reject report for{" "}
+              <strong>{rejectDraft.reportedMember.email ?? rejectDraft.reportedMember.id}</strong>?
+            </p>
+            <div className="modal-actions">
+              <button className="button ghost" type="button" onClick={closeRejectModal} disabled={reportActionSubmitting}>
+                Cancel
+              </button>
+              <button className="button solid" type="button" onClick={confirmReject} disabled={reportActionSubmitting}>
+                {reportActionSubmitting ? "Rejecting..." : "Confirm reject"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {banDetails && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="modal-card">
@@ -591,10 +728,29 @@ export function ModerationPage() {
               <button
                 className="button solid"
                 type="button"
-                onClick={() => unbanUser(banDetails)}
+                onClick={() => openUnbanModal(banDetails)}
                 disabled={banActionSubmitting}
               >
                 {banActionSubmitting ? "Unbanning..." : "Unban"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {unbanDraft && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <h3 className="modal-title">Unban user</h3>
+            <p className="muted">
+              Unban <strong>{unbanDraft.targetIdentifier}</strong>?
+            </p>
+            <div className="modal-actions">
+              <button className="button ghost" type="button" onClick={closeUnbanModal} disabled={banActionSubmitting}>
+                Cancel
+              </button>
+              <button className="button solid" type="button" onClick={confirmUnban} disabled={banActionSubmitting}>
+                {banActionSubmitting ? "Unbanning..." : "Confirm unban"}
               </button>
             </div>
           </div>

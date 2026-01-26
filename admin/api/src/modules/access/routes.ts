@@ -78,11 +78,17 @@ export async function accessRoutes(app: FastifyInstance) {
             ? await app.db.ban.findFirst({
                   where: {
                       worldId: banWorldId,
-                      OR: [
-                          { targetIdentifier: externalId },
-                          ...(query.ipAddress ? [{ ipAddress: query.ipAddress }] : []),
+                      AND: [
+                          {
+                              OR: [
+                                  { targetIdentifier: externalId },
+                                  ...(query.ipAddress ? [{ ipAddress: query.ipAddress }] : []),
+                              ],
+                          },
+                          {
+                              OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+                          },
                       ],
-                      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
                   },
                   orderBy: { createdAt: "desc" },
               })
