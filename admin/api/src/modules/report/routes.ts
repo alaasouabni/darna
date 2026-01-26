@@ -18,11 +18,22 @@ const listQuerySchema = z.object({
     skip: z.coerce.number().default(0),
 });
 
+const updateParamsSchema = z.object({
+    id: z.string(),
+});
+
+const updateBodySchema = z.object({
+    status: z.enum(["open", "banned", "rejected", "resolved"]),
+});
+
 export async function reportRoutes(app: FastifyInstance) {
     app.get("/reports", { preHandler: requireAdminAuth }, async (request, reply) => {
         const query = listQuerySchema.parse(request.query);
+        const statuses = query.status
+            ? query.status.split(",").map((status) => status.trim()).filter(Boolean)
+            : [];
         const where = {
-            ...(query.status ? { status: query.status } : {}),
+            ...(statuses.length ? { status: { in: statuses } } : {}),
             ...(query.worldSlug ? { world: { slug: query.worldSlug } } : {}),
         };
 
@@ -49,6 +60,7 @@ export async function reportRoutes(app: FastifyInstance) {
                 status: report.status,
                 comment: report.comment,
                 createdAt: report.createdAt.toISOString(),
+                updatedAt: report.updatedAt.toISOString(),
                 reportedMember: {
                     id: report.reportedMember.externalId,
                     email: report.reportedMember.email ?? null,
@@ -59,6 +71,31 @@ export async function reportRoutes(app: FastifyInstance) {
                 },
             })),
         });
+    });
+
+    app.patch("/report/:id", { preHandler: requireAdminAuth }, async (request, reply) => {
+        const params = updateParamsSchema.parse(request.params);
+        const body = updateBodySchema.parse(request.body);
+
+        const report = await app.db.report.findUnique({ where: { id: params.id } });
+        if (!report) {
+            reply.code(404).send(
+                errorData(
+                    "REPORT_NOT_FOUND",
+                    "Report not found",
+                    "The requested report does not exist.",
+                    `No report found for id ${params.id}.`
+                )
+            );
+            return;
+        }
+
+        await app.db.report.update({
+            where: { id: params.id },
+            data: { status: body.status },
+        });
+
+        reply.send({ status: "ok" });
     });
 
     app.post("/report", { preHandler: requireAdminAuth }, async (request, reply) => {

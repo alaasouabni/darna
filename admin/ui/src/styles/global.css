@@ -210,6 +210,18 @@ a {
   font-size: 0.95rem;
 }
 
+.table.table-wrap {
+  table-layout: fixed;
+}
+
+.table.table-wrap th,
+.table.table-wrap td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
+
 .table th,
 .table td {
   text-align: left;
@@ -296,6 +308,41 @@ a {
   border: 1px solid rgba(26, 22, 18, 0.15);
   padding: 10px 12px;
   font-family: var(--font-sans);
+}
+
+.textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 15, 12, 0.4);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: 24px;
+}
+
+.modal-card {
+  width: min(520px, 100%);
+  background: var(--card);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+  border: 1px solid rgba(26, 22, 18, 0.08);
+}
+
+.modal-title {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .muted {

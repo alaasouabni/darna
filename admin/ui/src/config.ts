@@ -25,5 +25,16 @@ export function inferWorldSlug(roomUrl: string) {
       return segments[1];
     }
   }
+  if (segments[0] === "~") {
+    return segments[1] ?? "";
+  }
   return "";
+}
+
+export function inferWorldDomain(playUri: string) {
+  try {
+    return new URL(playUri).host;
+  } catch {
+    return "";
+  }
 }

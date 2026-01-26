@@ -4,7 +4,7 @@ import { errorData, unauthorizedData } from "../../lib/error-response";
 import { buildApplications } from "../../lib/applications";
 import { getCompanionDetails, getWokaDetails } from "../../lib/catalogs";
 import { decodeAccessToken } from "../../lib/jwt";
-import { normalizeRoomPath } from "../../lib/room-url";
+import { normalizeRoomPath, parseRoomPath } from "../../lib/room-url";
 import { config } from "../../config/env";
 import { requireAdminAuth } from "../../plugins/auth";
 
@@ -25,17 +25,31 @@ function normalizeArray(value?: string | string[]): string[] {
     return Array.isArray(value) ? value : [value];
 }
 
+function extractMapStorageSlug(path: string): string | null {
+    const segments = normalizeRoomPath(path).split("/").filter(Boolean);
+    if (segments[0] !== "~") {
+        return null;
+    }
+    return segments[1] ?? null;
+}
+
 export async function accessRoutes(app: FastifyInstance) {
     app.get("/room/access", { preHandler: requireAdminAuth }, async (request, reply) => {
         const query = querySchema.parse(request.query);
-        const roomPath = normalizeRoomPath(query.playUri);
+        const parsedRoom = parseRoomPath(query.playUri);
+        const roomPath = parsedRoom.path;
 
         const room = await app.db.room.findUnique({
             where: { roomUrl: roomPath },
             include: { world: true, tagsTable: true },
         });
 
-        if (!room) {
+        const mapStorageSlug = parsedRoom.kind === "map-storage" ? extractMapStorageSlug(roomPath) : null;
+        const mapStorageWorld = mapStorageSlug
+            ? await app.db.world.findUnique({ where: { slug: mapStorageSlug } })
+            : null;
+
+        if (!room && parsedRoom.kind !== "map-storage") {
             reply.code(404).send(
                 errorData(
                     "ROOM_NOT_FOUND",
@@ -47,7 +61,7 @@ export async function accessRoutes(app: FastifyInstance) {
             return;
         }
 
-        if (!room.isActive) {
+        if (room && !room.isActive) {
             reply.code(403).send(
                 unauthorizedData("This room is currently inactive.")
             );
@@ -58,6 +72,29 @@ export async function accessRoutes(app: FastifyInstance) {
         const externalId = tokenUser?.email ?? query.userIdentifier;
         const identifierEmail = externalId.includes("@") ? externalId : null;
 
+        const now = new Date();
+        const banWorldId = room?.worldId ?? mapStorageWorld?.id ?? null;
+        const ban = banWorldId
+            ? await app.db.ban.findFirst({
+                  where: {
+                      worldId: banWorldId,
+                      OR: [
+                          { targetIdentifier: externalId },
+                          ...(query.ipAddress ? [{ ipAddress: query.ipAddress }] : []),
+                      ],
+                      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+                  },
+                  orderBy: { createdAt: "desc" },
+              })
+            : null;
+
+        if (ban) {
+            reply.code(403).send(
+                unauthorizedData(ban.reason ?? "You are banned.")
+            );
+            return;
+        }
+
         const member = await app.db.member.upsert({
             where: { externalId },
             update: {
@@ -65,7 +102,7 @@ export async function accessRoutes(app: FastifyInstance) {
                 displayName: tokenUser?.name ?? tokenUser?.preferredUsername ?? undefined,
                 chatId: query.chatID ?? undefined,
                 lastSeenAt: new Date(),
-                lastRoomUrl: room.roomUrl,
+                lastRoomUrl: room?.roomUrl ?? roomPath,
             },
             create: {
                 externalId,
@@ -73,7 +110,7 @@ export async function accessRoutes(app: FastifyInstance) {
                 displayName: tokenUser?.name ?? tokenUser?.preferredUsername ?? null,
                 chatId: query.chatID ?? null,
                 lastSeenAt: new Date(),
-                lastRoomUrl: room.roomUrl,
+                lastRoomUrl: room?.roomUrl ?? roomPath,
             },
         });
 
@@ -95,16 +132,18 @@ export async function accessRoutes(app: FastifyInstance) {
         tokenUser?.tags.forEach((tag) => tagSet.add(tag));
         memberTags.forEach((tag) => tagSet.add(tag.tag));
 
-        const roomTags = new Set<string>(room.tags);
-        room.tagsTable.forEach((tag) => roomTags.add(tag.tag));
+        if (room) {
+            const roomTags = new Set<string>(room.tags);
+            room.tagsTable.forEach((tag) => roomTags.add(tag.tag));
 
-        if (roomTags.size > 0) {
-            const hasAccess = Array.from(roomTags).some((tag) => tagSet.has(tag));
-            if (!hasAccess) {
-                reply.code(403).send(
-                    unauthorizedData("You do not have the required tags to access this room.")
-                );
-                return;
+            if (roomTags.size > 0) {
+                const hasAccess = Array.from(roomTags).some((tag) => tagSet.has(tag));
+                if (!hasAccess) {
+                    reply.code(403).send(
+                        unauthorizedData("You do not have the required tags to access this room.")
+                    );
+                    return;
+                }
             }
         }
 
@@ -161,7 +200,13 @@ export async function accessRoutes(app: FastifyInstance) {
             activatedInviteUser: true,
             applications: buildApplications(),
             canEdit,
-            world: room.world.name ?? room.world.slug,
+            world:
+                room?.world.name ??
+                room?.world.slug ??
+                mapStorageWorld?.name ??
+                mapStorageWorld?.slug ??
+                mapStorageSlug ??
+                "unknown",
             chatID: query.chatID ?? member.chatId ?? undefined,
         });
     });

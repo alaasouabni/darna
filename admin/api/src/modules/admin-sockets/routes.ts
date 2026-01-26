@@ -39,7 +39,7 @@ export async function adminSocketsRoutes(app: FastifyInstance) {
         }
 
         const token = await new SignJWT({
-            roomIds: body.roomIds,
+            authorizedRoomIds: body.roomIds,
             roles: user.roles,
             tags: user.tags,
         })

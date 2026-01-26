@@ -21,6 +21,50 @@ const worldTagsQuery = z.object({
     searchText: z.string().optional(),
 });
 
+const createRoomBody = z.object({
+    roomUrl: z.string(),
+    playUri: z.string().optional(),
+    worldSlug: z.string().optional(),
+    worldName: z.string().optional(),
+    worldDomain: z.string().optional(),
+    wamUrl: z.string().optional(),
+    name: z.string().optional(),
+    tags: z.union([z.string(), z.array(z.string())]).optional(),
+    isActive: z.boolean().optional(),
+});
+
+function normalizeTags(input?: string | string[]): string[] {
+    if (!input) {
+        return [];
+    }
+    const raw = Array.isArray(input) ? input : input.split(",");
+    return raw.map((tag) => tag.trim()).filter(Boolean);
+}
+
+function extractMapStorageSlug(path: string): string | null {
+    const segments = normalizeRoomPath(path).split("/").filter(Boolean);
+    if (segments[0] !== "~") {
+        return null;
+    }
+    return segments[1] ?? null;
+}
+
+function extractRoomSlug(path: string): string {
+    const segments = normalizeRoomPath(path).split("/").filter(Boolean);
+    return segments[segments.length - 1] ?? "room";
+}
+
+function inferDomain(playUri?: string): string | null {
+    if (!playUri) {
+        return null;
+    }
+    try {
+        return new URL(playUri).host;
+    } catch {
+        return null;
+    }
+}
+
 async function fetchMapStorageRooms() {
     if (!config.INTERNAL_MAP_STORAGE_URL || !config.PUBLIC_MAP_STORAGE_URL) {
         throw new Error("Map storage URLs are not configured.");
@@ -51,6 +95,111 @@ async function fetchMapStorageRooms() {
 }
 
 export async function roomRoutes(app: FastifyInstance) {
+    app.post("/room", { preHandler: requireAdminAuth }, async (request, reply) => {
+        const body = createRoomBody.parse(request.body);
+        const normalized = normalizeRoomPath(body.roomUrl);
+        const parsed = parseRoomPath(normalized);
+        const tags = normalizeTags(body.tags);
+        const tagsProvided = typeof body.tags !== "undefined";
+
+        const inferredSlug =
+            parsed.kind === "map-storage"
+                ? extractMapStorageSlug(normalized)
+                : extractWorldSlug(normalized);
+        const worldSlug = body.worldSlug?.trim() || inferredSlug;
+        if (!worldSlug) {
+            reply.code(400).send(
+                errorData(
+                    "WORLD_SLUG_REQUIRED",
+                    "World slug required",
+                    "Provide a world slug or a room URL that contains it.",
+                    "Unable to infer world slug from room URL."
+                )
+            );
+            return;
+        }
+
+        const existingWorld = await app.db.world.findUnique({ where: { slug: worldSlug } });
+        const worldDomain = body.worldDomain?.trim() || inferDomain(body.playUri) || existingWorld?.domain || null;
+        if (!existingWorld && !worldDomain) {
+            reply.code(400).send(
+                errorData(
+                    "WORLD_DOMAIN_REQUIRED",
+                    "World domain required",
+                    "Provide a world domain or a Play URL with a domain.",
+                    "Unable to infer world domain."
+                )
+            );
+            return;
+        }
+
+        const worldName = body.worldName?.trim() || existingWorld?.name || worldSlug;
+        const world = existingWorld
+            ? await app.db.world.update({
+                  where: { id: existingWorld.id },
+                  data: {
+                      ...(body.worldName ? { name: worldName } : {}),
+                      ...(body.worldDomain ? { domain: worldDomain ?? existingWorld.domain } : {}),
+                  },
+              })
+            : await app.db.world.create({
+                  data: { slug: worldSlug, name: worldName, domain: worldDomain ?? "" },
+              });
+
+        const roomSlug = extractRoomSlug(normalized);
+        const room = await app.db.$transaction(async (tx) => {
+            const entry = await tx.room.upsert({
+                where: { roomUrl: normalized },
+                create: {
+                    worldId: world.id,
+                    slug: roomSlug,
+                    roomUrl: normalized,
+                    wamUrl: body.wamUrl ?? null,
+                    tags: tagsProvided ? tags : [],
+                    isActive: body.isActive ?? true,
+                    metadata: body.name ? { name: body.name } : undefined,
+                },
+                update: {
+                    worldId: world.id,
+                    slug: roomSlug,
+                    wamUrl: body.wamUrl ?? undefined,
+                    ...(tagsProvided ? { tags } : {}),
+                    ...(typeof body.isActive === "boolean" ? { isActive: body.isActive } : {}),
+                },
+            });
+
+            if (tagsProvided) {
+                await tx.roomTag.deleteMany({ where: { roomId: entry.id } });
+                if (tags.length) {
+                    await tx.roomTag.createMany({
+                        data: tags.map((tag) => ({ roomId: entry.id, tag })),
+                        skipDuplicates: true,
+                    });
+                }
+            }
+
+            if (body.name) {
+                const nextMetadata =
+                    entry.metadata && typeof entry.metadata === "object" && !Array.isArray(entry.metadata)
+                        ? { ...(entry.metadata as Record<string, unknown>), name: body.name }
+                        : { name: body.name };
+                await tx.room.update({
+                    where: { id: entry.id },
+                    data: { metadata: nextMetadata },
+                });
+            }
+
+            return entry;
+        });
+
+        reply.send({
+            status: "ok",
+            roomUrl: room.roomUrl,
+            worldSlug: world.slug,
+            roomId: room.id,
+        });
+    });
+
     app.get("/room/sameWorld", { preHandler: requireAdminAuth }, async (request, reply) => {
         const query = sameWorldQuery.parse(request.query);
         const normalized = normalizeRoomPath(query.roomUrl);
@@ -108,6 +257,10 @@ export async function roomRoutes(app: FastifyInstance) {
 
             if (!tags.length) {
                 return entryTags.size === 0;
+            }
+
+            if (entryTags.size === 0) {
+                return true;
             }
 
             return tags.some((tag) => entryTags.has(tag));

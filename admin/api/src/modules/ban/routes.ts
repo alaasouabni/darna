@@ -25,6 +25,10 @@ const listQuerySchema = z.object({
     skip: z.coerce.number().default(0),
 });
 
+const unbanParamsSchema = z.object({
+    id: z.string(),
+});
+
 export async function banRoutes(app: FastifyInstance) {
     app.get("/bans", { preHandler: requireAdminAuth }, async (request, reply) => {
         const query = listQuerySchema.parse(request.query);
@@ -125,6 +129,21 @@ export async function banRoutes(app: FastifyInstance) {
             return;
         }
 
+        const now = new Date();
+        const existingBan = await app.db.ban.findFirst({
+            where: {
+                worldId: room.worldId,
+                targetIdentifier: body.uuidToBan,
+                OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            },
+            orderBy: { createdAt: "desc" },
+        });
+
+        if (existingBan) {
+            reply.code(200).send(true);
+            return;
+        }
+
         let createdByMemberId: string | null = null;
         if (body.byUserUuid) {
             const member = await app.db.member.upsert({
@@ -145,5 +164,29 @@ export async function banRoutes(app: FastifyInstance) {
         });
 
         reply.code(200).send(true);
+    });
+
+    app.delete("/ban/:id", { preHandler: requireAdminAuth }, async (request, reply) => {
+        const params = unbanParamsSchema.parse(request.params);
+        const ban = await app.db.ban.findUnique({ where: { id: params.id } });
+        if (!ban) {
+            reply.code(404).send(
+                errorData(
+                    "BAN_NOT_FOUND",
+                    "Ban not found",
+                    "The requested ban does not exist.",
+                    `No ban found for id ${params.id}.`
+                )
+            );
+            return;
+        }
+
+        const now = new Date();
+        await app.db.ban.update({
+            where: { id: params.id },
+            data: { expiresAt: now },
+        });
+
+        reply.send({ status: "ok" });
     });
 }

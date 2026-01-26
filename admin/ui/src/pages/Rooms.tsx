@@ -4,6 +4,7 @@ import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
+import { inferWorldDomain, inferWorldSlug } from "../config";
 
 type RoomSummary = {
   name?: string;
@@ -14,6 +15,16 @@ type RoomSummary = {
 export function RoomsPage() {
   const { context, updateContext } = useAdminContext();
   const [selectedRoomUrl, setSelectedRoomUrl] = useState("");
+  const [createRoomUrl, setCreateRoomUrl] = useState("");
+  const [createWamUrl, setCreateWamUrl] = useState("");
+  const [createRoomName, setCreateRoomName] = useState("");
+  const [createWorldSlug, setCreateWorldSlug] = useState("");
+  const [createWorldName, setCreateWorldName] = useState("");
+  const [createWorldDomain, setCreateWorldDomain] = useState("");
+  const [createTags, setCreateTags] = useState("");
+  const [createIsActive, setCreateIsActive] = useState(true);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
   const roomsQuery = useQuery({
     queryKey: ["rooms", context.roomUrl],
@@ -44,6 +55,30 @@ export function RoomsPage() {
     }
   }, [roomsQuery.data, selectedRoomUrl]);
 
+  useEffect(() => {
+    if (!createRoomUrl && context.roomUrl) {
+      setCreateRoomUrl(context.roomUrl);
+    }
+  }, [context.roomUrl, createRoomUrl]);
+
+  useEffect(() => {
+    if (!createWorldSlug) {
+      const inferred = context.worldSlug || inferWorldSlug(context.roomUrl);
+      if (inferred) {
+        setCreateWorldSlug(inferred);
+      }
+    }
+  }, [context.roomUrl, context.worldSlug, createWorldSlug]);
+
+  useEffect(() => {
+    if (!createWorldDomain && context.playUri) {
+      const inferred = inferWorldDomain(context.playUri);
+      if (inferred) {
+        setCreateWorldDomain(inferred);
+      }
+    }
+  }, [context.playUri, createWorldDomain]);
+
   const roomTagsQuery = useQuery({
     queryKey: ["room-tags", selectedRoomUrl],
     enabled: Boolean(selectedRoomUrl),
@@ -65,6 +100,42 @@ export function RoomsPage() {
       return;
     }
     window.open(context.playUri, "_blank", "noopener");
+  };
+
+  const handleCreateRoom = async () => {
+    if (!createRoomUrl) {
+      setCreateError("Room URL is required.");
+      return;
+    }
+    setCreateError(null);
+    setIsCreating(true);
+    const tags = createTags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+    try {
+      await apiRequest<{ status: string }>("/room", {
+        method: "POST",
+        body: JSON.stringify({
+          roomUrl: createRoomUrl,
+          wamUrl: createWamUrl || undefined,
+          name: createRoomName || undefined,
+          playUri: context.playUri || undefined,
+          worldSlug: createWorldSlug || undefined,
+          worldName: createWorldName || undefined,
+          worldDomain: createWorldDomain || undefined,
+          tags,
+          isActive: createIsActive,
+        }),
+      });
+      await roomsQuery.refetch();
+      setSelectedRoomUrl(createRoomUrl);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Unable to create the room.");
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -127,6 +198,89 @@ export function RoomsPage() {
               <span className="muted">No tags found.</span>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="section-title">Add room to admin database</h2>
+        <div className="grid-two">
+          <label className="field">
+            <span>Room URL</span>
+            <input
+              className="input"
+              placeholder="/~/darna/conference"
+              value={createRoomUrl}
+              onChange={(event) => setCreateRoomUrl(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>WAM URL</span>
+            <input
+              className="input"
+              placeholder="https://darna.lightency.io/map-storage/darna/conference.wam"
+              value={createWamUrl}
+              onChange={(event) => setCreateWamUrl(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Room name (optional)</span>
+            <input
+              className="input"
+              placeholder="Conference"
+              value={createRoomName}
+              onChange={(event) => setCreateRoomName(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>World slug</span>
+            <input
+              className="input"
+              placeholder="darna"
+              value={createWorldSlug}
+              onChange={(event) => setCreateWorldSlug(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>World name</span>
+            <input
+              className="input"
+              placeholder="Darna"
+              value={createWorldName}
+              onChange={(event) => setCreateWorldName(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>World domain</span>
+            <input
+              className="input"
+              placeholder="darna.lightency.io"
+              value={createWorldDomain}
+              onChange={(event) => setCreateWorldDomain(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Tags (comma-separated)</span>
+            <input
+              className="input"
+              placeholder="viewer,staff"
+              value={createTags}
+              onChange={(event) => setCreateTags(event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Active</span>
+            <input
+              type="checkbox"
+              checked={createIsActive}
+              onChange={(event) => setCreateIsActive(event.target.checked)}
+            />
+          </label>
+        </div>
+        {createError && <p className="muted">{createError}</p>}
+        <div className="button-stack">
+          <button className="button solid" type="button" onClick={handleCreateRoom} disabled={isCreating}>
+            {isCreating ? "Saving..." : "Add room"}
+          </button>
         </div>
       </div>
 
