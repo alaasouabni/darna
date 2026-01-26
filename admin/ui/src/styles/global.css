@@ -65,6 +65,12 @@ a {
   letter-spacing: 0.08em;
 }
 
+.brand-logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
 .brand-title {
   font-weight: 700;
 }

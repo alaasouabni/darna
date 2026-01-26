@@ -13,9 +13,15 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">WA</div>
+        <div className="brand-mark">
+          <img
+            className="brand-logo"
+            src={new URL("../assets/darna-logo-dark.png", import.meta.url).toString()}
+            alt="Darna"
+          />
+        </div>
         <div>
-          <div className="brand-title">WorkAdventure</div>
+          <div className="brand-title">Darna</div>
           <div className="brand-subtitle">Admin Console</div>
         </div>
       </div>

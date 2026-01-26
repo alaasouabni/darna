@@ -7,7 +7,8 @@ type Props = {
 };
 
 export function AuthGate({ children }: Props) {
-  const { state, login } = useAuth();
+  const { state, login, logout } = useAuth();
+  const isAdmin = state.roles?.includes("wa-admin");
 
   if (state.status === "loading") {
     return (
@@ -35,6 +36,27 @@ export function AuthGate({ children }: Props) {
               Sign in
             </button>
           )}
+        </div>
+      </section>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <section className="page">
+        <div className="card">
+          <h2 className="section-title">Access denied</h2>
+          <p className="muted">
+            Your account does not have the <strong>wa-admin</strong> role required to access this console.
+          </p>
+          <div className="button-stack">
+            <button className="button solid" onClick={logout} type="button">
+              Sign out
+            </button>
+            <button className="button ghost" onClick={login} type="button">
+              Sign in with another account
+            </button>
+          </div>
         </div>
       </section>
     );

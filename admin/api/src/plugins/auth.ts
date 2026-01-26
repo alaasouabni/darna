@@ -113,7 +113,7 @@ export function requireServiceAuth(request: FastifyRequest, reply: FastifyReply)
 }
 
 function isAdminUser(user?: TokenUser): boolean {
-    return Boolean(user && user.tags.length > 0);
+    return Boolean(user && user.tags.includes("admin"));
 }
 
 export function requireUserAuth(request: FastifyRequest, reply: FastifyReply) {
