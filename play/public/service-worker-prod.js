@@ -1,9 +1,10 @@
-let CACHE_NAME = 'workavdenture-cache';
+let CACHE_NAME = 'workadventure-cache-v2';
 let urlsToCache = [
     '/'
 ];
 
 self.addEventListener('install', function(event) {
+    self.skipWaiting();
     // url to cache
     if(event.target && event.target.serviceWorker && event.target.serviceWorker.scriptURL){
         const url = new URL(event.target.serviceWorker.scriptURL);
@@ -17,6 +18,25 @@ self.addEventListener('install', function(event) {
         caches.open(CACHE_NAME)
             .then(function(cache) {
                 return cache.addAll(urlsToCache);
+            })
+    );
+});
+
+self.addEventListener('activate', function(event) {
+    event.waitUntil(
+        caches.keys()
+            .then(function(keys) {
+                return Promise.all(
+                    keys.map(function(key) {
+                        if (key !== CACHE_NAME) {
+                            return caches.delete(key);
+                        }
+                        return null;
+                    })
+                );
+            })
+            .then(function() {
+                return self.clients.claim();
             })
     );
 });

@@ -455,6 +455,11 @@ class AdminApi implements AdminInterface {
         } catch (err) {
             let message = "Unknown error";
             if (isAxiosError(err)) {
+                const status = err.response?.status;
+                if (status === 401) {
+                    // Treat authentication failures as token expiry to force re-login.
+                    throw new JsonWebTokenError("Invalid token");
+                }
                 Sentry.captureException(err);
                 console.error(
                     `An error occurred during call to /room/access endpoint. HTTP Status: ${err.status}.`,

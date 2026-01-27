@@ -13,8 +13,45 @@ declare global {
 }
 window.e2eHooks = e2eHooks;
 
-const app = new App({
-    target: HtmlUtils.getElementByIdOrFail("app"),
-});
+const versionKey = "waClientHash";
+
+async function ensureFreshClient(): Promise<boolean> {
+    try {
+        const response = await fetch(`/version.json?_=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) {
+            return false;
+        }
+        const data = (await response.json()) as { hash?: string };
+        const hash = typeof data?.hash === "string" ? data.hash : null;
+        if (!hash) {
+            return false;
+        }
+        const stored = localStorage.getItem(versionKey);
+        if (stored && stored !== hash) {
+            localStorage.setItem(versionKey, hash);
+            localStorage.removeItem("authToken");
+            window.location.reload();
+            return true;
+        }
+        if (!stored) {
+            localStorage.setItem(versionKey, hash);
+        }
+    } catch {
+        return false;
+    }
+    return false;
+}
+
+let app: App | undefined;
+
+(async () => {
+    const reloaded = await ensureFreshClient();
+    if (reloaded) {
+        return;
+    }
+    app = new App({
+        target: HtmlUtils.getElementByIdOrFail("app"),
+    });
+})();
 
 export default app;

@@ -1,5 +1,6 @@
 import { basename } from "path";
 import fs from "fs";
+import { execSync } from "child_process";
 import { defineConfig, loadEnv } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { sveltePreprocess } from "svelte-preprocess";
@@ -14,6 +15,7 @@ export default defineConfig(({ mode }) => {
     // Load env file based on `mode` in the current working directory.
     // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
     const env = loadEnv(mode, process.cwd(), "");
+    const buildHash = resolveBuildHash(env);
     const config = {
         server: {
             host: "0.0.0.0",
@@ -43,6 +45,7 @@ export default defineConfig(({ mode }) => {
                     Buffer: true,
                 },
             }),
+            emitVersionPlugin(buildHash),
             svelte({
                 preprocess: sveltePreprocess(),
                 onwarn(warning, defaultHandler) {
@@ -143,6 +146,46 @@ function mediapipe_workaround() {
             } else {
                 return null;
             }
+        },
+    };
+}
+
+function resolveBuildHash(env: Record<string, string>): string {
+    if (env.VITE_BUILD_HASH) {
+        return env.VITE_BUILD_HASH;
+    }
+    if (process.env.SENTRY_RELEASE) {
+        return process.env.SENTRY_RELEASE;
+    }
+    if (process.env.GIT_HASH) {
+        return process.env.GIT_HASH;
+    }
+    try {
+        if (fs.existsSync(".git")) {
+            return execSync("git rev-parse --short HEAD").toString().trim();
+        }
+    } catch {
+        // ignore
+    }
+    return new Date().toISOString();
+}
+
+function emitVersionPlugin(buildHash: string) {
+    return {
+        name: "emit-version-json",
+        generateBundle() {
+            this.emitFile({
+                type: "asset",
+                fileName: "version.json",
+                source: JSON.stringify(
+                    {
+                        hash: buildHash,
+                        builtAt: new Date().toISOString(),
+                    },
+                    null,
+                    2
+                ),
+            });
         },
     };
 }

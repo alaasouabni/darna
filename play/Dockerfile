@@ -12,6 +12,7 @@ RUN npm run tag-version && npm run ts-proto
 FROM --platform=$BUILDPLATFORM node:20.18-bullseye-slim AS builder
 ARG NODE_OPTIONS="--max-old-space-size=16384"
 ARG FAST_BUILD=""
+ARG GIT_HASH=""
 WORKDIR /usr/src
 RUN apt-get update && apt-get install -y git
 COPY package.json package-lock.json ./
@@ -29,6 +30,7 @@ COPY --from=proto-builder /usr/libs/messages/src ./libs/messages/src
 COPY play ./play
 COPY --from=proto-builder /usr/src/generated play/src/messages/generated
 ENV NODE_ENV=production
+ENV VITE_BUILD_HASH=$GIT_HASH
 RUN --mount=type=secret,id=SENTRY_RELEASE \
     --mount=type=secret,id=SENTRY_URL \
     --mount=type=secret,id=SENTRY_AUTH_TOKEN \
