@@ -24,12 +24,23 @@ import type { AdminSocketData } from "../models/Websocket/AdminSocketData";
 import type { AdminMessageInterface } from "../models/Websocket/Admin/AdminMessages";
 import { isAdminMessageInterface } from "../models/Websocket/Admin/AdminMessages";
 import { adminService } from "../services/AdminService";
+import { openIDClient } from "../services/OpenIDClient";
 import { validateWebsocketQuery } from "../services/QueryValidator";
 import type { SocketData, SpaceName } from "../models/Websocket/SocketData";
 import { emitInBatch } from "../services/IoSocketHelpers";
 import { ClientAbortError } from "../models/ClientAbortError";
 
 const debug = Debug("pusher:requests");
+
+const isInvalidGrant = (err: unknown): boolean => {
+    if (!err || typeof err !== "object") return false;
+    const error = err as { error?: string; error_description?: string; message?: string };
+    return (
+        error.error === "invalid_grant" ||
+        (error.error_description?.toLowerCase().includes("not active") ?? false) ||
+        (error.message?.toLowerCase().includes("invalid_grant") ?? false)
+    );
+};
 
 type UpgradeFailedInvalidData = {
     rejected: true;
@@ -371,17 +382,49 @@ export class IoSocketController {
 
                         try {
                             try {
-                                userData = await adminService.fetchMemberDataByUuid(
-                                    userIdentifier,
-                                    tokenData?.accessToken,
-                                    roomId,
-                                    ipAddress,
-                                    characterTextureIds,
-                                    companionTextureId,
-                                    locale,
-                                    userData.tags,
-                                    chatID
-                                );
+                                try {
+                                    userData = await adminService.fetchMemberDataByUuid(
+                                        userIdentifier,
+                                        tokenData?.accessToken,
+                                        roomId,
+                                        ipAddress,
+                                        characterTextureIds,
+                                        companionTextureId,
+                                        locale,
+                                        userData.tags,
+                                        chatID
+                                    );
+                                } catch (err) {
+                                    if (err instanceof JsonWebTokenError && tokenData?.refreshToken) {
+                                        let refreshed;
+                                        try {
+                                            refreshed = await openIDClient.refreshAccessToken(tokenData.refreshToken);
+                                        } catch (refreshErr) {
+                                            if (isInvalidGrant(refreshErr)) {
+                                                throw new JsonWebTokenError("Invalid token");
+                                            }
+                                            throw refreshErr;
+                                        }
+                                        if (!refreshed.access_token) {
+                                            throw err;
+                                        }
+                                        tokenData.accessToken = refreshed.access_token;
+                                        tokenData.refreshToken = refreshed.refresh_token ?? tokenData.refreshToken;
+                                        userData = await adminService.fetchMemberDataByUuid(
+                                            userIdentifier,
+                                            tokenData.accessToken,
+                                            roomId,
+                                            ipAddress,
+                                            characterTextureIds,
+                                            companionTextureId,
+                                            locale,
+                                            userData.tags,
+                                            chatID
+                                        );
+                                    } else {
+                                        throw err;
+                                    }
+                                }
 
                                 if (userData.status === "ok" && !userData.isCharacterTexturesValid) {
                                     return res.upgrade(

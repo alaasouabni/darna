@@ -67,6 +67,18 @@ function createRequestedMicrophoneState() {
     };
 }
 
+function createRequestedNoiseSuppressionStore() {
+    const { subscribe, set } = writable(localUserStore.getNoiseSuppression());
+
+    return {
+        subscribe,
+        set: (value: boolean) => {
+            set(value);
+            localUserStore.setNoiseSuppression(value);
+        },
+    };
+}
+
 /**
  * A store that contains whether the EnableCameraScene is shown or not.
  */
@@ -82,6 +94,7 @@ function createEnableCameraSceneVisibilityStore() {
 
 export const requestedCameraState = createRequestedCameraState();
 export const requestedMicrophoneState = createRequestedMicrophoneState();
+export const requestedNoiseSuppressionStore = createRequestedNoiseSuppressionStore();
 export const enableCameraSceneVisibilityStore = createEnableCameraSceneVisibilityStore();
 
 /**
@@ -254,12 +267,14 @@ export const videoConstraintStore = derived(
 /**
  * A store that contains video constraints.
  */
-export const audioConstraintStore = derived(requestedMicrophoneDeviceIdStore, ($microphoneDeviceIdStore) => {
+export const audioConstraintStore = derived(
+    [requestedMicrophoneDeviceIdStore, requestedNoiseSuppressionStore],
+    ([$microphoneDeviceIdStore, $noiseSuppression]) => {
     let constraints = {
         //TODO: make these values configurable in the game settings menu and store them in localstorage
         autoGainControl: true,
         echoCancellation: true,
-        noiseSuppression: true,
+        noiseSuppression: $noiseSuppression,
     } as boolean | MediaTrackConstraints;
 
     if (typeof constraints === "boolean") {

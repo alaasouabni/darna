@@ -57,6 +57,7 @@ const menu: BaseTranslation = {
         ignoreFollowRequest: "Ignore requests to follow other users",
         proximityDiscussionVolume: "Proximity discussion volume",
         blockAudio: "Block ambient sounds and music",
+        noiseSuppression: "Noise suppression",
         disableAnimations: "Disable map animations",
         bubbleSound: "Bubble sound",
         bubbleSoundOptions: {

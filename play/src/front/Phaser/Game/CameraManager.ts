@@ -97,6 +97,14 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private explorerFocusOn: { x: number; y: number } = { x: 0, y: 0 };
     // If set, the camera will move toward this target.
     private explorerFocusOnTarget: { x: number; y: number; zoom: number } | undefined;
+    private zoomAnchor:
+        | {
+              screenX: number;
+              screenY: number;
+              worldX: number;
+              worldY: number;
+          }
+        | undefined;
     private focusTargetSpeed = 0.2;
 
     // The tween for the camera offset
@@ -138,12 +146,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             this.animationInProgress = false;
         });
 
-        // Set zoom out to the maximum possible value
-        const targetZoomModifier = this.waScaleManager.getTargetZoomModifierFor(
-            this.mapSize.width,
-            this.mapSize.height
-        );
-        this.waScaleManager.maxZoomOut = targetZoomModifier;
+        // Set zoom out to the maximum possible value (fit-to-map)
+        this.refreshZoomBounds();
         this.targetZoomModifier = undefined;
     }
 
@@ -527,20 +531,24 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     // Create function to define the camera on exploration mode. The camera can be moved anywhere on the map. The camera is not locked on the player. The camera can be zoomed in and out. The camera can be moved with the mouse. The camera can be moved with the keyboard. The camera can be moved with the touchpad.
-    public setExplorationMode(): void {
+    public setExplorationMode(allowOutsideMap = true): void {
         this.cameraLocked = false;
         //this.stopFollow();
         this.setCameraMode(CameraMode.Exploration);
 
         this.camera.setFollowOffset(0, 0);
 
-        this.camera.setBounds(
-            -this.mapSize.width,
-            -this.mapSize.height,
-            this.mapSize.width * 3,
-            this.mapSize.height * 3,
-            false
-        );
+        if (allowOutsideMap) {
+            this.camera.setBounds(
+                -this.mapSize.width,
+                -this.mapSize.height,
+                this.mapSize.width * 3,
+                this.mapSize.height * 3,
+                false
+            );
+        } else {
+            this.camera.setBounds(0, 0, this.mapSize.width, this.mapSize.height);
+        }
 
         this.explorerFocusOn = {
             x: this.camera.scrollX + this.camera.width / 2,
@@ -555,11 +563,16 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         //this.waScaleManager.maxZoomOut = targetZoomModifier;
     }
 
+    public refreshZoomBounds(): void {
+        this.waScaleManager.maxZoomOut = this.getFitZoomModifier();
+    }
+
+    private getFitZoomModifier(): number {
+        return this.waScaleManager.getTargetZoomModifierFor(this.mapSize.width, this.mapSize.height);
+    }
+
     public triggerMaxZoomOutAnimation(): void {
-        const targetZoomModifier = this.waScaleManager.getTargetZoomModifierFor(
-            this.mapSize.width,
-            this.mapSize.height
-        );
+        const targetZoomModifier = this.getFitZoomModifier();
 
         this.startFollowTween?.stop();
         this.startFollowTween = undefined;
@@ -598,6 +611,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
      * we break the wall for 10 seconds.
      */
     public zoomByFactor(zoomFactor: number, smooth: boolean): void {
+        // Keep zoom-out clamped to map bounds (avoid blank space around the map)
+        this.refreshZoomBounds();
+        const fitZoomModifier = this.getFitZoomModifier();
+
         const wallBroken = Date.now() - this.wallDownDate < 10000 || this.enableResistanceWall === false;
         if (
             this.isBetween(
@@ -626,10 +643,15 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             }
         }
 
+        const targetZoom = this.waScaleManager.zoomModifier * zoomFactor;
+        const clampedZoom = Math.max(targetZoom, fitZoomModifier);
+
         if (!smooth) {
-            waScaleManager.setZoomModifier(this.waScaleManager.zoomModifier * zoomFactor, this.camera);
+            waScaleManager.setZoomModifier(clampedZoom, this.camera);
+            this.applyZoomAnchor();
+            this.clearZoomAnchor();
         } else {
-            this.animateToZoomLevel(this.waScaleManager.zoomModifier * zoomFactor);
+            this.animateToZoomLevel(clampedZoom);
         }
 
         if (this.animationInProgress) {
@@ -767,11 +789,14 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             this.explorerFocusOn.y = y;
         }
 
+        this.applyZoomAnchor();
+
         if (
             this.cameraSpeed === undefined &&
             this.targetZoomModifier === undefined &&
             this.explorerFocusOnTarget === undefined
         ) {
+            this.clearZoomAnchor();
             this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.animateCallback);
             this.targetReachInProgress = false;
         }
@@ -933,5 +958,46 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
         this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
         this.scene.markDirty();
+    }
+
+    adjustCameraAnchor(deltaX: number, deltaY: number): void {
+        if (this.cameraMode === CameraMode.Exploration) {
+            this.scrollCamera(deltaX, deltaY);
+            return;
+        }
+
+        if (this.camera.followTarget) {
+            this.camera.setFollowOffset(
+                this.camera.followOffset.x + deltaX,
+                this.camera.followOffset.y + deltaY
+            );
+            this.scene.markDirty();
+            return;
+        }
+
+        this.camera.scrollX += deltaX;
+        this.camera.scrollY += deltaY;
+        this.scene.markDirty();
+    }
+
+    setZoomAnchor(anchor: { screenX: number; screenY: number; worldX: number; worldY: number } | undefined): void {
+        this.zoomAnchor = anchor;
+    }
+
+    clearZoomAnchor(): void {
+        this.zoomAnchor = undefined;
+    }
+
+    private applyZoomAnchor(): void {
+        if (!this.zoomAnchor) {
+            return;
+        }
+        const { screenX, screenY, worldX, worldY } = this.zoomAnchor;
+        const current = this.camera.getWorldPoint(screenX, screenY);
+        const deltaX = worldX - current.x;
+        const deltaY = worldY - current.y;
+        if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
+            this.adjustCameraAnchor(deltaX, deltaY);
+        }
     }
 }

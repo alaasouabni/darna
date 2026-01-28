@@ -29,6 +29,7 @@ import { MatrixChatConnection } from "../../Chat/Connection/Matrix/MatrixChatCon
 import { VoidChatConnection } from "../../Chat/Connection/VoidChatConnection";
 import { loginTokenErrorStore, isMatrixChatEnabledStore } from "../../Stores/ChatStore";
 import { initializeChatVisibilitySubscription } from "../../Chat/Stores/ChatStore";
+import { urlManager } from "../../Url/UrlManager";
 import { GameScene } from "./GameScene";
 /**
  * This class should be responsible for any scene starting/stopping
@@ -149,7 +150,10 @@ export class GameManager {
         const gameIndex = this.scenePlugin.getIndex(roomID);
         if (gameIndex === -1) {
             const game: Phaser.Scene = new GameScene(room);
-            this.scenePlugin.add(roomID, game, false);
+            const startPositionName = urlManager.getStartPositionNameFromUrl();
+            const initPosition =
+                startPositionName === undefined ? localUserStore.getLastRoomPosition(room.key) : undefined;
+            this.scenePlugin.add(roomID, game, false, { initPosition });
         }
     }
 

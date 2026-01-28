@@ -8,6 +8,7 @@ import Mustache from "mustache";
 import type { Application } from "express";
 import Debug from "debug";
 import type { AuthTokenData } from "../services/JWTTokenManager";
+import type { FetchMemberDataByUuidResponse } from "../services/AdminApi";
 import { jwtTokenManager } from "../services/JWTTokenManager";
 import { openIDClient } from "../services/OpenIDClient";
 import { DISABLE_ANONYMOUS, FRONT_URL, MATRIX_PUBLIC_URI, PUSHER_URL } from "../enums/EnvironmentVariable";
@@ -193,31 +194,93 @@ export class AuthenticateController extends BaseHttpController {
             }
             try {
                 const authTokenData: AuthTokenData = jwtTokenManager.verifyJWTToken(token, false);
+                let accessToken = authTokenData.accessToken;
+                let refreshToken = authTokenData.refreshToken;
+                let refreshedAuthToken = token;
+
+                const isInvalidGrant = (err: unknown): boolean => {
+                    if (!err || typeof err !== "object") return false;
+                    const error = err as { error?: string; error_description?: string; message?: string };
+                    return (
+                        error.error === "invalid_grant" ||
+                        (error.error_description?.toLowerCase().includes("not active") ?? false) ||
+                        (error.message?.toLowerCase().includes("invalid_grant") ?? false)
+                    );
+                };
+
+                const refreshAccessToken = async () => {
+                    if (!refreshToken) {
+                        throw new JsonWebTokenError("Invalid token");
+                    }
+                    let refreshed;
+                    try {
+                        refreshed = await openIDClient.refreshAccessToken(refreshToken);
+                    } catch (err) {
+                        if (isInvalidGrant(err)) {
+                            throw new JsonWebTokenError("Invalid token");
+                        }
+                        throw err;
+                    }
+                    if (!refreshed.access_token) {
+                        throw new JsonWebTokenError("Invalid token");
+                    }
+                    accessToken = refreshed.access_token;
+                    refreshToken = refreshed.refresh_token ?? refreshToken;
+                    refreshedAuthToken = jwtTokenManager.createAuthToken(
+                        authTokenData.identifier,
+                        accessToken,
+                        authTokenData.username,
+                        authTokenData.locale,
+                        authTokenData.tags,
+                        authTokenData.matrixUserId,
+                        refreshToken
+                    );
+                };
 
                 //Get user data from Admin Back Office
                 //This is very important to create User Local in LocalStorage in WorkAdventure
-                const resUserData = await adminService.fetchMemberDataByUuid(
-                    authTokenData.identifier,
-                    authTokenData.accessToken,
-                    playUri,
-                    IPAddress,
-                    localStorageCharacterTextureIds ?? [],
-                    localStorageCompanionTextureId,
-                    req.header("accept-language"),
-                    authTokenData.tags,
-                    chatID
-                );
+                let resUserData: FetchMemberDataByUuidResponse;
+                try {
+                    resUserData = await adminService.fetchMemberDataByUuid(
+                        authTokenData.identifier,
+                        accessToken,
+                        playUri,
+                        IPAddress,
+                        localStorageCharacterTextureIds ?? [],
+                        localStorageCompanionTextureId,
+                        req.header("accept-language"),
+                        authTokenData.tags,
+                        chatID
+                    );
+                } catch (err) {
+                    if (err instanceof JsonWebTokenError && refreshToken) {
+                        await refreshAccessToken();
+                        resUserData = await adminService.fetchMemberDataByUuid(
+                            authTokenData.identifier,
+                            accessToken,
+                            playUri,
+                            IPAddress,
+                            localStorageCharacterTextureIds ?? [],
+                            localStorageCompanionTextureId,
+                            req.header("accept-language"),
+                            authTokenData.tags,
+                            chatID
+                        );
+                    } else {
+                        throw err;
+                    }
+                }
 
                 if (resUserData.status === "error") {
                     res.json(resUserData);
                     return;
                 }
 
-                if (authTokenData.accessToken == undefined) {
+                if (accessToken == undefined) {
                     //if not nonce and code, anonymous user connected
                     //get data with identifier and return token
                     res.json({
-                        authToken: token,
+                        authToken: refreshedAuthToken,
                         username: authTokenData?.username,
                         locale: authTokenData?.locale,
                         // TODO: replace ... with each property
@@ -229,10 +292,20 @@ export class AuthenticateController extends BaseHttpController {
                 }
 
                 try {
-                    const resCheckTokenAuth = await openIDClient.checkTokenAuth(authTokenData.accessToken);
+                    let resCheckTokenAuth;
+                    try {
+                        resCheckTokenAuth = await openIDClient.checkTokenAuth(accessToken);
+                    } catch (err) {
+                        if (refreshToken) {
+                            await refreshAccessToken();
+                            resCheckTokenAuth = await openIDClient.checkTokenAuth(accessToken);
+                        } else {
+                            throw err;
+                        }
+                    }
                     res.json({
                         username: authTokenData?.username,
-                        authToken: token,
+                        authToken: refreshedAuthToken,
                         locale: authTokenData?.locale,
                         matrixUserId: authTokenData?.matrixUserId,
                         matrixServerUrl: (resCheckTokenAuth.matrix_url as string | undefined) ?? MATRIX_PUBLIC_URI,
@@ -317,7 +390,8 @@ export class AuthenticateController extends BaseHttpController {
                 userInfo?.username,
                 userInfo?.locale,
                 userInfo?.tags,
-                email ? matrixProvider.getBareMatrixIdFromEmail(email) : undefined
+                email ? matrixProvider.getBareMatrixIdFromEmail(email) : undefined,
+                userInfo?.refresh_token
             );
 
             const matrixPublicUri = userInfo.matrix_url ?? MATRIX_PUBLIC_URI;

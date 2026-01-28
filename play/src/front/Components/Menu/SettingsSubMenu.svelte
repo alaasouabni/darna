@@ -19,7 +19,7 @@
         PEER_VIDEO_LOW_BANDWIDTH,
         PEER_VIDEO_RECOMMENDED_BANDWIDTH,
     } from "../../Enum/EnvironmentVariable";
-    import { videoBandwidthStore } from "../../Stores/MediaStore";
+    import { requestedNoiseSuppressionStore, videoBandwidthStore } from "../../Stores/MediaStore";
     import { screenShareBandwidthStore } from "../../Stores/ScreenSharingStore";
     import { volumeProximityDiscussionStore } from "../../Stores/PeerStore";
     import InputSwitch from "../Input/InputSwitch.svelte";
@@ -40,6 +40,7 @@
     let notification: boolean = localUserStore.getNotification();
     let allowPictureInPicture: boolean = localUserStore.getAllowPictureInPicture();
     let blockAudio: boolean = localUserStore.getBlockAudio();
+    let valueNoiseSuppression = localUserStore.getNoiseSuppression();
     let forceCowebsiteTrigger: boolean = localUserStore.getForceCowebsiteTrigger();
     let ignoreFollowRequests: boolean = localUserStore.getIgnoreFollowRequests();
     let decreaseAudioPlayerVolumeWhileTalking: boolean = localUserStore.getDecreaseAudioPlayerVolumeWhileTalking();
@@ -155,6 +156,10 @@
             audioManagerVisibilityStore.set("disabledBySettings");
         }
         localUserStore.setBlockAudio(blockAudio);
+    }
+
+    function changeNoiseSuppression() {
+        requestedNoiseSuppressionStore.set(valueNoiseSuppression);
     }
 
     function changeForceCowebsiteTrigger() {
@@ -534,6 +539,14 @@
                 bind:value={blockAudio}
                 onChange={changeBlockAudio}
                 label={$LL.menu.settings.blockAudio()}
+            />
+        </div>
+        <div class="flex cursor-pointer items-center relative m-4">
+            <InputSwitch
+                id="noise-suppression-toggle"
+                bind:value={valueNoiseSuppression}
+                onChange={changeNoiseSuppression}
+                label={$LL.menu.settings.noiseSuppression()}
             />
         </div>
 

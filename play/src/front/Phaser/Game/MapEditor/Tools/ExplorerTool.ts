@@ -76,7 +76,7 @@ export class ExplorerTool implements MapEditorTool {
         deltaY: number,
         deltaZ: number
     ) => {
-        this.scene.handleMouseWheel(deltaY);
+        this.scene.handleMouseWheel(deltaY, pointer);
     };
     private pointerDownHandler = (pointer: Phaser.Input.Pointer) => {
         // The motion factor is used to smooth out the velocity of the camera.

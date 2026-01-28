@@ -4,7 +4,7 @@ import { Player } from "../Player/Player";
 import { RemotePlayer } from "../Entity/RemotePlayer";
 import type { UserInputHandlerInterface } from "../../Interfaces/UserInputHandlerInterface";
 import type { GameScene } from "../Game/GameScene";
-import { mapEditorModeStore } from "../../Stores/MapEditorStore";
+import { mapEditorModeStore, mapExplorationModeStore } from "../../Stores/MapEditorStore";
 import { isActivatable } from "../Game/ActivatableInterface";
 import { mapManagerActivated } from "../../Stores/MenuStore";
 import { displayEmote, isEmoteIndex } from "../../Stores/EmoteStore";
@@ -21,6 +21,13 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
     private gameScene: GameScene;
     private controlKeyisPressed: boolean = false;
     public shortcuts: Shortcut[] = [];
+    private isDraggingCamera = false;
+    private dragMoved = false;
+    private dragStart?: { x: number; y: number };
+    private dragLast?: { x: number; y: number };
+    private readonly DRAG_THRESHOLD = 6;
+    private spaceKeyIsPressed = false;
+    private panUsedSinceSpaceDown = false;
 
     constructor(gameScene: GameScene) {
         this.gameScene = gameScene;
@@ -101,6 +108,20 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
     }
 
     public handlePointerUpEvent(pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]): void {
+        if (this.isDraggingCamera) {
+            const didDrag = this.dragMoved;
+            this.isDraggingCamera = false;
+            this.dragMoved = false;
+            this.dragStart = undefined;
+            this.dragLast = undefined;
+            this.gameScene.input.setDefaultCursor("auto");
+
+            if (didDrag) {
+                this.gameScene.sendViewportToServer();
+                return;
+            }
+        }
+
         if (pointer.wasTouch || pointer.leftButtonReleased()) {
             for (const object of gameObjects) {
                 if (isActivatable(object)) {
@@ -142,9 +163,58 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
             });
     }
 
-    public handlePointerDownEvent(pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]): void {}
+    public handlePointerDownEvent(pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]): void {
+        if (pointer.wasTouch || !pointer.leftButtonDown()) {
+            return;
+        }
+        if (!this.gameScene.userInputManager.isControlsEnabled) {
+            return;
+        }
+        if (get(mapEditorModeStore) || get(mapExplorationModeStore)) {
+            return;
+        }
+        if (this.gameScene.getCameraManager().isCameraLocked()) {
+            return;
+        }
 
-    public handlePointerMoveEvent(pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]): void {}
+        for (const object of gameObjects) {
+            if (object instanceof Player || object instanceof RemotePlayer || isActivatable(object)) {
+                return;
+            }
+        }
+
+        this.isDraggingCamera = true;
+        this.dragMoved = false;
+        this.dragStart = { x: pointer.x, y: pointer.y };
+        this.dragLast = { x: pointer.x, y: pointer.y };
+        this.gameScene.input.setDefaultCursor("grab");
+    }
+
+    public handlePointerMoveEvent(pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]): void {
+        if (!this.isDraggingCamera || !pointer.isDown || !this.dragStart || !this.dragLast) {
+            return;
+        }
+
+        if (!this.dragMoved) {
+            const distance = Math.hypot(pointer.x - this.dragStart.x, pointer.y - this.dragStart.y);
+            if (distance < this.DRAG_THRESHOLD) {
+                return;
+            }
+            this.dragMoved = true;
+            this.panUsedSinceSpaceDown = true;
+            this.gameScene.getCameraManager().setExplorationMode(false);
+            this.gameScene.input.setDefaultCursor("grabbing");
+        }
+
+        this.gameScene
+            .getCameraManager()
+            .scrollCamera(
+                (this.dragLast.x - pointer.x) / this.gameScene.getCameraManager().getCamera().zoom,
+                (this.dragLast.y - pointer.y) / this.gameScene.getCameraManager().getCamera().zoom
+            );
+        this.dragLast = { x: pointer.x, y: pointer.y };
+        this.gameScene.sendViewportToServer();
+    }
 
     private handleKeyC() {
         if (!this.gameScene.room.isChatEnabled) return;
@@ -192,6 +262,10 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
                 this.gameScene.CurrentPlayer.rotate();
                 break;
             }
+            case "KeyF": {
+                this.gameScene.getCameraManager().startFollowPlayer(this.gameScene.CurrentPlayer, 500);
+                break;
+            }
             case "KeyC":
                 this.handleKeyC();
                 break;
@@ -234,6 +308,11 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
                 }
                 break;
             }
+            case "Space": {
+                this.spaceKeyIsPressed = true;
+                this.panUsedSinceSpaceDown = false;
+                break;
+            }
             default: {
                 break;
             }
@@ -272,7 +351,11 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
         switch (event.key) {
             // SPACE
             case " ": {
-                this.handleActivableEntity();
+                this.spaceKeyIsPressed = false;
+                if (!this.panUsedSinceSpaceDown) {
+                    this.handleActivableEntity();
+                }
+                this.panUsedSinceSpaceDown = false;
                 break;
             }
             case "Control": {

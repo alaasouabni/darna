@@ -63,6 +63,7 @@ const menu: BaseTranslation = {
             ding: "Ding",
             wobble: "Wobble",
         },
+        noiseSuppression: "Noise suppression",
     },
     invite: {
         description: "Compartilhe o link da sala!",

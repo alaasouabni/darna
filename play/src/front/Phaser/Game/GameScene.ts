@@ -350,6 +350,7 @@ export class GameScene extends DirtyScene {
     private playersMovementEventDispatcher = new IframeEventDispatcher();
     private remotePlayersRepository = new RemotePlayersRepository();
     private throttledSendViewportToServer!: throttle<() => void>;
+    private throttledSaveLastPosition!: throttle<(position: PositionInterface) => void>;
     private playersDebugLogAlreadyDisplayed = false;
     private hideTimeout: ReturnType<typeof setTimeout> | undefined;
     // The promise that will resolve to the current player textures. This will be available only after connection is established.
@@ -681,6 +682,9 @@ export class GameScene extends DirtyScene {
 
         this.throttledSendViewportToServer = throttle(200, () => {
             this.sendViewportToServer();
+        });
+        this.throttledSaveLastPosition = throttle(1000, (position: PositionInterface) => {
+            localUserStore.setLastRoomPosition(this._room.key, position);
         });
 
         //permit to set bound collision
@@ -1448,6 +1452,7 @@ export class GameScene extends DirtyScene {
     public onResize(): void {
         super.onResize();
         this.reposition(true);
+        this.cameraManager.refreshZoomBounds();
 
         this.throttledSendViewportToServer();
     }
@@ -3503,6 +3508,7 @@ ${escapedMessage}
             cb(event);
         }
         this.hasMovedThisFrame = true;
+        this.throttledSaveLastPosition(event);
     }
 
     private createCollisionWithPlayer() {
@@ -3535,6 +3541,7 @@ ${escapedMessage}
             }
             //});
         }
+
     }
 
     private createCurrentPlayer() {
@@ -3572,6 +3579,10 @@ ${escapedMessage}
 
         //create collision
         this.createCollisionWithPlayer();
+        localUserStore.setLastRoomPosition(this._room.key, {
+            x: this.CurrentPlayer.x,
+            y: this.CurrentPlayer.y,
+        });
     }
 
     private pushPlayerPosition(event: HasPlayerMovedInterface) {

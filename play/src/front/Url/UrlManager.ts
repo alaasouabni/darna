@@ -71,14 +71,21 @@ class UrlManager {
     }
 
     public getHashParameters(): Record<string, string> {
-        return window.location.hash
-            .substring(1)
-            .split("&")
-            .reduce((res: Record<string, string>, item: string) => {
-                const parts = item.split("=");
-                res[parts[0]] = parts[1];
+        const hash = window.location.hash.substring(1);
+        if (!hash) {
+            return {};
+        }
+        return hash.split("&").reduce((res: Record<string, string>, item: string) => {
+            if (!item) {
                 return res;
-            }, {});
+            }
+            const parts = item.split("=");
+            if (!parts[0]) {
+                return res;
+            }
+            res[parts[0]] = parts[1];
+            return res;
+        }, {});
     }
 
     pushStartLayerNameToUrl(startLayerName: string): void {

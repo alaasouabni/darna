@@ -168,7 +168,7 @@ export abstract class Character extends Container implements OutlineableInterfac
 
             // Todo: Replace the font family with a better one
             // Use larger font size for non-Latin characters (Arabic, CJK, etc.) for better readability
-            const fontSize = StringUtils.containsNonLatinCharacters(name) ? "11px" : "8px";
+            const fontSize = StringUtils.containsNonLatinCharacters(name) ? "9px" : "7px";
             this.playerNameText = new Text(scene, 0, playerNameY, name, {
                 fontFamily: '"Press Start 2P"',
                 fontSize,

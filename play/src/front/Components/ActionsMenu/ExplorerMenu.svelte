@@ -9,15 +9,15 @@
     function zoomIn() {
         analyticsClient.clickToZoomIn();
 
-        const cameraManager = gameManager.getCurrentGameScene().getCameraManager();
-        cameraManager.zoomByFactor(1.2, true);
+        const scene = gameManager.getCurrentGameScene();
+        scene.zoomByFactor(1.2, true);
     }
 
     function zoomOut() {
         analyticsClient.clickToZoomOut();
 
-        const cameraManager = gameManager.getCurrentGameScene().getCameraManager();
-        cameraManager.zoomByFactor(0.8, true);
+        const scene = gameManager.getCurrentGameScene();
+        scene.zoomByFactor(0.8, true);
     }
 
     function openMapExplorer() {

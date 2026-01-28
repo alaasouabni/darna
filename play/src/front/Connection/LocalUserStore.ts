@@ -5,6 +5,7 @@ import { arrayEmoji } from "../Stores/Utils/emojiSchema";
 import type { RequestedStatus } from "../Rules/StatusRules/statusRules";
 import { requestedStatusFactory } from "../Rules/StatusRules/StatusFactory/RequestedStatusFactory";
 import { INITIAL_SIDEBAR_WIDTH } from "../Stores/ChatStore";
+import type { PositionInterface } from "./ConnexionModels";
 import type { LocalUser } from "./LocalUser";
 import { areCharacterTexturesValid, isUserNameValid } from "./LocalUserUtils";
 
@@ -25,6 +26,7 @@ const ignoreFollowRequests = "ignoreFollowRequests";
 const decreaseAudioPlayerVolumeWhileTalking = "decreaseAudioPlayerVolumeWhileTalking";
 const disableAnimations = "disableAnimations";
 const lastRoomUrl = "lastRoomUrl";
+const lastRoomPositionKey = "lastRoomPosition";
 const authToken = "authToken";
 const notification = "notificationPermission";
 const allowPictureInPicture = "allowPictureInPicture";
@@ -51,6 +53,7 @@ const cameraContainerHeightKey = "cameraContainerHeight";
 const chatSideBarWidthKey = "chatSideBarWidth";
 const mapEditorSideBarWidthKey = "mapEditorSideBarWidthKey";
 const bubbleSound = "bubbleSound";
+const noiseSuppression = "noiseSuppression";
 
 const INITIAL_MAP_EDITOR_SIDEBAR_WIDTH = 448;
 
@@ -239,6 +242,39 @@ class LocalUserStore {
         return localStorage.getItem(lastRoomUrl) ?? window.location.protocol + "//" + window.location.host + "/";
     }
 
+    setLastRoomPosition(roomKey: string, position: PositionInterface): void {
+        try {
+            const raw = localStorage.getItem(lastRoomPositionKey);
+            const data = raw ? (JSON.parse(raw) as Record<string, { x: number; y: number; t: number }>) : {};
+            data[roomKey] = {
+                x: Math.round(position.x),
+                y: Math.round(position.y),
+                t: Date.now(),
+            };
+            localStorage.setItem(lastRoomPositionKey, JSON.stringify(data));
+        } catch (error) {
+            console.warn("Error while saving last room position:", error);
+        }
+    }
+
+    getLastRoomPosition(roomKey: string): PositionInterface | undefined {
+        try {
+            const raw = localStorage.getItem(lastRoomPositionKey);
+            if (!raw) {
+                return undefined;
+            }
+            const data = JSON.parse(raw) as Record<string, { x: number; y: number; t: number }>;
+            const entry = data?.[roomKey];
+            if (!entry || !Number.isFinite(entry.x) || !Number.isFinite(entry.y)) {
+                return undefined;
+            }
+            return { x: Number(entry.x), y: Number(entry.y) };
+        } catch (error) {
+            console.warn("Error while reading last room position:", error);
+            return undefined;
+        }
+    }
+
     getLastRoomUrlCacheApi(): Promise<string | undefined> {
         if (!("caches" in window)) {
             return Promise.resolve(undefined);
@@ -404,6 +440,17 @@ class LocalUserStore {
             localStorage.setItem(microphonePrivacySettings, "true");
         }
         return localStorage.getItem(microphonePrivacySettings) === "true";
+    }
+
+    setNoiseSuppression(value: boolean): void {
+        localStorage.setItem(noiseSuppression, value.toString());
+    }
+
+    getNoiseSuppression(): boolean {
+        if (localStorage.getItem(noiseSuppression) == null) {
+            localStorage.setItem(noiseSuppression, "true");
+        }
+        return localStorage.getItem(noiseSuppression) === "true";
     }
 
     getAllUserProperties(context: string): Map<string, PlayerVariable> {
