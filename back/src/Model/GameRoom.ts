@@ -329,13 +329,16 @@ export class GameRoom implements BrothersFinder {
 
     updatePlayerDetails(user: User, playerDetailsMessage: SetPlayerDetailsMessage) {
         user.updateDetails(playerDetailsMessage);
-        if (user.group !== undefined && user.silent) {
+        if (user.group !== undefined && (user.silent || user.isInPersonalArea())) {
             this.leaveGroup(user);
         }
     }
 
     private updateUserGroup(user: User): void {
-        if (user.silent) {
+        if (user.silent || user.isInPersonalArea()) {
+            if (user.group !== undefined) {
+                this.leaveGroup(user);
+            }
             return;
         }
 
@@ -514,6 +517,9 @@ export class GameRoom implements BrothersFinder {
                 return;
             }
             if (currentUser.silent) {
+                return;
+            }
+            if (currentUser.isInPersonalArea()) {
                 return;
             }
 

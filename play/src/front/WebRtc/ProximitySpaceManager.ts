@@ -4,16 +4,58 @@ import * as Sentry from "@sentry/svelte";
 import { AbortError } from "@workadventure/shared-utils/src/Abort/AbortError";
 import type { RoomConnection } from "../Connection/RoomConnection";
 import type { ProximityChatRoom } from "../Chat/Connection/Proximity/ProximityChatRoom";
+import { personalAreaSpaceNameStore } from "../Stores/GameStore";
+import { get } from "svelte/store";
 
 const debug = Debug("ProximitySpaceManager");
 
 export class ProximitySpaceManager {
     private joinSpaceRequestMessageSubscription: Subscription;
     private leaveSpaceRequestMessageSubscription: Subscription;
+    private personalAreaSubscription: (() => void) | undefined;
+    private pendingJoinRequest:
+        | {
+              spaceName: string;
+              propertiesToSync: string[];
+          }
+        | undefined;
+    private isInPersonalArea = false;
+    private isResuming = false;
 
     public constructor(roomConnection: RoomConnection, private proximityChatRoom: ProximityChatRoom) {
+        this.isInPersonalArea = get(personalAreaSpaceNameStore) !== null;
+        this.personalAreaSubscription = personalAreaSpaceNameStore.subscribe((spaceName) => {
+            const wasInPersonalArea = this.isInPersonalArea;
+            this.isInPersonalArea = spaceName !== null;
+
+            if (wasInPersonalArea && !this.isInPersonalArea) {
+                const pending = this.pendingJoinRequest;
+                this.pendingJoinRequest = undefined;
+                if (pending) {
+                    this.isResuming = true;
+                    this.proximityChatRoom
+                        .joinSpace(pending.spaceName, pending.propertiesToSync)
+                        .catch((e) => {
+                            if (e instanceof AbortError) {
+                                debug("Join space aborted after personal area", e);
+                                return;
+                            }
+                            console.error(e);
+                            Sentry.captureException(e);
+                        })
+                        .finally(() => {
+                            this.isResuming = false;
+                        });
+                }
+            }
+        });
+
         this.joinSpaceRequestMessageSubscription = roomConnection.joinSpaceRequestMessage.subscribe(
             ({ spaceName, propertiesToSync }) => {
+                if (this.isInPersonalArea || this.isResuming) {
+                    this.pendingJoinRequest = { spaceName, propertiesToSync };
+                    return;
+                }
                 this.proximityChatRoom.joinSpace(spaceName, propertiesToSync).catch((e) => {
                     if (e instanceof AbortError) {
                         debug("Join space aborted. The user left the space before finalizing the join", e);
@@ -27,6 +69,12 @@ export class ProximitySpaceManager {
 
         this.leaveSpaceRequestMessageSubscription = roomConnection.leaveSpaceRequestMessage.subscribe(
             ({ spaceName }) => {
+                if (this.isInPersonalArea || this.isResuming) {
+                    if (this.pendingJoinRequest?.spaceName === spaceName) {
+                        this.pendingJoinRequest = undefined;
+                    }
+                    return;
+                }
                 this.proximityChatRoom.leaveSpace(spaceName).catch((e) => {
                     console.error("Error while leaving space", e);
                     Sentry.captureException(e);
@@ -38,5 +86,6 @@ export class ProximitySpaceManager {
     public destroy() {
         this.joinSpaceRequestMessageSubscription.unsubscribe();
         this.leaveSpaceRequestMessageSubscription.unsubscribe();
+        this.personalAreaSubscription?.();
     }
 }

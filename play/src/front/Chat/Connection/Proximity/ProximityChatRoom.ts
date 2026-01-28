@@ -475,6 +475,10 @@ export class ProximityChatRoom implements ChatRoom {
         this.name.set(displayName);
     }
 
+    public getCurrentSpaceName(): string | null {
+        return this._space?.getName() ?? null;
+    }
+
     public async joinSpace(
         spaceName: string,
         propertiesToSync: string[],

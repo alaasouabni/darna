@@ -302,6 +302,19 @@ export class User implements Movable, CustomJsonReplacerInterface {
         return this.variables;
     }
 
+    public isInPersonalArea(): boolean {
+        const variable = this.variables.getVariables().get("wa.personalAreaActive");
+        if (!variable) return false;
+        const raw = variable.value;
+        if (raw === "true") return true;
+        if (raw === "false") return false;
+        try {
+            return Boolean(JSON.parse(raw));
+        } catch {
+            return raw === "1";
+        }
+    }
+
     private updateDataUserSameUUID(
         setVariable: SetPlayerVariableMessage,
         details: SetPlayerDetailsMessage | undefined,

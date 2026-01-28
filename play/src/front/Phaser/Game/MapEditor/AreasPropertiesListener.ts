@@ -69,6 +69,7 @@ import type { GameScene } from "../GameScene";
 import { mapEditorAskToClaimPersonalAreaStore } from "../../../Stores/MapEditorStore";
 import {
     canRequestVisitCardsStore,
+    personalAreaSpaceNameStore,
     requestVisitCardsStore,
     selectedChatIDRemotePlayerStore,
 } from "../../../Stores/GameStore";
@@ -77,6 +78,8 @@ import type { MessageUserJoined } from "../../../Connection/ConnexionModels";
 import { navChat } from "../../../Chat/Stores/ChatStore";
 import type { Area } from "../../Entity/Area";
 import { extensionModuleStore } from "../../../Stores/GameSceneStore";
+
+const PERSONAL_AREA_ACTIVE_VARIABLE = "wa.personalAreaActive";
 import type { ChatRoom } from "../../../Chat/Connection/ChatConnection";
 import { userIsConnected } from "../../../Stores/MenuStore";
 import { popupStore } from "../../../Stores/PopupStore";
@@ -101,6 +104,7 @@ export class AreasPropertiesListener {
     private _requestedCameraStateSubscription: Unsubscriber | undefined;
 
     private actionTriggerCallback: Map<string, () => void> = new Map<string, () => void>();
+    private personalAreaSpaceName: string | null = null;
 
     constructor(scene: GameScene) {
         this.scene = scene;
@@ -955,6 +959,12 @@ export class AreasPropertiesListener {
         areaData: AreaData,
         area?: Area
     ): void {
+        this.setPersonalAreaActive(true);
+        this.joinPersonalAreaSpace(areaData).catch((error) => {
+            console.error("Error while joining personal area space", error);
+            Sentry.captureException(error);
+        });
+
         if (property.ownerId !== null) {
             canRequestVisitCardsStore.set(true);
             this.displayPersonalAreaOwnerVisitCard(property.ownerId, areaData, area);
@@ -1141,12 +1151,77 @@ export class AreasPropertiesListener {
     private handlePersonalAreaPropertyOnLeave(area?: Area): void {
         // Reset this store to indicate that the user is no longer in the personal area and cannot request or display their business card.
         canRequestVisitCardsStore.set(false);
+        this.setPersonalAreaActive(false);
 
         mapEditorAskToClaimPersonalAreaStore.set(undefined);
         if (get(requestVisitCardsStore)) {
             requestVisitCardsStore.set(null);
         }
         area?.unHighLightArea();
+
+        this.leavePersonalAreaSpace().catch((error) => {
+            console.error("Error while leaving personal area space", error);
+            Sentry.captureException(error);
+        });
+    }
+
+    private getPersonalAreaSpaceName(areaData: AreaData): string {
+        return Jitsi.slugifyJitsiRoomName(`personal-area-${areaData.id}`, this.scene.roomUrl).trim();
+    }
+
+    private async joinPersonalAreaSpace(areaData: AreaData): Promise<void> {
+        const spaceName = this.getPersonalAreaSpaceName(areaData);
+        if (this.personalAreaSpaceName === spaceName) return;
+
+        const proximityRoom = this.scene.proximityChatRoom;
+        const displayName =
+            areaData.name && areaData.name.trim().length > 0 ? areaData.name : get(LL).chat.proximity();
+
+        this.personalAreaSpaceName = spaceName;
+        personalAreaSpaceNameStore.set(spaceName);
+
+        try {
+            const currentSpaceName = proximityRoom.getCurrentSpaceName();
+            if (currentSpaceName && currentSpaceName !== spaceName) {
+                await proximityRoom.leaveSpace(currentSpaceName, true);
+            }
+
+            proximityRoom.setDisplayName(displayName);
+            await proximityRoom.joinSpace(
+                spaceName,
+                ["cameraState", "microphoneState", "screenShareState"],
+                true,
+                FilterType.ALL_USERS
+            );
+        } catch (error) {
+            this.personalAreaSpaceName = null;
+            personalAreaSpaceNameStore.set(null);
+            throw error;
+        }
+    }
+
+    private async leavePersonalAreaSpace(): Promise<void> {
+        if (!this.personalAreaSpaceName) return;
+
+        const spaceName = this.personalAreaSpaceName;
+        this.personalAreaSpaceName = null;
+        personalAreaSpaceNameStore.set(null);
+
+        const proximityRoom = this.scene.proximityChatRoom;
+        proximityRoom.setDisplayName(get(LL).chat.proximity());
+        await proximityRoom.leaveSpace(spaceName, true);
+    }
+
+    private setPersonalAreaActive(active: boolean): void {
+        const connection = this.scene.connection;
+        if (!connection) return;
+        connection.emitPlayerSetVariable({
+            key: PERSONAL_AREA_ACTIVE_VARIABLE,
+            value: active,
+            public: false,
+            persist: false,
+            scope: "room",
+        });
     }
 
     private async handleLivekitRoomPropertyOnLeave(property: LivekitRoomPropertyData): Promise<void> {
