@@ -178,6 +178,9 @@ const actionbar: BaseTranslation = {
     personalDesk: {
         label: "Walk to my desk",
         unclaim: "Unclaim my desk",
+        lock: "Lock my desk",
+        unlock: "Unlock my desk",
+        lockedWarning: "This desk is locked.",
         errorNoUser: "Unable to find your user information",
         errorNotFound: "You don't have a personal desk yet",
         errorMoving: "Unable to reach your personal desk",

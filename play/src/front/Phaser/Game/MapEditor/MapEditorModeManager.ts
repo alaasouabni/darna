@@ -570,4 +570,35 @@ export class MapEditorModeManager {
             )
         );
     }
+
+    public async setPersonalAreaLock(areaData: AreaData, locked: boolean): Promise<void> {
+        const gameMapArea = this.getScene().getGameMap().getGameMapAreas()?.getArea(areaData.id);
+        const areaSource = gameMapArea ? structuredClone(gameMapArea) : structuredClone(areaData);
+        const property = areaSource.properties.find((property) => property.type === "personalAreaPropertyData");
+        if (!property) {
+            console.error("No area property data");
+            return;
+        }
+        const userUUID = localUserStore.getLocalUser()?.uuid;
+        if (!userUUID || property.ownerId !== userUUID) {
+            console.error("Only the personal area owner can change the lock");
+            return;
+        }
+
+        const oldAreaData = structuredClone(areaSource);
+        merge(property, {
+            locked,
+        });
+
+        await this.executeCommand(
+            new UpdateAreaFrontCommand(
+                this.getScene().getGameMap(),
+                areaSource,
+                undefined,
+                oldAreaData,
+                this.editorTools.AreaEditor as AreaEditorTool,
+                this.scene.getGameMapFrontWrapper()
+            )
+        );
+    }
 }

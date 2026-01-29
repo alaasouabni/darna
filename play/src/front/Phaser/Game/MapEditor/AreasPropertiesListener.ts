@@ -73,6 +73,7 @@ import {
     requestVisitCardsStore,
     selectedChatIDRemotePlayerStore,
 } from "../../../Stores/GameStore";
+import { warningMessageStore } from "../../../Stores/ErrorStore";
 import { isMediaBreakpointUp } from "../../../Utils/BreakpointsUtils";
 import type { MessageUserJoined } from "../../../Connection/ConnexionModels";
 import { navChat } from "../../../Chat/Stores/ChatStore";
@@ -387,8 +388,12 @@ export class AreasPropertiesListener {
             }
             case "personalAreaPropertyData": {
                 newProperty = newProperty as typeof oldProperty;
-                this.handlePersonalAreaPropertyOnLeave();
-                this.handlePersonalAreaPropertyOnEnter(newProperty, area);
+                const isInside = this.isCurrentPlayerInsideArea(area);
+                if (!isInside) {
+                    this.handlePersonalAreaPropertyOnLeave();
+                }
+                this.handlePersonalAreaPropertyOnEnter(newProperty, area, undefined, { skipLockCheck: isInside });
+                this.scene.getGameMapFrontWrapper().recomputeAreasCollisionGrid();
                 break;
             }
             case "matrixRoomPropertyData": {
@@ -957,8 +962,17 @@ export class AreasPropertiesListener {
     private handlePersonalAreaPropertyOnEnter(
         property: PersonalAreaPropertyData,
         areaData: AreaData,
-        area?: Area
+        area?: Area,
+        options?: { skipLockCheck?: boolean }
     ): void {
+        const userUUID = localUserStore.getLocalUser()?.uuid;
+        const isOwner = userUUID !== undefined && property.ownerId === userUUID;
+        if (property.locked && !options?.skipLockCheck && !isOwner) {
+            area?.unHighLightArea();
+            warningMessageStore.addWarningMessage(get(LL).actionbar.personalDesk.lockedWarning(), { closable: true });
+            return;
+        }
+
         this.setPersonalAreaActive(true);
         this.joinPersonalAreaSpace(areaData).catch((error) => {
             console.error("Error while joining personal area space", error);
@@ -971,6 +985,77 @@ export class AreasPropertiesListener {
         } else if (property.accessClaimMode === PersonalAreaAccessClaimMode.enum.dynamic) {
             this.displayPersonalAreaClaimDialogBox(property, areaData, area);
         }
+    }
+
+    private isCurrentPlayerInsideArea(areaData: AreaData): boolean {
+        return this.scene.getGameMapFrontWrapper().isInsideAreaByCoordinates(
+            {
+                x: areaData.x,
+                y: areaData.y,
+                width: areaData.width,
+                height: areaData.height,
+            },
+            { x: this.scene.CurrentPlayer.x, y: this.scene.CurrentPlayer.y }
+        );
+    }
+
+    private teleportOutsidePersonalArea(areaData: AreaData): void {
+        const target = this.getOutsidePersonalAreaPosition(areaData, {
+            x: this.scene.CurrentPlayer.x,
+            y: this.scene.CurrentPlayer.y,
+        });
+        this.scene.CurrentPlayer.teleportTo(target.x, target.y);
+        this.scene.getGameMapFrontWrapper().setPosition(target.x, target.y);
+    }
+
+    private getOutsidePersonalAreaPosition(
+        areaData: AreaData,
+        position: { x: number; y: number }
+    ): { x: number; y: number } {
+        const map = this.scene.getGameMapFrontWrapper().getMap();
+        const tileWidth = map.tilewidth ?? 32;
+        const tileHeight = map.tileheight ?? 32;
+
+        const areaLeft = areaData.x;
+        const areaRight = areaData.x + areaData.width;
+        const areaTop = areaData.y;
+        const areaBottom = areaData.y + areaData.height;
+
+        const distLeft = Math.abs(position.x - areaLeft);
+        const distRight = Math.abs(position.x - areaRight);
+        const distTop = Math.abs(position.y - areaTop);
+        const distBottom = Math.abs(position.y - areaBottom);
+
+        const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+
+        let x = position.x;
+        let y = position.y;
+
+        if (minDist === distLeft) {
+            x = areaLeft - tileWidth;
+            y = this.clamp(position.y, areaTop, areaBottom);
+        } else if (minDist === distRight) {
+            x = areaRight + tileWidth;
+            y = this.clamp(position.y, areaTop, areaBottom);
+        } else if (minDist === distTop) {
+            x = this.clamp(position.x, areaLeft, areaRight);
+            y = areaTop - tileHeight;
+        } else {
+            x = this.clamp(position.x, areaLeft, areaRight);
+            y = areaBottom + tileHeight;
+        }
+
+        const maxX = (map.width ?? 0) * (map.tilewidth ?? 32);
+        const maxY = (map.height ?? 0) * (map.tileheight ?? 32);
+
+        return {
+            x: this.clamp(x, 0, maxX),
+            y: this.clamp(y, 0, maxY),
+        };
+    }
+
+    private clamp(value: number, min: number, max: number): number {
+        return Math.min(Math.max(value, min), max);
     }
 
     private displayPersonalAreaOwnerVisitCard(ownerId: string, areaData: AreaData, area?: Area) {

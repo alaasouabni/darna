@@ -196,6 +196,8 @@ const mapEditor: DeepPartial<Translation["mapEditor"]> = {
                 "Toegangsrechten bepalen wie met het gebied kan interageren. Gebruikers die overeenkomen met een van deze tags kunnen het gebied binnenkomen en objecten binnen het gebied gebruiken.",
         },
         personalAreaPropertyData: {
+            lockedLabel: "Lock area",
+            lockedHelper: "Only the personal area owner can lock or unlock this area.",
             label: "Persoonlijk gebied",
             description:
                 "Gebruikers kunnen persoonlijke gebieden claimen als hun eigen ruimte. Als beheerder kun je het eigendom van een gebied instellen/revorderen",

@@ -170,6 +170,9 @@ const actionbar: BaseTranslation = {
         removeHighlightText: "Remover",
     },
     personalDesk: {
+        lock: "Lock my desk",
+        unlock: "Unlock my desk",
+        lockedWarning: "This desk is locked.",
         label: "Ir para minha mesa",
         unclaim: "Liberar minha mesa",
         errorNoUser: "Não foi possível encontrar suas informações de usuário",

@@ -7,6 +7,7 @@
     import LL from "../../../../i18n/i18n-svelte";
     import InputRoomTags from "../../Input/InputRoomTags.svelte";
     import MemberAutocomplete from "../../Input/MemberAutocomplete.svelte";
+    import InputSwitch from "../../Input/InputSwitch.svelte";
     import type { InputTagOption } from "../../Input/InputTagOption";
     import { toTags } from "../../Input/InputTagOption";
     import { gameManager } from "../../../Phaser/Game/GameManager";
@@ -14,6 +15,7 @@
     import ActionPopupOnPersonalAreaWithEntities from "../ActionPopupOnPersonalAreaWithEntities.svelte";
     import ButtonClose from "../../Input/ButtonClose.svelte";
     import PropertyEditorBase from "./PropertyEditorBase.svelte";
+    import { localUserStore } from "../../../Connection/LocalUserStore";
     import { IconInfoCircle, IconUser, IconDesk } from "@wa-icons";
 
     export let personalAreaPropertyData: PersonalAreaPropertyData;
@@ -27,6 +29,13 @@
         : undefined;
 
     let personalAreaOwner: string | null = personalAreaPropertyData.ownerId;
+    let isOwner = false;
+    if (personalAreaPropertyData.locked === undefined) {
+        personalAreaPropertyData.locked = false;
+    }
+    $: isOwner =
+        personalAreaPropertyData.ownerId !== null &&
+        personalAreaPropertyData.ownerId === localUserStore.getLocalUser()?.uuid;
 
     const dispatch = createEventDispatcher<{
         change: boolean | undefined;
@@ -84,8 +93,13 @@
         dispatch("change");
     }
 
+    function onLockChange() {
+        dispatch("change");
+    }
+
     function resetAreaOwner() {
         personalAreaPropertyData.ownerId = null;
+        personalAreaPropertyData.locked = false;
         personalAreaOwner = null;
     }
 
@@ -205,6 +219,18 @@
                             />
                         {/if}
                     </div>
+                {/if}
+                <div class="value-switch">
+                    <InputSwitch
+                        id="personalAreaLocked"
+                        label={$LL.mapEditor.properties.personalAreaPropertyData.lockedLabel()}
+                        bind:value={personalAreaPropertyData.locked}
+                        onChange={onLockChange}
+                        disabled={!isOwner}
+                    />
+                </div>
+                {#if !isOwner}
+                    <p class="help-text">{$LL.mapEditor.properties.personalAreaPropertyData.lockedHelper()}</p>
                 {/if}
             </div>
         {/if}

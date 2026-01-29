@@ -180,6 +180,9 @@ const actionbar: DeepPartial<Translation["actionbar"]> = {
         removeHighlightText: "Supprimer",
     },
     personalDesk: {
+        lock: "Lock my desk",
+        unlock: "Unlock my desk",
+        lockedWarning: "This desk is locked.",
         label: "Aller à mon bureau",
         unclaim: "Libérer mon bureau",
         errorNoUser: "Impossible de trouver vos informations utilisateur",

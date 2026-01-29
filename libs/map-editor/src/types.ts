@@ -170,6 +170,7 @@ export const PersonalAreaPropertyData = PropertyBase.extend({
     accessClaimMode: PersonalAreaAccessClaimMode,
     allowedTags: z.array(z.string()).default([]),
     ownerId: z.string().nullable(), //Proto handle null here. If something goes wrong with personal area, this may be the issue
+    locked: z.boolean().default(false),
 });
 
 export const MatrixRoomPropertyData = PropertyBase.extend({

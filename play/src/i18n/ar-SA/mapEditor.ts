@@ -202,6 +202,8 @@ const mapEditor: DeepPartial<Translation["mapEditor"]> = {
                 "حقوق الوصول تحدد من يمكنه التفاعل مع المنطقة. المستخدمون المطابقون لأحد هذه الوسوم يمكنهم دخول المنطقة واستخدام الكائنات داخلها.",
         },
         personalAreaPropertyData: {
+            lockedLabel: "Lock area",
+            lockedHelper: "Only the personal area owner can lock or unlock this area.",
             label: "منطقة شخصية",
             description: "يمكن للمستخدمين المطالبة بمناطق شخصية كمساحتهم الخاصة. كمسؤول، يمكنك تعيين/سحب ملكية منطقة",
             accessClaimMode: "وضع المطالبة بالوصول",

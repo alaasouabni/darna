@@ -196,6 +196,8 @@ const mapEditor: BaseTranslation = {
                 "Direitos de acesso definem quem pode interagir com a área. Usuários correspondentes a uma dessas tags podem entrar na área e usar objetos dentro da área.",
         },
         personalAreaPropertyData: {
+            lockedLabel: "Lock area",
+            lockedHelper: "Only the personal area owner can lock or unlock this area.",
             label: "Área pessoal",
             description:
                 "Usuários podem reivindicar áreas pessoais como seu próprio espaço. Como administrador, você pode definir/revogar propriedade de uma área",

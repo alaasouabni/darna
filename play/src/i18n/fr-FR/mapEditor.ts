@@ -230,6 +230,8 @@ const mapEditor: DeepPartial<Translation["mapEditor"]> = {
             actionButtonLabel: "Aller à la salle privée",
         },
         personalAreaPropertyData: {
+            lockedLabel: "Lock area",
+            lockedHelper: "Only the personal area owner can lock or unlock this area.",
             label: "Zone personnelle",
             description:
                 "La définition d'une zone personnelle permet à l'utilisateur de revendiquer cette zone comme son propre espace. En tant qu'administrateur, vous pouvez définir/révoquer un espace à un utilisateur.",

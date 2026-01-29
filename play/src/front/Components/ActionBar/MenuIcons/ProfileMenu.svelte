@@ -6,7 +6,7 @@
     import type { SvelteComponentTyped } from "svelte";
     import type { Readable } from "svelte/store";
     import { derived, get } from "svelte/store";
-    import type { AreaData } from "@workadventure/map-editor";
+    import type { AreaData, PersonalAreaPropertyData } from "@workadventure/map-editor";
     import { availabilityStatusStore, enableCameraSceneVisibilityStore } from "../../../Stores/MediaStore";
 
     import { gameManager } from "../../../Phaser/Game/GameManager";
@@ -59,7 +59,9 @@
     let userName = gameManager.getPlayerName() || "";
     let hasPersonalDesk = false;
     let personalAreaData: AreaData | null = null;
+    let personalAreaProperty: PersonalAreaPropertyData | null = null;
     let isInsidePersonalDesk = false;
+    let isPersonalDeskLocked = false;
 
     // Check if user has a personal desk and if they're inside it
     function checkPersonalDesk() {
@@ -67,7 +69,9 @@
         if (!userUUID) {
             hasPersonalDesk = false;
             personalAreaData = null;
+            personalAreaProperty = null;
             isInsidePersonalDesk = false;
+            isPersonalDeskLocked = false;
             return;
         }
 
@@ -75,7 +79,9 @@
         if (!gameScene) {
             hasPersonalDesk = false;
             personalAreaData = null;
+            personalAreaProperty = null;
             isInsidePersonalDesk = false;
+            isPersonalDeskLocked = false;
             return;
         }
 
@@ -89,6 +95,8 @@
             if (property && property.ownerId === userUUID) {
                 hasPersonalDesk = true;
                 personalAreaData = area.areaData;
+                personalAreaProperty = property as PersonalAreaPropertyData;
+                isPersonalDeskLocked = property.locked ?? false;
 
                 // Check if the current player is inside the personal desk
                 const currentPlayer = gameScene.CurrentPlayer;
@@ -111,7 +119,9 @@
 
         hasPersonalDesk = false;
         personalAreaData = null;
+        personalAreaProperty = null;
         isInsidePersonalDesk = false;
+        isPersonalDeskLocked = false;
     }
 
     let checkInterval: ReturnType<typeof setInterval> | null = null;
@@ -267,6 +277,32 @@
         }
     }
 
+    async function togglePersonalDeskLock() {
+        if (!personalAreaData || !personalAreaProperty) {
+            checkPersonalDesk();
+            if (!personalAreaData || !personalAreaProperty) {
+                warningMessageStore.addWarningMessage($LL.actionbar.personalDesk.errorNotFound(), { closable: true });
+                return;
+            }
+        }
+
+        try {
+            const gameScene = gameManager.getCurrentGameScene();
+            const mapEditorModeManager = gameScene.getMapEditorModeManager();
+            if (!mapEditorModeManager) {
+                warningMessageStore.addWarningMessage($LL.actionbar.personalDesk.errorUnclaiming(), { closable: true });
+                return;
+            }
+            const nextLocked = !(personalAreaProperty.locked ?? false);
+            await mapEditorModeManager.setPersonalAreaLock(personalAreaData as AreaData, nextLocked);
+            isPersonalDeskLocked = nextLocked;
+            checkPersonalDesk();
+        } catch (error) {
+            console.error("Error while toggling personal desk lock", error);
+            warningMessageStore.addWarningMessage($LL.actionbar.personalDesk.errorUnclaiming(), { closable: true });
+        }
+    }
+
     const [floatingUiRef, floatingUiContent, arrowAction] = createFloatingUiActions(
         {
             placement: "bottom-end",
@@ -408,6 +444,19 @@
                     >
                         <DeskIcon height="22" width="22" />
                     </ActionBarButton>
+                    {#if isInsidePersonalDesk}
+                        <ActionBarButton
+                            label={
+                                isPersonalDeskLocked
+                                    ? $LL.actionbar.personalDesk.unlock()
+                                    : $LL.actionbar.personalDesk.lock()
+                            }
+                            on:click={togglePersonalDeskLock}
+                            classList="group/btn-personal-desk"
+                        >
+                            <DeskIcon height="22" width="22" />
+                        </ActionBarButton>
+                    {/if}
                     <ActionBarButton
                         label={$LL.actionbar.personalDesk.unclaim()}
                         on:click={unclaimPersonalDesk}

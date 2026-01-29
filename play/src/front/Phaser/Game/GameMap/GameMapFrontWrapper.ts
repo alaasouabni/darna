@@ -273,6 +273,8 @@ export class GameMapFrontWrapper {
             }
         }
 
+        // Ensure newly placed tiles are actually collidable (layer was empty at creation time).
+        this.areasCollisionLayer.setCollisionByProperty({ collides: true });
         this.updateCollisionGrid(this.areasCollisionLayer, false);
     }
 
@@ -368,6 +370,7 @@ export class GameMapFrontWrapper {
                 const tile = this.areasCollisionLayer.putTileAt(this.existingTileIndex, x, y);
                 if (tile !== null) {
                     tile.properties["collides"] = true;
+                    tile.setCollision(true, true, true, true);
                 }
             }
         }
@@ -944,6 +947,7 @@ export class GameMapFrontWrapper {
             throw new Error("AreasManager is not initialized. Are you on a public map?");
         }
         this.areasManager.updateArea(newConfig);
+        this.recomputeAreasCollisionGrid();
     }
 
     public listenAreaDeletion(areaData: AreaData | undefined) {

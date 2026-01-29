@@ -230,6 +230,8 @@ const mapEditor: BaseTranslation = {
             allowedUser: "Allowed user",
             owner: "Owner",
             revokeAccess: "Revoke access",
+            lockedLabel: "Lock area",
+            lockedHelper: "Only the personal area owner can lock or unlock this area.",
             actionButtonLabel: "Got to personal desk",
         },
         excalidraw: {

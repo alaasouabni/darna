@@ -223,6 +223,8 @@ const mapEditor: DeepPartial<Translation["mapEditor"]> = {
                 "접근 권한은 이 영역에 들어오고 그 안의 오브젝트와 상호작용할 수 있는 사람을 정의합니다. 여기 태그 중 하나와 일치하는 사용자만 입장할 수 있습니다.",
         },
         personalAreaPropertyData: {
+            lockedLabel: "Lock area",
+            lockedHelper: "Only the personal area owner can lock or unlock this area.",
             label: "개인 영역",
             description:
                 "사용자가 개인 영역을 자신의 공간으로 ‘소유’할 수 있도록 설정합니다. 관리자는 이 영역의 소유자를 설정하거나 해제할 수 있습니다.",

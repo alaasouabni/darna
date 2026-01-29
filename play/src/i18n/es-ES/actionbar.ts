@@ -16,6 +16,9 @@ const actionbar: DeepPartial<Translation["actionbar"]> = {
         },
     },
     personalDesk: {
+        lock: "Lock my desk",
+        unlock: "Unlock my desk",
+        lockedWarning: "This desk is locked.",
         label: "Ir a mi escritorio",
         unclaim: "Liberar mi escritorio",
         errorNoUser: "No se pueden encontrar sus datos de usuario",

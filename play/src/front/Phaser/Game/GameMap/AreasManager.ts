@@ -1,4 +1,4 @@
-import type { AreaData, AtLeast, GameMapAreas } from "@workadventure/map-editor";
+import type { AreaData, AtLeast, GameMapAreas, PersonalAreaPropertyData } from "@workadventure/map-editor";
 import { AreaPermissions } from "@workadventure/map-editor";
 import { Area } from "../../Entity/Area";
 import type { GameScene } from "../GameScene";
@@ -53,7 +53,7 @@ export class AreasManager {
             return;
         }
         this.areas[removedAreaIndex].destroy();
-        this.areas = this.areas.filter((area) => area.areaData.id === deletedAreaId);
+        this.areas = this.areas.filter((area) => area.areaData.id !== deletedAreaId);
         this.updateMapEditorOptionForSpecificAreas();
     }
 
@@ -97,9 +97,45 @@ export class AreasManager {
      * Returns the list of all areas that the user has no access to.
      */
     public getCollidingAreas(): AreaData[] {
+        const lockedAreas = this.getLockedPersonalAreasForUser();
         if (this.userCanEdit) {
-            return [];
+            return lockedAreas;
         }
-        return this.gameMapAreas.getCollidingAreas(this.userConnectedTags);
+        const collidingAreas = this.gameMapAreas.getCollidingAreas(this.userConnectedTags);
+        if (lockedAreas.length === 0) {
+            return collidingAreas;
+        }
+        const dedup = new Map<string, AreaData>();
+        for (const area of collidingAreas) {
+            dedup.set(area.id, area);
+        }
+        for (const area of lockedAreas) {
+            dedup.set(area.id, area);
+        }
+        return [...dedup.values()];
+    }
+
+    private getLockedPersonalAreasForUser(): AreaData[] {
+        const areas = Array.from(this.gameMapAreas.getAreas().values());
+        return areas.filter((area) => this.isLockedPersonalAreaForUser(area));
+    }
+
+    private isLockedPersonalAreaForUser(area: AreaData): boolean {
+        const userId = localUserStore.getLocalUser()?.uuid;
+        if (!userId) {
+            return false;
+        }
+
+        const property = area.properties.find(
+            (prop) => prop.type === "personalAreaPropertyData"
+        ) as PersonalAreaPropertyData | undefined;
+
+        if (!property?.locked) {
+            return false;
+        }
+        if (property.ownerId && property.ownerId === userId) {
+            return false;
+        }
+        return true;
     }
 }
