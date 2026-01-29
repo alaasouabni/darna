@@ -1,13 +1,14 @@
 import type { Unsubscriber } from "svelte/store";
 import { get } from "svelte/store";
 import type CancelablePromise from "cancelable-promise";
-import { PositionMessage_Direction } from "@workadventure/messages";
+import { AvailabilityStatus, PositionMessage_Direction } from "@workadventure/messages";
 import type { GameScene } from "../Game/GameScene";
 import type { ActiveEventList } from "../UserInput/UserInputManager";
 import { UserInputEvent } from "../UserInput/UserInputManager";
 import { Character } from "../Entity/Character";
 
 import { userMovingStore } from "../../Stores/GameStore";
+import { requestedStatusStore } from "../../Stores/MediaStore";
 import { followStateStore, followRoleStore, followUsersStore } from "../../Stores/FollowStore";
 import { WOKA_SPEED } from "../../Enum/EnvironmentVariable";
 import { visibilityStore } from "../../Stores/VisibilityStore";
@@ -302,7 +303,9 @@ export class Player extends Character {
                 this._lastDirection = PositionMessage_Direction.DOWN;
             }
         }
-        passStatusToOnline();
+        if (this.shouldAutoPassStatusToOnline()) {
+            passStatusToOnline();
+        }
         this.playAnimation(this._lastDirection, true);
         this.setDepth(this.y + 16);
 
@@ -336,7 +339,9 @@ export class Player extends Character {
                 this._lastDirection = PositionMessage_Direction.DOWN;
             }
         }
-        passStatusToOnline();
+        if (this.shouldAutoPassStatusToOnline()) {
+            passStatusToOnline();
+        }
         this.playAnimation(this._lastDirection, true);
 
         this.setDepth(this.y + 16);
@@ -353,6 +358,14 @@ export class Player extends Character {
         this.finishFollowingPath(true);
         this.emit(hasMovedEventName, { moving: false, direction: this._lastDirection, x: this.x, y: this.y });
         this.scene.markDirty();
+    }
+
+    private shouldAutoPassStatusToOnline(): boolean {
+        const requestedStatus = get(requestedStatusStore);
+        return (
+            requestedStatus !== AvailabilityStatus.DO_NOT_DISTURB &&
+            requestedStatus !== AvailabilityStatus.BACK_IN_A_MOMENT
+        );
     }
 
     public get walkingSpeed(): number | undefined {

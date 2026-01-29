@@ -45,6 +45,7 @@ export { default as IconMessagePlus } from "~icons/tabler/message";
 export { default as IconFolder } from "~icons/tabler/folder";
 export { default as IconUnMute } from "~icons/tabler/volume";
 export { default as IconMute } from "~icons/tabler/volume3";
+export { default as IconVolumeOff } from "~icons/tabler/volume-off";
 export { default as IconRestore } from "~icons/tabler/restore";
 export { default as IconBellOff } from "~icons/tabler/bell-off";
 export { default as IconSearch } from "~icons/tabler/search";

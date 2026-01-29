@@ -487,6 +487,18 @@ export class GameMapPropertiesListener {
         });
     }
 
+    public suspendPersonalAreaChat(): void {
+        this.areasPropertiesListener.suspendPersonalAreaChat();
+    }
+
+    public resumePersonalAreaChatIfInside(): void {
+        this.areasPropertiesListener.resumePersonalAreaChatIfInside();
+    }
+
+    public isPersonalAreaChatActive(): boolean {
+        return this.areasPropertiesListener.isPersonalAreaChatActive();
+    }
+
     private abortControllers = new Map<ITiledPlace, AbortController>();
 
     private onEnterPlaceHandler(places: ITiledPlace[]): void {

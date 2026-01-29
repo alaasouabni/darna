@@ -9,6 +9,7 @@ import type { ObtainedMediaStreamConstraints } from "../WebRtc/P2PMessages/Const
 import { SoundMeter } from "../Phaser/Components/SoundMeter";
 import type { RequestedStatus } from "../Rules/StatusRules/statusRules";
 import { statusChanger } from "../Components/ActionBar/AvailabilityStatus/statusChanger";
+import { hideDndModeModal, showDndModeModal } from "../Rules/StatusRules/statusChangerFunctions";
 import {
     createBackgroundTransformer,
     type BackgroundTransformer,
@@ -394,6 +395,14 @@ availabilityStatusStore.subscribe((newStatus: AvailabilityStatus) => {
     } catch (e) {
         console.error("Error while changing status", e);
         Sentry.captureException(e);
+    }
+    if (
+        newStatus === AvailabilityStatus.DO_NOT_DISTURB ||
+        newStatus === AvailabilityStatus.BACK_IN_A_MOMENT
+    ) {
+        showDndModeModal(newStatus);
+    } else {
+        hideDndModeModal();
     }
 });
 

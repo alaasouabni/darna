@@ -29,7 +29,7 @@ export enum UserInputEvent {
 
 // The reason why the controls are disabled
 // The MessageEventSource type means the controls where disabled by the scripting API in the related iframe
-type DisableControlsReason = "store" | "explorerTool" | "errorScreen" | MessageEventSource;
+type DisableControlsReason = "store" | "explorerTool" | "errorScreen" | "availabilityStatus" | MessageEventSource;
 
 export interface Shortcut {
     key: string;

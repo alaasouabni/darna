@@ -21,6 +21,7 @@ export class ProximitySpaceManager {
         | undefined;
     private isInPersonalArea = false;
     private isResuming = false;
+    private isStatusBlocked = false;
 
     public constructor(roomConnection: RoomConnection, private proximityChatRoom: ProximityChatRoom) {
         this.isInPersonalArea = get(personalAreaSpaceNameStore) !== null;
@@ -52,6 +53,10 @@ export class ProximitySpaceManager {
 
         this.joinSpaceRequestMessageSubscription = roomConnection.joinSpaceRequestMessage.subscribe(
             ({ spaceName, propertiesToSync }) => {
+                if (this.isStatusBlocked) {
+                    this.pendingJoinRequest = undefined;
+                    return;
+                }
                 if (this.isInPersonalArea || this.isResuming) {
                     this.pendingJoinRequest = { spaceName, propertiesToSync };
                     return;
@@ -69,6 +74,12 @@ export class ProximitySpaceManager {
 
         this.leaveSpaceRequestMessageSubscription = roomConnection.leaveSpaceRequestMessage.subscribe(
             ({ spaceName }) => {
+                if (this.isStatusBlocked) {
+                    if (this.pendingJoinRequest?.spaceName === spaceName) {
+                        this.pendingJoinRequest = undefined;
+                    }
+                    return;
+                }
                 if (this.isInPersonalArea || this.isResuming) {
                     if (this.pendingJoinRequest?.spaceName === spaceName) {
                         this.pendingJoinRequest = undefined;
@@ -87,5 +98,12 @@ export class ProximitySpaceManager {
         this.joinSpaceRequestMessageSubscription.unsubscribe();
         this.leaveSpaceRequestMessageSubscription.unsubscribe();
         this.personalAreaSubscription?.();
+    }
+
+    public setStatusBlocked(blocked: boolean): void {
+        this.isStatusBlocked = blocked;
+        if (blocked) {
+            this.pendingJoinRequest = undefined;
+        }
     }
 }

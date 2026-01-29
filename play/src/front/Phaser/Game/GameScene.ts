@@ -331,6 +331,7 @@ export class GameScene extends DirtyScene {
     private followManager!: FollowManager;
     private locateManager!: LocateManager;
     private hasMovedThisFrame: boolean = false;
+    private gameMapPropertiesListener?: GameMapPropertiesListener;
 
     private proximitySpaceManager: ProximitySpaceManager | undefined;
     private scriptingVideoManager: ScriptingVideoManager | undefined;
@@ -377,6 +378,7 @@ export class GameScene extends DirtyScene {
     public landingAreas: AreaData[] = [];
     // Listeners for when the player finishes moving
     private onPlayerMovementEndedCallbacks: Array<(event: HasPlayerMovedInterface) => void> = [];
+    private lastAvailabilityStatus: AvailabilityStatus | undefined;
 
     public _chatConnection: ChatConnectionInterface | undefined;
     private _proximityChatRoomDeferred: Deferred<ProximityChatRoom> = new Deferred();
@@ -897,7 +899,8 @@ export class GameScene extends DirtyScene {
 
         this.reposition(true);
 
-        new GameMapPropertiesListener(this, this.gameMapFrontWrapper).register();
+        this.gameMapPropertiesListener = new GameMapPropertiesListener(this, this.gameMapFrontWrapper);
+        this.gameMapPropertiesListener.register();
 
         if (!this._room.isDisconnected()) {
             try {
@@ -2303,6 +2306,10 @@ export class GameScene extends DirtyScene {
             if (availabilityStatus === AvailabilityStatus.SILENT) {
                 this.CurrentPlayer.toggleTalk(false, true);
             }
+            if (this.lastAvailabilityStatus !== undefined) {
+                this.handleAvailabilityStatusTransition(this.lastAvailabilityStatus, availabilityStatus);
+            }
+            this.lastAvailabilityStatus = availabilityStatus;
         });
 
         this.emoteUnsubscriber = emoteStore.subscribe((emote) => {
@@ -3094,7 +3101,11 @@ ${escapedMessage}
                             //Create new colliders with the new GameMap
                             this.createCollisionWithPlayer();
                             //Create new trigger with the new GameMap
-                            new GameMapPropertiesListener(this, this.gameMapFrontWrapper).register();
+                            this.gameMapPropertiesListener = new GameMapPropertiesListener(
+                                this,
+                                this.gameMapFrontWrapper
+                            );
+                            this.gameMapPropertiesListener.register();
                             resolve(newFirstgid);
                         });
                         this.load.off("loaderror", errorHandler);
@@ -3509,6 +3520,51 @@ ${escapedMessage}
         }
         this.hasMovedThisFrame = true;
         this.throttledSaveLastPosition(event);
+    }
+
+    private isHardLeaveStatus(status: AvailabilityStatus): boolean {
+        return status === AvailabilityStatus.DO_NOT_DISTURB || status === AvailabilityStatus.BACK_IN_A_MOMENT;
+    }
+
+    private handleAvailabilityStatusTransition(previous: AvailabilityStatus, next: AvailabilityStatus): void {
+        const wasHardLeave = this.isHardLeaveStatus(previous);
+        const isHardLeave = this.isHardLeaveStatus(next);
+
+        if (isHardLeave && !wasHardLeave) {
+            this.proximitySpaceManager?.setStatusBlocked(true);
+            this.userInputManager.disableControls("availabilityStatus");
+            if (this.gameMapPropertiesListener?.isPersonalAreaChatActive()) {
+                this.gameMapPropertiesListener.suspendPersonalAreaChat();
+            } else {
+                const currentSpaceName = this._proximityChatRoom?.getCurrentSpaceName();
+                if (currentSpaceName) {
+                    this._proximityChatRoom?.leaveSpace(currentSpaceName).catch((e) => {
+                        console.error("Error while leaving proximity space after status change", e);
+                        Sentry.captureException(e);
+                    });
+                }
+            }
+            return;
+        }
+
+        if (!isHardLeave && wasHardLeave) {
+            this.proximitySpaceManager?.setStatusBlocked(false);
+            this.userInputManager.restoreControls("availabilityStatus");
+            this.gameMapPropertiesListener?.resumePersonalAreaChatIfInside();
+            this.forceProximityReevaluation();
+        }
+    }
+
+    private forceProximityReevaluation(): void {
+        if (!this.connection || !this.CurrentPlayer) {
+            return;
+        }
+        this.doPushPlayerPosition({
+            x: this.CurrentPlayer.x,
+            y: this.CurrentPlayer.y,
+            direction: this.CurrentPlayer.lastDirection,
+            moving: false,
+        });
     }
 
     private createCollisionWithPlayer() {

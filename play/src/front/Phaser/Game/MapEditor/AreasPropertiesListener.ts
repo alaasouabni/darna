@@ -23,7 +23,7 @@ import { Jitsi } from "@workadventure/shared-utils";
 import type { Unsubscriber } from "svelte/store";
 import { get } from "svelte/store";
 import type { Member } from "@workadventure/messages";
-import { FilterType } from "@workadventure/messages";
+import { AvailabilityStatus, FilterType } from "@workadventure/messages";
 import { LL } from "../../../../i18n/i18n-svelte";
 import { analyticsClient } from "../../../Administration/AnalyticsClient";
 import { iframeListener } from "../../../Api/IframeListener";
@@ -47,6 +47,7 @@ import {
     inOpenWebsite,
     isListenerStore,
     isSpeakerStore,
+    availabilityStatusStore,
     listenerWaitingMediaStore,
     requestedCameraState,
     requestedMicrophoneState,
@@ -106,6 +107,8 @@ export class AreasPropertiesListener {
 
     private actionTriggerCallback: Map<string, () => void> = new Map<string, () => void>();
     private personalAreaSpaceName: string | null = null;
+    private lastPersonalAreaData: AreaData | null = null;
+    private lastPersonalAreaProperty: PersonalAreaPropertyData | null = null;
 
     constructor(scene: GameScene) {
         this.scene = scene;
@@ -973,11 +976,16 @@ export class AreasPropertiesListener {
             return;
         }
 
+        this.lastPersonalAreaData = areaData;
+        this.lastPersonalAreaProperty = property;
+
         this.setPersonalAreaActive(true);
-        this.joinPersonalAreaSpace(areaData).catch((error) => {
-            console.error("Error while joining personal area space", error);
-            Sentry.captureException(error);
-        });
+        if (!this.isHardLeaveStatus(get(availabilityStatusStore))) {
+            this.joinPersonalAreaSpace(areaData).catch((error) => {
+                console.error("Error while joining personal area space", error);
+                Sentry.captureException(error);
+            });
+        }
 
         if (property.ownerId !== null) {
             canRequestVisitCardsStore.set(true);
@@ -1237,6 +1245,8 @@ export class AreasPropertiesListener {
         // Reset this store to indicate that the user is no longer in the personal area and cannot request or display their business card.
         canRequestVisitCardsStore.set(false);
         this.setPersonalAreaActive(false);
+        this.lastPersonalAreaData = null;
+        this.lastPersonalAreaProperty = null;
 
         mapEditorAskToClaimPersonalAreaStore.set(undefined);
         if (get(requestVisitCardsStore)) {
@@ -1248,6 +1258,45 @@ export class AreasPropertiesListener {
             console.error("Error while leaving personal area space", error);
             Sentry.captureException(error);
         });
+    }
+
+    public suspendPersonalAreaChat(): void {
+        if (!this.personalAreaSpaceName) {
+            return;
+        }
+        this.leavePersonalAreaSpace().catch((error) => {
+            console.error("Error while suspending personal area space", error);
+            Sentry.captureException(error);
+        });
+    }
+
+    public resumePersonalAreaChatIfInside(): void {
+        if (!this.lastPersonalAreaData || !this.lastPersonalAreaProperty) {
+            return;
+        }
+        if (this.isHardLeaveStatus(get(availabilityStatusStore))) {
+            return;
+        }
+        if (this.personalAreaSpaceName) {
+            return;
+        }
+        if (!this.isCurrentPlayerInsideArea(this.lastPersonalAreaData)) {
+            return;
+        }
+
+        this.setPersonalAreaActive(true);
+        this.joinPersonalAreaSpace(this.lastPersonalAreaData).catch((error) => {
+            console.error("Error while resuming personal area space", error);
+            Sentry.captureException(error);
+        });
+    }
+
+    public isPersonalAreaChatActive(): boolean {
+        return this.personalAreaSpaceName !== null;
+    }
+
+    private isHardLeaveStatus(status: AvailabilityStatus): boolean {
+        return status === AvailabilityStatus.DO_NOT_DISTURB || status === AvailabilityStatus.BACK_IN_A_MOMENT;
     }
 
     private getPersonalAreaSpaceName(areaData: AreaData): string {
