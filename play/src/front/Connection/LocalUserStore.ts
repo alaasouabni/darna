@@ -54,6 +54,7 @@ const chatSideBarWidthKey = "chatSideBarWidth";
 const mapEditorSideBarWidthKey = "mapEditorSideBarWidthKey";
 const bubbleSound = "bubbleSound";
 const noiseSuppression = "noiseSuppression";
+const rnnoiseEnabled = "rnnoiseEnabled";
 
 const INITIAL_MAP_EDITOR_SIDEBAR_WIDTH = 448;
 
@@ -451,6 +452,17 @@ class LocalUserStore {
             localStorage.setItem(noiseSuppression, "true");
         }
         return localStorage.getItem(noiseSuppression) === "true";
+    }
+
+    setRnnoiseEnabled(value: boolean): void {
+        localStorage.setItem(rnnoiseEnabled, value.toString());
+    }
+
+    getRnnoiseEnabled(): boolean {
+        if (localStorage.getItem(rnnoiseEnabled) == null) {
+            localStorage.setItem(rnnoiseEnabled, "false");
+        }
+        return localStorage.getItem(rnnoiseEnabled) === "true";
     }
 
     getAllUserProperties(context: string): Map<string, PlayerVariable> {

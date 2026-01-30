@@ -4,7 +4,7 @@ import deepEqual from "fast-deep-equal";
 import { AvailabilityStatus } from "@workadventure/messages";
 import * as Sentry from "@sentry/svelte";
 import { localUserStore } from "../Connection/LocalUserStore";
-import { isIOS, isSafari } from "../WebRtc/DeviceUtils";
+import { isAndroid, isIOS, isSafari } from "../WebRtc/DeviceUtils";
 import type { ObtainedMediaStreamConstraints } from "../WebRtc/P2PMessages/ConstraintMessage";
 import { SoundMeter } from "../Phaser/Components/SoundMeter";
 import type { RequestedStatus } from "../Rules/StatusRules/statusRules";
@@ -29,6 +29,7 @@ import { hideHelpCameraSettings } from "./HelpSettingsStore";
 import { isLiveStreamingStore } from "./IsStreamingStore";
 
 import { backgroundConfigStore, backgroundProcessingEnabledStore } from "./BackgroundTransformStore";
+import { RNNoiseStreamProcessor } from "../WebRtc/AudioStream/RNNoiseStreamProcessor";
 
 /**
  * A store that contains the camera state requested by the user (on or off).
@@ -80,6 +81,18 @@ function createRequestedNoiseSuppressionStore() {
     };
 }
 
+function createRequestedRnnoiseStore() {
+    const { subscribe, set } = writable(localUserStore.getRnnoiseEnabled());
+
+    return {
+        subscribe,
+        set: (value: boolean) => {
+            set(value);
+            localUserStore.setRnnoiseEnabled(value);
+        },
+    };
+}
+
 /**
  * A store that contains whether the EnableCameraScene is shown or not.
  */
@@ -96,6 +109,7 @@ function createEnableCameraSceneVisibilityStore() {
 export const requestedCameraState = createRequestedCameraState();
 export const requestedMicrophoneState = createRequestedMicrophoneState();
 export const requestedNoiseSuppressionStore = createRequestedNoiseSuppressionStore();
+export const requestedRnnoiseStore = createRequestedRnnoiseStore();
 export const enableCameraSceneVisibilityStore = createEnableCameraSceneVisibilityStore();
 
 /**
@@ -269,13 +283,13 @@ export const videoConstraintStore = derived(
  * A store that contains video constraints.
  */
 export const audioConstraintStore = derived(
-    [requestedMicrophoneDeviceIdStore, requestedNoiseSuppressionStore],
-    ([$microphoneDeviceIdStore, $noiseSuppression]) => {
+    [requestedMicrophoneDeviceIdStore, requestedNoiseSuppressionStore, requestedRnnoiseStore],
+    ([$microphoneDeviceIdStore, $noiseSuppression, $rnnoiseEnabled]) => {
     let constraints = {
         //TODO: make these values configurable in the game settings menu and store them in localstorage
         autoGainControl: true,
         echoCancellation: true,
-        noiseSuppression: $noiseSuppression,
+        noiseSuppression: $noiseSuppression && !$rnnoiseEnabled,
     } as boolean | MediaTrackConstraints;
 
     if (typeof constraints === "boolean") {
@@ -558,6 +572,11 @@ let oldConstraints: { video: MediaTrackConstraints | false; audio: MediaTrackCon
 let backgroundTransformer: BackgroundTransformer | undefined = undefined;
 // Track the last background config to detect if we need to recreate or just update
 let lastBackgroundConfig: BackgroundConfig | undefined = undefined;
+let rnnoiseProcessor: RNNoiseStreamProcessor | undefined;
+
+function isRnnoiseSupported(): boolean {
+    return !isIOS() && !isAndroid() && typeof AudioWorkletNode !== "undefined";
+}
 
 /**
  * Update background processor configuration without recreating the transformer
@@ -851,47 +870,73 @@ export const rawLocalStreamStore = derived<[typeof mediaStreamConstraintsStore],
 );
 
 export const localStreamStore = derived<
-    [typeof rawLocalStreamStore, typeof backgroundProcessingEnabledStore],
+    [typeof rawLocalStreamStore, typeof backgroundProcessingEnabledStore, typeof requestedRnnoiseStore],
     LocalStreamStoreValue
 >(
-    [rawLocalStreamStore, backgroundProcessingEnabledStore],
-    ([$rawLocalStreamStore, $backgroundProcessingEnabled], set) => {
-        if (
-            $rawLocalStreamStore.type === "error" ||
-            $rawLocalStreamStore.stream === undefined ||
-            $rawLocalStreamStore.stream.getVideoTracks().length === 0 ||
-            !$backgroundProcessingEnabled
-        ) {
+    [rawLocalStreamStore, backgroundProcessingEnabledStore, requestedRnnoiseStore],
+    ([$rawLocalStreamStore, $backgroundProcessingEnabled, $rnnoiseEnabled], set) => {
+        const rnnoiseActive = $rnnoiseEnabled && isRnnoiseSupported();
+
+        if (!rnnoiseActive && rnnoiseProcessor) {
+            rnnoiseProcessor.stop();
+            rnnoiseProcessor = undefined;
+        }
+
+        if ($rawLocalStreamStore.type === "error" || $rawLocalStreamStore.stream === undefined) {
             if (backgroundTransformer) {
                 backgroundTransformer.stop();
             }
-
             set($rawLocalStreamStore);
             return;
         }
 
-        let finalStream;
+        const rawStream = $rawLocalStreamStore.stream;
+        const shouldApplyBackground = $backgroundProcessingEnabled && rawStream.getVideoTracks().length > 0;
 
-        if (!backgroundTransformer) {
-            // Get current config from the store
-            const currentConfig = get(backgroundConfigStore);
+        const getBaseStream = async (): Promise<MediaStream> => {
+            if (!shouldApplyBackground) {
+                if (backgroundTransformer) {
+                    backgroundTransformer.stop();
+                }
+                return rawStream;
+            }
 
-            backgroundTransformer = createBackgroundTransformer(currentConfig);
-        }
+            if (!backgroundTransformer) {
+                const currentConfig = get(backgroundConfigStore);
+                backgroundTransformer = createBackgroundTransformer(currentConfig);
+            }
+
+            if (!backgroundTransformer) {
+                return rawStream;
+            }
+
+            const transformed = await backgroundTransformer.transform(rawStream);
+            lastBackgroundConfig = { ...get(backgroundConfigStore) };
+            return transformed;
+        };
 
         (async () => {
-            // Only create if we don't have a transformer yet
-            if ($rawLocalStreamStore.stream && backgroundTransformer) {
-                // Transform the stream using the new approach if available
-                finalStream = await backgroundTransformer.transform($rawLocalStreamStore.stream);
-                // Store config for next comparison
-                lastBackgroundConfig = { ...get(backgroundConfigStore) };
+            let baseStream = await getBaseStream();
 
-                set({
-                    type: "success",
-                    stream: finalStream,
-                });
+            if (rnnoiseActive && baseStream.getAudioTracks().length > 0) {
+                try {
+                    if (!rnnoiseProcessor) {
+                        rnnoiseProcessor = new RNNoiseStreamProcessor();
+                    }
+                    baseStream = await rnnoiseProcessor.processStream(baseStream);
+                } catch (error) {
+                    console.warn("[MediaStore] RNNoise failed, falling back to raw audio.", error);
+                    warningMessageStore.addWarningMessage(
+                        "RNNoise failed to initialize. Falling back to standard noise suppression.",
+                        { closable: true }
+                    );
+                }
             }
+
+            set({
+                type: "success",
+                stream: baseStream,
+            });
         })().catch((error) => {
             console.warn("[MediaStore] Failed to transform stream:", error);
             Sentry.captureException(error);

@@ -1,5 +1,7 @@
 <script lang="ts">
+    import { onDestroy } from "svelte";
     import { fly } from "svelte/transition";
+    import { get } from "svelte/store";
     import {
         audioManagerFileStore,
         audioManagerVisibilityStore,
@@ -19,9 +21,18 @@
         PEER_VIDEO_LOW_BANDWIDTH,
         PEER_VIDEO_RECOMMENDED_BANDWIDTH,
     } from "../../Enum/EnvironmentVariable";
-    import { requestedNoiseSuppressionStore, videoBandwidthStore } from "../../Stores/MediaStore";
+    import {
+        requestedMicrophoneDeviceIdStore,
+        requestedMicrophoneState,
+        requestedNoiseSuppressionStore,
+        requestedRnnoiseStore,
+        videoBandwidthStore,
+    } from "../../Stores/MediaStore";
     import { screenShareBandwidthStore } from "../../Stores/ScreenSharingStore";
     import { volumeProximityDiscussionStore } from "../../Stores/PeerStore";
+    import { warningMessageStore } from "../../Stores/ErrorStore";
+    import { SoundMeter } from "../../Phaser/Components/SoundMeter";
+    import SoundMeterWidget from "../SoundMeterWidget.svelte";
     import InputSwitch from "../Input/InputSwitch.svelte";
     import RangeSlider from "../Input/RangeSlider.svelte";
     import Select from "../Input/Select.svelte";
@@ -34,13 +45,16 @@
         IconDoorExit,
         IconScreenShare,
         IconCameraUp,
+        IconMicrophone,
     } from "@wa-icons";
+    import { isAndroid, isIOS } from "../../WebRtc/DeviceUtils";
 
     let fullscreen: boolean = localUserStore.getFullscreen();
     let notification: boolean = localUserStore.getNotification();
     let allowPictureInPicture: boolean = localUserStore.getAllowPictureInPicture();
     let blockAudio: boolean = localUserStore.getBlockAudio();
     let valueNoiseSuppression = localUserStore.getNoiseSuppression();
+    let valueRnnoise = localUserStore.getRnnoiseEnabled();
     let forceCowebsiteTrigger: boolean = localUserStore.getForceCowebsiteTrigger();
     let ignoreFollowRequests: boolean = localUserStore.getIgnoreFollowRequests();
     let decreaseAudioPlayerVolumeWhileTalking: boolean = localUserStore.getDecreaseAudioPlayerVolumeWhileTalking();
@@ -67,6 +81,19 @@
 
     let valueBubbleSound = localUserStore.getBubbleSound();
     const sound = new Audio();
+    const rnnoiseSupported = typeof AudioWorkletNode !== "undefined" && !isIOS() && !isAndroid();
+    let micTestActive = false;
+    let micTestVolume: number[] = [0, 0, 0, 0, 0, 0, 0];
+    let micTestStream: MediaStream | null = null;
+    let micTestMeter: SoundMeter | null = null;
+    let micTestInterval: number | undefined;
+    let micTestPreviousMicState: boolean | null = null;
+    let micTestPreviousVolume: number | null = null;
+
+    $: if (!rnnoiseSupported && valueRnnoise) {
+        valueRnnoise = false;
+        requestedRnnoiseStore.set(false);
+    }
 
     async function updateLocale() {
         await setCurrentLocale(valueLocale as Locales);
@@ -161,6 +188,73 @@
     function changeNoiseSuppression() {
         requestedNoiseSuppressionStore.set(valueNoiseSuppression);
     }
+
+    function changeRnnoise() {
+        requestedRnnoiseStore.set(valueRnnoise);
+    }
+
+    async function startMicTest() {
+        if (micTestActive) return;
+        micTestPreviousMicState = localUserStore.getRequestedMicrophoneState();
+        micTestPreviousVolume = get(volumeProximityDiscussionStore);
+
+        requestedMicrophoneState.disableMicrophone();
+        volumeProximityDiscussionStore.set(0);
+
+        try {
+            const deviceId = get(requestedMicrophoneDeviceIdStore);
+            const constraints: MediaStreamConstraints = {
+                audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+            };
+            micTestStream = await navigator.mediaDevices.getUserMedia(constraints);
+            micTestMeter = new SoundMeter(micTestStream);
+            micTestActive = true;
+            micTestInterval = window.setInterval(() => {
+                if (micTestMeter) {
+                    micTestVolume = micTestMeter.getVolume();
+                }
+            }, 150);
+        } catch (e) {
+            warningMessageStore.addWarningMessage("Unable to access your microphone for the test.", { closable: true });
+            stopMicTest();
+        }
+    }
+
+    function stopMicTest() {
+        if (micTestInterval) {
+            clearInterval(micTestInterval);
+            micTestInterval = undefined;
+        }
+        if (micTestMeter) {
+            micTestMeter.stop();
+            micTestMeter = null;
+        }
+        if (micTestStream) {
+            micTestStream.getTracks().forEach((track) => track.stop());
+            micTestStream = null;
+        }
+        micTestActive = false;
+        micTestVolume = [0, 0, 0, 0, 0, 0, 0];
+
+        if (micTestPreviousMicState !== null) {
+            if (micTestPreviousMicState) {
+                requestedMicrophoneState.enableMicrophone();
+            } else {
+                requestedMicrophoneState.disableMicrophone();
+            }
+            micTestPreviousMicState = null;
+        }
+        if (micTestPreviousVolume !== null) {
+            volumeProximityDiscussionStore.set(micTestPreviousVolume);
+            micTestPreviousVolume = null;
+        }
+    }
+
+    onDestroy(() => {
+        if (micTestActive) {
+            stopMicTest();
+        }
+    });
 
     function changeForceCowebsiteTrigger() {
         // Analytics Client
@@ -548,6 +642,38 @@
                 onChange={changeNoiseSuppression}
                 label={$LL.menu.settings.noiseSuppression()}
             />
+        </div>
+        <div class="flex cursor-pointer items-center relative m-4">
+            <InputSwitch
+                id="rnnoise-toggle"
+                bind:value={valueRnnoise}
+                onChange={changeRnnoise}
+                label="RNNoise (desktop only)"
+                disabled={!rnnoiseSupported}
+            />
+        </div>
+        {#if !rnnoiseSupported}
+            <div class="mx-4 mb-4 text-sm text-white/50">
+                RNNoise is available on desktop browsers that support AudioWorklet.
+            </div>
+        {/if}
+        <div class="bg-contrast font-bold text-lg p-4 flex items-center mt-6">
+            <div class="me-4 opacity-50"><IconMicrophone /></div>
+            Microphone test
+        </div>
+        <div class="mt-2 p-4 flex flex-col gap-3">
+            <div class="text-sm text-white/60">
+                While testing, your mic is muted in the room and incoming voice audio is paused.
+            </div>
+            <button class="btn btn-light w-fit" on:click={() => (micTestActive ? stopMicTest() : startMicTest())}>
+                {micTestActive ? "Stop test" : "Start test"}
+            </button>
+            {#if micTestActive}
+                <div class="flex items-center gap-3">
+                    <SoundMeterWidget volume={micTestVolume} barColor="blue" />
+                    <span class="text-sm text-white/60">Speak to see the level.</span>
+                </div>
+            {/if}
         </div>
 
         <div class="flex cursor-pointer items-center relative m-4">

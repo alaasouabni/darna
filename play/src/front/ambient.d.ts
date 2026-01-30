@@ -36,3 +36,16 @@ declare module "*.webp" {
     const value: string;
     export = value;
 }
+
+declare module "@jitsi/rnnoise-wasm/dist/rnnoise-sync.js" {
+    const createRNNWasmModuleSync: () => {
+        ready: Promise<unknown>;
+        HEAPF32: Float32Array;
+        _malloc: (size: number) => number;
+        _free: (ptr: number) => void;
+        _rnnoise_create: () => number;
+        _rnnoise_destroy: (state: number) => void;
+        _rnnoise_process_frame: (state: number, out: number, input: number) => number;
+    };
+    export default createRNNWasmModuleSync;
+}
