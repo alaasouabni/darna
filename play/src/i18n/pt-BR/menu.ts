@@ -64,6 +64,9 @@ const menu: BaseTranslation = {
             wobble: "Wobble",
         },
         noiseSuppression: "Noise suppression",
+        noiseSuppressionBrowser: "Noise suppression (browser)",
+        echoCancellation: "Echo cancellation",
+        autoGainControl: "Auto gain control",
     },
     invite: {
         description: "Compartilhe o link da sala!",

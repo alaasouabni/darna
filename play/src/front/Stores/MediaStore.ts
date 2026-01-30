@@ -81,6 +81,30 @@ function createRequestedNoiseSuppressionStore() {
     };
 }
 
+function createRequestedEchoCancellationStore() {
+    const { subscribe, set } = writable(localUserStore.getEchoCancellation());
+
+    return {
+        subscribe,
+        set: (value: boolean) => {
+            set(value);
+            localUserStore.setEchoCancellation(value);
+        },
+    };
+}
+
+function createRequestedAutoGainControlStore() {
+    const { subscribe, set } = writable(localUserStore.getAutoGainControl());
+
+    return {
+        subscribe,
+        set: (value: boolean) => {
+            set(value);
+            localUserStore.setAutoGainControl(value);
+        },
+    };
+}
+
 function createRequestedRnnoiseStore() {
     const { subscribe, set } = writable(localUserStore.getRnnoiseEnabled());
 
@@ -109,6 +133,8 @@ function createEnableCameraSceneVisibilityStore() {
 export const requestedCameraState = createRequestedCameraState();
 export const requestedMicrophoneState = createRequestedMicrophoneState();
 export const requestedNoiseSuppressionStore = createRequestedNoiseSuppressionStore();
+export const requestedEchoCancellationStore = createRequestedEchoCancellationStore();
+export const requestedAutoGainControlStore = createRequestedAutoGainControlStore();
 export const requestedRnnoiseStore = createRequestedRnnoiseStore();
 export const enableCameraSceneVisibilityStore = createEnableCameraSceneVisibilityStore();
 
@@ -283,27 +309,34 @@ export const videoConstraintStore = derived(
  * A store that contains video constraints.
  */
 export const audioConstraintStore = derived(
-    [requestedMicrophoneDeviceIdStore, requestedNoiseSuppressionStore, requestedRnnoiseStore],
-    ([$microphoneDeviceIdStore, $noiseSuppression, $rnnoiseEnabled]) => {
-    let constraints = {
-        //TODO: make these values configurable in the game settings menu and store them in localstorage
-        autoGainControl: true,
-        echoCancellation: true,
-        noiseSuppression: $noiseSuppression && !$rnnoiseEnabled,
-    } as boolean | MediaTrackConstraints;
+    [
+        requestedMicrophoneDeviceIdStore,
+        requestedNoiseSuppressionStore,
+        requestedRnnoiseStore,
+        requestedEchoCancellationStore,
+        requestedAutoGainControlStore,
+    ],
+    ([$microphoneDeviceIdStore, $noiseSuppression, $rnnoiseEnabled, $echoCancellation, $autoGainControl]) => {
+        let constraints = {
+            //TODO: make these values configurable in the game settings menu and store them in localstorage
+            autoGainControl: $autoGainControl,
+            echoCancellation: $echoCancellation,
+            noiseSuppression: $noiseSuppression && !$rnnoiseEnabled,
+        } as boolean | MediaTrackConstraints;
 
-    if (typeof constraints === "boolean") {
-        constraints = {};
+        if (typeof constraints === "boolean") {
+            constraints = {};
+        }
+        if (
+            $microphoneDeviceIdStore !== undefined &&
+            navigator.mediaDevices &&
+            navigator.mediaDevices.getSupportedConstraints().deviceId === true
+        ) {
+            constraints.deviceId = { exact: $microphoneDeviceIdStore };
+        }
+        return constraints;
     }
-    if (
-        $microphoneDeviceIdStore !== undefined &&
-        navigator.mediaDevices &&
-        navigator.mediaDevices.getSupportedConstraints().deviceId === true
-    ) {
-        constraints.deviceId = { exact: $microphoneDeviceIdStore };
-    }
-    return constraints;
-});
+);
 
 /**
  * A store that contains "true" if the webcam should be stopped for energy efficiency reason - i.e. we are not moving and not in a conversation.

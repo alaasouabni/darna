@@ -58,6 +58,9 @@ const menu: BaseTranslation = {
         proximityDiscussionVolume: "Proximity discussion volume",
         blockAudio: "Block ambient sounds and music",
         noiseSuppression: "Noise suppression",
+        noiseSuppressionBrowser: "Noise suppression (browser)",
+        echoCancellation: "Echo cancellation",
+        autoGainControl: "Auto gain control",
         disableAnimations: "Disable map animations",
         bubbleSound: "Bubble sound",
         bubbleSoundOptions: {

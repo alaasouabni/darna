@@ -55,6 +55,8 @@ const mapEditorSideBarWidthKey = "mapEditorSideBarWidthKey";
 const bubbleSound = "bubbleSound";
 const noiseSuppression = "noiseSuppression";
 const rnnoiseEnabled = "rnnoiseEnabled";
+const echoCancellation = "echoCancellation";
+const autoGainControl = "autoGainControl";
 
 const INITIAL_MAP_EDITOR_SIDEBAR_WIDTH = 448;
 
@@ -452,6 +454,28 @@ class LocalUserStore {
             localStorage.setItem(noiseSuppression, "true");
         }
         return localStorage.getItem(noiseSuppression) === "true";
+    }
+
+    setEchoCancellation(value: boolean): void {
+        localStorage.setItem(echoCancellation, value.toString());
+    }
+
+    getEchoCancellation(): boolean {
+        if (localStorage.getItem(echoCancellation) == null) {
+            localStorage.setItem(echoCancellation, "true");
+        }
+        return localStorage.getItem(echoCancellation) === "true";
+    }
+
+    setAutoGainControl(value: boolean): void {
+        localStorage.setItem(autoGainControl, value.toString());
+    }
+
+    getAutoGainControl(): boolean {
+        if (localStorage.getItem(autoGainControl) == null) {
+            localStorage.setItem(autoGainControl, "true");
+        }
+        return localStorage.getItem(autoGainControl) === "true";
     }
 
     setRnnoiseEnabled(value: boolean): void {
