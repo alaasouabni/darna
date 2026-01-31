@@ -8,6 +8,8 @@ import { NameNotValidError, NameTooLongError } from "../../Exception/NameError";
 import { hasCapability } from "../../Connection/Capabilities";
 import { ResizableScene } from "./ResizableScene";
 import { SelectCharacterSceneName } from "./SelectCharacterScene";
+import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
+import { get } from "svelte/store";
 
 export const LoginSceneName = "LoginScene";
 
@@ -24,18 +26,21 @@ export class LoginScene extends ResizableScene {
     preload() {}
 
     create() {
+        const isInGameEdit = get(inGameProfileEditStore);
         loginSceneVisibleIframeStore.set(false);
-        //If authentication is mandatory, push authentication iframe
-        if (
-            localUserStore.getAuthToken() == undefined &&
-            gameManager.currentStartedRoom &&
-            gameManager.currentStartedRoom.authenticationMandatory
-        ) {
-            const redirect = connectionManager.loadOpenIDScreen(false);
-            if (redirect !== null) {
-                window.location.assign(redirect.toString());
+        if (!isInGameEdit) {
+            //If authentication is mandatory, push authentication iframe
+            if (
+                localUserStore.getAuthToken() == undefined &&
+                gameManager.currentStartedRoom &&
+                gameManager.currentStartedRoom.authenticationMandatory
+            ) {
+                const redirect = connectionManager.loadOpenIDScreen(false);
+                if (redirect !== null) {
+                    window.location.assign(redirect.toString());
+                }
+                loginSceneVisibleIframeStore.set(true);
             }
-            loginSceneVisibleIframeStore.set(true);
         }
         loginSceneVisibleStore.set(true);
 
@@ -64,10 +69,15 @@ export class LoginScene extends ResizableScene {
             }
         }
 
+        const isInGameEdit = get(inGameProfileEditStore);
         this.scene.stop(LoginSceneName);
-        gameManager.tryResumingGame(SelectCharacterSceneName);
         this.scene.remove(LoginSceneName);
         loginSceneVisibleStore.set(false);
+        if (isInGameEdit) {
+            inGameProfileEditStore.set(false);
+            return;
+        }
+        gameManager.tryResumingGame(SelectCharacterSceneName);
     }
 
     update(_time: number, _delta: number): void {}

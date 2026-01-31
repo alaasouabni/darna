@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onDestroy, onMount } from "svelte";
     import { LL } from "../../../i18n/i18n-svelte";
     import type { Game } from "../../Phaser/Game/Game";
     import type { SelectCompanionScene } from "../../Phaser/Login/SelectCompanionScene";
@@ -6,6 +7,9 @@
     import { collectionsSizeStore, selectedCollection } from "../../Stores/SelectCharacterSceneStore";
     import { analyticsClient } from "../../Administration/AnalyticsClient";
     import { IconChevronLeft, IconChevronRight } from "@wa-icons";
+    import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
+    import { selectCompanionPreviewFrameStore, selectCompanionReadyStore } from "../../Stores/SelectCompanionStore";
+    import XIcon from "../Icons/XIcon.svelte";
 
     export let game: Game;
 
@@ -34,42 +38,151 @@
     function selectRightCollection() {
         selectCompanionScene.selectNextCompanionCollection();
     }
+
+    let previewFrameEl: HTMLDivElement | null = null;
+    let modalEl: HTMLDivElement | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+
+    function updatePreviewFrameRect() {
+        if (!previewFrameEl || !modalEl) return;
+        const rect = previewFrameEl.getBoundingClientRect();
+        const modalRect = modalEl.getBoundingClientRect();
+        selectCompanionPreviewFrameStore.set({
+            centerX: rect.left + rect.width / 2,
+            centerY: rect.top + rect.height / 2,
+            width: rect.width,
+            height: rect.height,
+        });
+        modalEl.style.setProperty("--hole-left", `${Math.max(0, rect.left - modalRect.left)}px`);
+        modalEl.style.setProperty("--hole-top", `${Math.max(0, rect.top - modalRect.top)}px`);
+        modalEl.style.setProperty("--hole-width", `${Math.max(0, rect.width)}px`);
+        modalEl.style.setProperty("--hole-height", `${Math.max(0, rect.height)}px`);
+    }
+
+    onMount(() => {
+        updatePreviewFrameRect();
+        if (typeof ResizeObserver !== "undefined") {
+            resizeObserver = new ResizeObserver(updatePreviewFrameRect);
+            if (previewFrameEl) {
+                resizeObserver.observe(previewFrameEl);
+            }
+        }
+        window.addEventListener("resize", updatePreviewFrameRect);
+        requestAnimationFrame(updatePreviewFrameRect);
+    });
+
+    onDestroy(() => {
+        resizeObserver?.disconnect();
+        window.removeEventListener("resize", updatePreviewFrameRect);
+        selectCompanionPreviewFrameStore.set(null);
+    });
 </script>
 
-<section class="text-center absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-[calc(50%+20vh)] h-16">
-    <span class="text-white text-lg bold">
-        {$LL.companion.select.title()}
-    </span>
-</section>
-<section class="category flex flex-row justify-center">
-    {#if $collectionsSizeStore > 1 && $selectedCollection}
-        <button class="light mr-2 selectCharacterButton" on:click|preventDefault={selectLeftCollection}>
-            <IconChevronLeft />
-        </button>
-        <strong class="category-text">{$selectedCollection}</strong>
-        <button class="outline ml-2 selectCharacterButton" on:click|preventDefault={selectRightCollection}>
-            <IconChevronRight />
-        </button>
-    {/if}
-</section>
-<div
-    class="fixed bottom-0 w-full bg-contrast/80 backdrop-blur-md border border-solid border-t border-b-0 border-x-0 border-white/10"
->
-    <section
-        class="action container m-auto p-4 flex flex-col-reverse md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4 justify-between"
-    >
-        <button
-            class="btn btn-light btn-lg btn-ghost w-full md:w-1/2 block selectCompanionSceneFormBack"
-            on:click|preventDefault={noCompanion}>{$LL.companion.select.any()}</button
+{#if $inGameProfileEditStore}
+    <div class="fixed inset-0 z-40 flex items-center justify-center pointer-events-auto">
+        <div class="absolute inset-0 bg-black/80" />
+        <div
+            bind:this={modalEl}
+            class="modal-shell relative z-10 w-[min(760px,90vw)] border border-slate-500/30 rounded-xl shadow-2xl"
         >
-        <button
-            type="submit"
-            class="btn btn-secondary btn-lg w-full md:w-1/2 block selectCompanionSceneFormSubmit"
-            on:click|preventDefault={() => analyticsClient.selectCompanion()}
-            on:click|preventDefault={selectCompanion}>{$LL.companion.select.continue()}</button
-        >
+            <div class="modal-mask" aria-hidden="true">
+                <div class="mask-block mask-top" />
+                <div class="mask-block mask-left" />
+                <div class="mask-block mask-right" />
+                <div class="mask-block mask-bottom" />
+            </div>
+            <div class="relative z-10 p-6">
+            <button
+                type="button"
+                aria-label="Close"
+                class="absolute right-3 top-3 h-9 w-9 rounded-full hover:bg-white/10 flex items-center justify-center"
+                on:click|preventDefault={() => selectCompanionScene.closeScene()}
+            >
+                <XIcon classList="h-4 w-4" />
+            </button>
+            <section class="text-center mb-4">
+                <span class="text-white text-lg bold">
+                    {$LL.companion.select.title()}
+                </span>
+            </section>
+            <section class="flex justify-center mb-4">
+                <div
+                    class="w-[min(72vw,400px)] rounded-xl border border-slate-400/30 bg-slate-800/70 p-3 shadow-[0_12px_24px_rgba(0,0,0,0.35)]"
+                >
+                    <div
+                        bind:this={previewFrameEl}
+                        class="relative w-full aspect-[4/3] rounded-lg border border-white/15 bg-transparent shadow-none"
+                    >
+                        {#if !$selectCompanionReadyStore}
+                            <div class="absolute inset-0 flex items-center justify-center text-sm text-slate-200/80">
+                                Loading companions…
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+            </section>
+            <section class="category flex flex-row justify-center mb-6">
+                {#if $collectionsSizeStore > 1 && $selectedCollection}
+                    <button class="light mr-2 selectCharacterButton" on:click|preventDefault={selectLeftCollection}>
+                        <IconChevronLeft />
+                    </button>
+                    <strong class="category-text">{$selectedCollection}</strong>
+                    <button class="outline ml-2 selectCharacterButton" on:click|preventDefault={selectRightCollection}>
+                        <IconChevronRight />
+                    </button>
+                {/if}
+            </section>
+            <section class="action flex flex-col-reverse md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4 justify-between">
+                <button
+                    class="btn btn-light btn-lg btn-ghost w-full md:w-1/2 block selectCompanionSceneFormBack"
+                    on:click|preventDefault={noCompanion}>{$LL.companion.select.any()}</button
+                >
+                <button
+                    type="submit"
+                    class="btn btn-secondary btn-lg w-full md:w-1/2 block selectCompanionSceneFormSubmit"
+                    on:click|preventDefault={() => analyticsClient.selectCompanion()}
+                    on:click|preventDefault={selectCompanion}>{$LL.companion.select.continue()}</button
+                >
+            </section>
+            </div>
+        </div>
+    </div>
+{:else}
+    <section class="text-center absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-[calc(50%+20vh)] h-16">
+        <span class="text-white text-lg bold">
+            {$LL.companion.select.title()}
+        </span>
     </section>
-</div>
+    <section class="category flex flex-row justify-center">
+        {#if $collectionsSizeStore > 1 && $selectedCollection}
+            <button class="light mr-2 selectCharacterButton" on:click|preventDefault={selectLeftCollection}>
+                <IconChevronLeft />
+            </button>
+            <strong class="category-text">{$selectedCollection}</strong>
+            <button class="outline ml-2 selectCharacterButton" on:click|preventDefault={selectRightCollection}>
+                <IconChevronRight />
+            </button>
+        {/if}
+    </section>
+    <div
+        class="fixed bottom-0 w-full bg-contrast/80 backdrop-blur-md border border-solid border-t border-b-0 border-x-0 border-white/10"
+    >
+        <section
+            class="action container m-auto p-4 flex flex-col-reverse md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4 justify-between"
+        >
+            <button
+                class="btn btn-light btn-lg btn-ghost w-full md:w-1/2 block selectCompanionSceneFormBack"
+                on:click|preventDefault={noCompanion}>{$LL.companion.select.any()}</button
+            >
+            <button
+                type="submit"
+                class="btn btn-secondary btn-lg w-full md:w-1/2 block selectCompanionSceneFormSubmit"
+                on:click|preventDefault={() => analyticsClient.selectCompanion()}
+                on:click|preventDefault={selectCompanion}>{$LL.companion.select.continue()}</button
+            >
+        </section>
+    </div>
+{/if}
 
 <!--<form class="selectCompanionScene">-->
 <!--    <section class="text-center">-->
@@ -112,5 +225,43 @@
 <style lang="scss">
     button {
         pointer-events: auto;
+    }
+    .modal-shell {
+        background: transparent;
+    }
+    .modal-mask {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border-radius: 0.75rem;
+        overflow: hidden;
+    }
+    .mask-block {
+        position: absolute;
+        background: rgba(15, 23, 42, 0.9);
+    }
+    .mask-top {
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: var(--hole-top, 0px);
+    }
+    .mask-bottom {
+        left: 0;
+        top: calc(var(--hole-top, 0px) + var(--hole-height, 0px));
+        width: 100%;
+        height: calc(100% - (var(--hole-top, 0px) + var(--hole-height, 0px)));
+    }
+    .mask-left {
+        left: 0;
+        top: var(--hole-top, 0px);
+        width: var(--hole-left, 0px);
+        height: var(--hole-height, 0px);
+    }
+    .mask-right {
+        left: calc(var(--hole-left, 0px) + var(--hole-width, 0px));
+        top: var(--hole-top, 0px);
+        width: calc(100% - (var(--hole-left, 0px) + var(--hole-width, 0px)));
+        height: var(--hole-height, 0px);
     }
 </style>

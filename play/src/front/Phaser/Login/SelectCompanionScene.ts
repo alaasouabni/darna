@@ -4,7 +4,13 @@ import { gameManager } from "../Game/GameManager";
 import { localUserStore } from "../../Connection/LocalUserStore";
 import { touchScreenManager } from "../../Touch/TouchScreenManager";
 import { PinchManager } from "../UserInput/PinchManager";
-import { selectCompanionSceneVisibleStore } from "../../Stores/SelectCompanionStore";
+import {
+    selectCompanionPreviewFrameStore,
+    selectCompanionReadyStore,
+    selectCompanionSceneVisibleStore,
+} from "../../Stores/SelectCompanionStore";
+import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
+import { get } from "svelte/store";
 import { waScaleManager } from "../Services/WaScaleManager";
 import { isMediaBreakpointUp } from "../../Utils/BreakpointsUtils";
 import { SuperLoaderPlugin } from "../Services/SuperLoaderPlugin";
@@ -15,6 +21,7 @@ import { collectionsSizeStore, selectedCollection } from "../../Stores/SelectCha
 import { connectionManager } from "../../Connection/ConnectionManager";
 import { EnableCameraSceneName } from "./EnableCameraScene";
 import { ResizableScene } from "./ResizableScene";
+import { loaderVisibleStore } from "../../Stores/LoaderStore";
 
 // Event listeners are valid for the lifetime of the Phaser scene and will be garbage collected when the object is destroyed
 /* eslint-disable listeners/no-missing-remove-event-listener, listeners/no-inline-function-event-listener */
@@ -36,6 +43,8 @@ export class SelectCompanionScene extends ResizableScene {
     private pointerTimer = 0;
     private loader: Loader;
     protected superLoad: SuperLoaderPlugin;
+    private sceneCreated = false;
+    private companionsInitialized = false;
 
     constructor() {
         super({
@@ -47,7 +56,9 @@ export class SelectCompanionScene extends ResizableScene {
     }
 
     preload() {
+        const isInGameEdit = get(inGameProfileEditStore);
         this.cache.json.remove(companionListMetakey());
+        selectCompanionReadyStore.set(false);
 
         const companionLoadingManager = new CompanionTexturesLoadingManager(this.superLoad, this.load);
 
@@ -55,12 +66,23 @@ export class SelectCompanionScene extends ResizableScene {
             this.companionTextures.mapTexturesMetadataIntoResources(collections);
             collectionsSizeStore.set(this.companionTextures.getCollectionsKeys().length);
             this.companionModels = companionLoadingManager.loadModels(this.load, this.companionTextures);
-            selectCompanionSceneVisibleStore.set(true);
+            const initAfterLoad = () => this.tryInitializeCompanions();
+            if (this.load.isLoading()) {
+                this.load.once(Phaser.Loader.Events.COMPLETE, initAfterLoad);
+            } else {
+                this.load.once(Phaser.Loader.Events.COMPLETE, initAfterLoad);
+                this.load.start();
+            }
         });
-        this.loader.addLoader();
+        if (!isInGameEdit) {
+            this.loader.addLoader();
+        } else {
+            loaderVisibleStore.set(false);
+        }
     }
 
     create() {
+        this.sceneCreated = true;
         this.selectedCollectionIndex = 0;
         this.currentCompanion = 0;
         this.companionCollectionKeys = this.companionTextures.getCollectionsKeys();
@@ -100,8 +122,7 @@ export class SelectCompanionScene extends ResizableScene {
         localUserStore.setCompanionTextureId(null);
         gameManager.setCompanionTextureId(null);
 
-        this.createCurrentCompanion();
-        this.updateSelectedCompanion();
+        this.tryInitializeCompanions();
         if (gameManager.currentStartedRoom.backgroundColor != undefined) {
             this.cameras.main.setBackgroundColor(gameManager.currentStartedRoom.backgroundColor);
         }
@@ -133,12 +154,19 @@ export class SelectCompanionScene extends ResizableScene {
     }
 
     public closeScene() {
+        const isInGameEdit = get(inGameProfileEditStore);
         // next scene
         this.scene.stop(SelectCompanionSceneName);
         waScaleManager.restoreZoom();
-        gameManager.tryResumingGame(EnableCameraSceneName);
+        if (!isInGameEdit) {
+            gameManager.tryResumingGame(EnableCameraSceneName);
+        }
         this.scene.remove(SelectCompanionSceneName);
         selectCompanionSceneVisibleStore.set(false);
+        selectCompanionReadyStore.set(false);
+        if (isInGameEdit) {
+            inGameProfileEditStore.set(false);
+        }
     }
 
     private createCurrentCompanion(): void {
@@ -193,6 +221,23 @@ export class SelectCompanionScene extends ResizableScene {
             this.setUpCompanion(companion, i);
         }
         this.updateSelectedCompanion();
+    }
+
+    private tryInitializeCompanions(): void {
+        if (!this.sceneCreated || this.companionsInitialized) {
+            return;
+        }
+        const keys = this.companionTextures.getCollectionsKeys();
+        if (keys.length === 0) {
+            return;
+        }
+        this.companionCollectionKeys = keys;
+        selectedCollection.set(this.getSelectedCollectionName());
+        this.createCurrentCompanion();
+        this.updateSelectedCompanion();
+        this.companionsInitialized = true;
+        selectCompanionSceneVisibleStore.set(true);
+        selectCompanionReadyStore.set(true);
     }
 
     public moveToRight() {
@@ -287,6 +332,21 @@ export class SelectCompanionScene extends ResizableScene {
      * Returns pixel position by on column and row number
      */
     private getCompanionPosition(): [number, number] {
+        const isInGameEdit = get(inGameProfileEditStore);
+        if (isInGameEdit) {
+            const frame = get(selectCompanionPreviewFrameStore);
+            const canvas = this.game.canvas;
+            if (frame && canvas) {
+                const rect = canvas.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    const scaleX = this.game.renderer.width / rect.width;
+                    const scaleY = this.game.renderer.height / rect.height;
+                    const x = (frame.centerX - rect.left) * scaleX;
+                    const y = (frame.centerY - rect.top) * scaleY;
+                    return [x, y];
+                }
+            }
+        }
         return [this.game.renderer.width / 2, this.game.renderer.height / 3];
     }
 

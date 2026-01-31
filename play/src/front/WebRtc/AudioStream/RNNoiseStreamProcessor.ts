@@ -46,25 +46,68 @@ export class RNNoiseStreamProcessor {
                     return;
                 }
 
+                let resolved = false;
+
                 const timeout = window.setTimeout(() => {
-                    reject(new Error("RNNoise worklet did not report ready state."));
+                    if (!resolved) reject(new Error("RNNoise worklet did not report ready state."));
                 }, 5000);
 
-                this.workletNode.port.start();
+                // Keep handler alive: ready/error resolves init, dbg keeps printing
                 this.workletNode.port.onmessage = (event: MessageEvent) => {
-                    const data = event.data as { type?: string; message?: string };
+                    const data = event.data as any;
                     if (!data || typeof data.type !== "string") return;
+
                     if (data.type === "ready") {
+                        resolved = true;
                         window.clearTimeout(timeout);
-                        this.workletNode!.port.onmessage = null;
                         console.info("[RNNoise] Worklet ready");
                         resolve();
-                    } else if (data.type === "error") {
+                        return;
+                    }
+
+                    if (data.type === "error") {
+                        resolved = true;
                         window.clearTimeout(timeout);
-                        this.workletNode!.port.onmessage = null;
+                        console.error("[RNNoise] Worklet error:", data.message);
                         reject(new Error(data.message || "RNNoise worklet failed to initialize."));
+                        return;
+                    }
+
+                    if (data.type === "dbg") {
+                        const vad = Number(data.vad ?? 0);
+                        const rawRms = Number(data.rawRms ?? 0);
+                        const speaking = Boolean(data.speaking);
+                        const hold = Number(data.speechHold ?? 0);
+
+                        const makeup = Number(data.makeup ?? 1);
+                        const effMakeup = Number(data.effectiveMakeup ?? makeup);
+
+                        const gate = Number(data.gate ?? 1);
+                        const mix = Number(data.mix ?? 1);
+                        const totalGain = Number(data.totalGain ?? 1);
+
+                        // (Optional) classify mode in logs
+                        // Keep this threshold aligned with SILENCE_RMS in the worklet
+                        const SILENCE_RMS = 0.006;
+                        const mode = speaking ? "speech" : rawRms < SILENCE_RMS ? "silence" : "noise";
+
+                        console.log(
+                            `[RNNoise] mode=${data.mode} vad=${Number(data.vad).toFixed(6)} rms=${Number(
+                                data.rawRms
+                            ).toFixed(5)} ` +
+                                `speaking=${data.speaking} activeNow=${data.activeSpeechNow} hold=${data.speechHold} ` +
+                                `mix=${Number(data.mix).toFixed(2)} gate=${Number(data.gate).toFixed(2)} ` +
+                                `makeup=${Number(data.makeup).toFixed(2)} effMakeup=${Number(
+                                    data.effectiveMakeup
+                                ).toFixed(2)} ` +
+                                `totalGain=${Number(data.totalGain).toFixed(2)} impulse=${data.impulse}`
+                        );
+                        return;
                     }
                 };
+
+                // Optional; not strictly needed when using onmessage, but harmless
+                this.workletNode.port.start();
             });
         })().catch((e) => {
             this.initError = e instanceof Error ? e : new Error(String(e));

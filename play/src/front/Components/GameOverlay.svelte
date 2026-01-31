@@ -12,6 +12,7 @@
     import { forceRefreshChatStore } from "../Stores/ChatStore";
     import { loaderVisibleStore } from "../Stores/LoaderStore";
     import { showModalGlobalComminucationVisibilityStore } from "../Stores/ModalStore";
+    import { inGameProfileEditStore } from "../Stores/ProfileEditStore";
     import { isActivatedStore as calendarIsActivatedStore, isCalendarVisibleStore } from "../Stores/CalendarStore";
     import { isActivatedStore as todoListIsActivatedStore, isTodoListVisibleStore } from "../Stores/TodoListStore";
     import { draggingFile } from "../Stores/FileUploadStore";
@@ -66,15 +67,15 @@
     <div class="bg-contrast">
         <ErrorDialog />
     </div>
-{:else if $loginSceneVisibleStore}
+{:else if $loginSceneVisibleStore && !$inGameProfileEditStore}
     <div class="h-dvh overflow-y-auto">
         <LoginScene {game} />
     </div>
-{:else if $selectCharacterSceneVisibleStore}
+{:else if $selectCharacterSceneVisibleStore && !$inGameProfileEditStore}
     <div class="absolute h-dvh">
         <WokaScene />
     </div>
-{:else if $selectCompanionSceneVisibleStore}
+{:else if $selectCompanionSceneVisibleStore && !$inGameProfileEditStore}
     <div>
         <SelectCompanionScene {game} />
     </div>
@@ -104,6 +105,16 @@
     {/if}
     {#if $todoListIsActivatedStore && $isTodoListVisibleStore}
         <TodoList />
+    {/if}
+
+    {#if $loginSceneVisibleStore && $inGameProfileEditStore}
+        <LoginScene {game} />
+    {/if}
+    {#if $selectCharacterSceneVisibleStore && $inGameProfileEditStore}
+        <WokaScene />
+    {/if}
+    {#if $selectCompanionSceneVisibleStore && $inGameProfileEditStore}
+        <SelectCompanionScene {game} />
     {/if}
 {/if}
 

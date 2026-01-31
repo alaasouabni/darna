@@ -187,6 +187,16 @@ export class GameManager {
     }
 
     /**
+     * Runs a scene on top of the current game without leaving the room.
+     */
+    public runOverlayScene(targetSceneName: string, sceneClass: Phaser.Scene): void {
+        if (!this.scenePlugin.get(targetSceneName)) {
+            this.scenePlugin.add(targetSceneName, sceneClass, false);
+        }
+        this.scenePlugin.run(targetSceneName);
+    }
+
+    /**
      * Temporary leave a gameScene to go back to the loginScene for example.
      * This will close the socket connections and stop the gameScene, but won't remove it.
      */

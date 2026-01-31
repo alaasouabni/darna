@@ -12,6 +12,7 @@
 
     export let customize: () => void;
     export let saveAndContinue: (texturesId: string[]) => void;
+    export let inGame = false;
 
     let wokaData: WokaData | null = null;
     let currentWokaCollection: WokaCollection | null = null;
@@ -195,9 +196,15 @@
     });
 </script>
 
-<div class="mobile-webkit bg-contrast w-screen md:!mt-[15vh] h-full md:!h-[70vh] flex items-center justify-center">
+<div
+    class={`mobile-webkit flex items-center justify-center ${
+        inGame ? "w-full h-full" : "bg-contrast w-screen md:!mt-[15vh] h-full md:!h-[70vh]"
+    }`}
+>
     <div
-        class="mobile-webkit rounded-lg flex flex-col max-w-4xl w-full h-full m-4 relative bg-white/10 backdrop-blur-md"
+        class={`mobile-webkit rounded-lg flex flex-col w-full h-full relative bg-white/10 ${
+            inGame ? "max-w-[900px]" : "max-w-4xl m-4 backdrop-blur-md"
+        }`}
     >
         {#if isLoading}
             <div class="flex items-center justify-center h-64">
@@ -211,7 +218,11 @@
                 </button>
             </div>
         {:else}
-            <div class="flex-1 flex flex-col sm:flex-row items-start gap-6 min-h-0 p-6">
+            <div
+                class={`flex-1 flex ${
+                    inGame ? "flex-col lg:flex-row" : "flex-col sm:flex-row"
+                } items-start gap-6 min-h-0 p-6`}
+            >
                 <div class="flex flex-row gap-4 w-full sm:w-fit">
                     <div class="flex flex-col gap-2">
                         <WokaPreview
@@ -239,7 +250,9 @@
                     <div class="rounded-lg flex flex-col flex-1 min-h-0 min-w-0">
                         <h3 class="text-lg font-semibold capitalize">Woka</h3>
                         <div
-                            class="flex-none lg:flex-1 flex flex-col items-start gap-0 min-h-0 min-w-0 max-h-full overflow-y-scroll overflow-x-auto scroll-mask py-[20px]"
+                            class={`flex-none lg:flex-1 flex flex-col items-start gap-0 min-h-0 min-w-0 max-h-full overflow-y-auto scroll-mask py-[20px] ${
+                                inGame ? "overflow-x-hidden" : "overflow-x-auto"
+                            }`}
                         >
                             {#each wokaData?.["woka"]?.collections || [] as collection, collectionIndex (collection.name)}
                                 <p class="text-sm text-gray-500 mb-1 mt-4 p-0">{collection.name}</p>

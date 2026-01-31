@@ -42,6 +42,7 @@
     import { selectCompanionSceneVisibleStore } from "../../../Stores/SelectCompanionStore";
     import { SelectCompanionScene, SelectCompanionSceneName } from "../../../Phaser/Login/SelectCompanionScene";
     import { EnableCameraScene, EnableCameraSceneName } from "../../../Phaser/Login/EnableCameraScene";
+    import { inGameProfileEditStore } from "../../../Stores/ProfileEditStore";
     import { createFloatingUiActions } from "../../../Utils/svelte-floatingui";
     import ActionBarButton from "../ActionBarButton.svelte";
     import { localUserStore } from "../../../Connection/LocalUserStore";
@@ -168,18 +169,20 @@
     }
 
     function openEditNameScene() {
+        inGameProfileEditStore.set(true);
         loginSceneVisibleStore.set(true);
-        gameManager.leaveGame(LoginSceneName, new LoginScene());
     }
 
     function openEditSkinScene() {
+        inGameProfileEditStore.set(true);
         selectCharacterSceneVisibleStore.set(true);
-        gameManager.leaveGame(SelectCharacterSceneName, new SelectCharacterScene());
+        gameManager.runOverlayScene(SelectCharacterSceneName, new SelectCharacterScene());
     }
 
     function openEditCompanionScene() {
+        inGameProfileEditStore.set(true);
         selectCompanionSceneVisibleStore.set(true);
-        gameManager.leaveGame(SelectCompanionSceneName, new SelectCompanionScene());
+        gameManager.runOverlayScene(SelectCompanionSceneName, new SelectCompanionScene());
     }
 
     function openEnableCameraScene() {
