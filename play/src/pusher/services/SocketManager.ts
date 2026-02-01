@@ -38,6 +38,8 @@ import type {
     UpdateSpaceUserMessage,
     UserMovesMessage,
     ViewportMessage,
+    CharacterTextureMessage,
+    CompanionTextureMessage,
 } from "@workadventure/messages";
 import {
     AvailabilityStatus,
@@ -425,6 +427,42 @@ export class SocketManager implements ZoneEventListener {
             sockets.map(async (socket) => {
                 socket.getUserData().name = name;
                 await this.emitProfileVariable(socket, PROFILE_NAME_VARIABLE, name);
+            })
+        );
+    }
+
+    public async updateUserProfileTextures(
+        userUuid: string,
+        textures: CharacterTextureMessage[]
+    ): Promise<void> {
+        const sockets = this.getSocketsByUserUuid(userUuid);
+        if (sockets.length === 0) {
+            return;
+        }
+
+        await Promise.all(
+            sockets.map(async (socket) => {
+                const socketData = socket.getUserData();
+                socketData.characterTextures = textures;
+                await this.emitProfileVariable(socket, PROFILE_TEXTURES_VARIABLE, textures);
+            })
+        );
+    }
+
+    public async updateUserProfileCompanion(
+        userUuid: string,
+        companionTexture: CompanionTextureMessage | null
+    ): Promise<void> {
+        const sockets = this.getSocketsByUserUuid(userUuid);
+        if (sockets.length === 0) {
+            return;
+        }
+
+        await Promise.all(
+            sockets.map(async (socket) => {
+                const socketData = socket.getUserData();
+                socketData.companionTexture = companionTexture ?? undefined;
+                await this.emitProfileVariable(socket, PROFILE_COMPANION_VARIABLE, companionTexture ?? null);
             })
         );
     }

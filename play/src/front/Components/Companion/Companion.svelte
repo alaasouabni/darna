@@ -1,33 +1,38 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
+    import type { Unsubscriber } from "svelte/store";
     import { gameManager } from "../../Phaser/Game/GameManager";
     import type { PictureStore } from "../../Stores/PictureStore";
+    import { currentPlayerCompanionStore } from "../../Stores/CurrentPlayerCompanionStore";
 
     export let userId: number;
     export let placeholderSrc: string;
     export let width = "62px";
     export let height = "62px";
 
-    const gameScene = gameManager.getCurrentGameScene();
-    let companionWokaPictureStore: PictureStore | undefined;
+    let src = placeholderSrc;
+    let unsubscribe: Unsubscriber | undefined;
+
     if (userId === -1) {
-        companionWokaPictureStore = gameScene.CurrentPlayer.companion?.pictureStore;
+        unsubscribe = currentPlayerCompanionStore.subscribe((source) => {
+            src = source ?? placeholderSrc;
+        });
     } else {
-        companionWokaPictureStore = gameScene.MapPlayersByKey.getNestedStore(
+        const gameScene = gameManager.getCurrentGameScene();
+        const companionWokaPictureStore: PictureStore | undefined = gameScene.MapPlayersByKey.getNestedStore(
             userId,
             (item) => item.companion?.pictureStore
         );
+        if (companionWokaPictureStore) {
+            unsubscribe = companionWokaPictureStore.subscribe((source) => {
+                src = source ?? placeholderSrc;
+            });
+        }
     }
 
-    let src = placeholderSrc;
-
-    if (companionWokaPictureStore) {
-        const unsubscribe = companionWokaPictureStore.subscribe((source) => {
-            src = source ?? placeholderSrc;
-        });
-
-        onDestroy(unsubscribe);
-    }
+    onDestroy(() => {
+        if (unsubscribe) unsubscribe();
+    });
 </script>
 
 <img {src} alt="" draggable="false" style="--theme-width: {width}; --theme-height: {height}" />

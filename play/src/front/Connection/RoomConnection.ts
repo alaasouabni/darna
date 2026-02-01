@@ -537,6 +537,11 @@ export class RoomConnection implements RoomConnection {
                         const characterTextures = roomJoinedMessage.characterTextures.map(
                             this.mapWokaTextureToResourceDescription.bind(this)
                         );
+                        const characterTextureIds = roomJoinedMessage.characterTextures.map((texture) => texture.id);
+                        if (characterTextureIds.length > 0) {
+                            localUserStore.setCharacterTextures(characterTextureIds);
+                        }
+                        localUserStore.setCompanionTextureId(roomJoinedMessage.companionTexture?.id ?? null);
 
                         this._roomJoinedMessageStream.next({
                             connection: this,

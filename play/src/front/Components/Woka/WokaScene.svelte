@@ -67,18 +67,25 @@
 
             analyticsClient.validationWoka("SelectWoka");
             gameManager.setCharacterTextureIds(texturesId);
-            await connectionManager.saveTextures(texturesId);
+
+            let descriptors: WokaTextureDescriptionInterface[] | null = null;
+            try {
+                const wokaData = await getWokaData();
+                descriptors = mapTextureIdsToDescriptors(wokaData, texturesId);
+            } catch (e) {
+                console.warn("Could not fetch Woka data for profile update", e);
+            }
+
+            const didSave = await connectionManager.saveTextures(
+                texturesId,
+                descriptors && descriptors.length > 0 ? descriptors : undefined
+            );
+            if (didSave) {
+                localUserStore.setCharacterTextures(texturesId);
+            }
             if ($inGameProfileEditStore) {
                 try {
                     const scene = gameManager.getCurrentGameScene();
-                    let descriptors: WokaTextureDescriptionInterface[] | null = null;
-                    try {
-                        const wokaData = await getWokaData();
-                        descriptors = mapTextureIdsToDescriptors(wokaData, texturesId);
-                    } catch (e) {
-                        console.warn("Could not fetch Woka data for profile update", e);
-                    }
-
                     if (descriptors && descriptors.length > 0) {
                         await lazyLoadPlayerCharacterTextures(scene.superLoad, descriptors);
                         scene.CurrentPlayer?.updateTextures(descriptors.map((texture) => texture.id));

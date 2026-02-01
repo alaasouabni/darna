@@ -643,6 +643,17 @@ export class Space implements SpaceInterface {
 
         merge(userToUpdate, maskedNewData);
 
+        if (maskedNewData.characterTextures !== undefined) {
+            CharacterLayerManager.wokaBase64(maskedNewData.characterTextures)
+                .then((wokaBase64) => {
+                    (userToUpdate.pictureStore as Writable<string | undefined>).set(wokaBase64);
+                })
+                .catch((e) => {
+                    Sentry.captureException(e);
+                    console.warn("Error while getting woka base64", e);
+                });
+        }
+
         for (const key in maskedNewData) {
             // We allow ourselves a not 100% exact type cast here.
             // Technically, newData could contain any key, not only keys part of SpaceUser type (because additional keys
@@ -688,18 +699,19 @@ export class Space implements SpaceInterface {
     }
 
     private extendSpaceUser(user: SpaceUser): SpaceUserExtended {
+        const pictureStore = writable<string | undefined>(undefined);
+        CharacterLayerManager.wokaBase64(user.characterTextures)
+            .then((wokaBase64) => {
+                pictureStore.set(wokaBase64);
+            })
+            .catch((e) => {
+                Sentry.captureException(e);
+                console.warn("Error while getting woka base64", e);
+            });
+
         const extendedUser = {
             ...user,
-            pictureStore: readable<string | undefined>(undefined, (set) => {
-                CharacterLayerManager.wokaBase64(user.characterTextures)
-                    .then((wokaBase64) => {
-                        set(wokaBase64);
-                    })
-                    .catch((e) => {
-                        Sentry.captureException(e);
-                        console.warn("Error while getting woka base64", e);
-                    });
-            }),
+            pictureStore,
 
             //emitter,
             emitPrivateEvent: (message: NonNullable<PrivateSpaceEvent["event"]>) => {

@@ -663,8 +663,12 @@ class ConnectionManager {
                 params: {
                     token,
                     playUri,
-                    localStorageCharacterTextureIds: localUserStore.getCharacterTextures() ?? undefined,
-                    localStorageCompanionTextureId: localUserStore.getCompanionTextureId() ?? undefined,
+                    localStorageCharacterTextureIds: localUserStore.isLogged()
+                        ? undefined
+                        : localUserStore.getCharacterTextures() ?? undefined,
+                    localStorageCompanionTextureId: localUserStore.isLogged()
+                        ? undefined
+                        : localUserStore.getCompanionTextureId() ?? undefined,
                     chatID: localUserStore.getChatId() ?? undefined,
                 },
             })
@@ -758,7 +762,10 @@ class ConnectionManager {
         }
     }
 
-    async saveTextures(textures: string[]): Promise<boolean> {
+    async saveTextures(
+        textures: string[],
+        textureDescriptors?: { id: string; url: string }[]
+    ): Promise<boolean> {
         if (
             hasCapability("api/save-textures") &&
             this.authToken !== undefined &&
@@ -768,6 +775,7 @@ class ConnectionManager {
                 "save-textures",
                 {
                     textures,
+                    textureDescriptors,
                     roomUrl: this.currentRoom?.key,
                 },
                 {
@@ -782,7 +790,10 @@ class ConnectionManager {
         }
     }
 
-    async saveCompanionTexture(texture: string | null): Promise<boolean> {
+    async saveCompanionTexture(
+        texture: string | null,
+        textureDescriptor?: { id: string; url: string } | null
+    ): Promise<boolean> {
         if (
             hasCapability("api/save-textures") &&
             this.authToken !== undefined &&
@@ -792,6 +803,7 @@ class ConnectionManager {
                 "save-companion-texture",
                 {
                     texture,
+                    textureDescriptor,
                     roomUrl: this.currentRoom?.key,
                 },
                 {

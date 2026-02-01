@@ -153,10 +153,11 @@ export class SelectCompanionScene extends ResizableScene {
     }
 
     public async selectCompanion(): Promise<void> {
-        const companionId = this.companionCurrentCollection[this.currentCompanion].id;
+        const companionDescriptor = this.companionCurrentCollection[this.currentCompanion];
+        const companionId = companionDescriptor.id;
         localUserStore.setCompanionTextureId(companionId);
         gameManager.setCompanionTextureId(companionId);
-        await connectionManager.saveCompanionTexture(companionId);
+        await connectionManager.saveCompanionTexture(companionId, companionDescriptor);
 
         try {
             const currentPlayer = gameManager.getCurrentGameScene().CurrentPlayer;
@@ -184,7 +185,7 @@ export class SelectCompanionScene extends ResizableScene {
     public async noCompagnion(): Promise<void> {
         localUserStore.setCompanionTextureId(null);
         gameManager.setCompanionTextureId(null);
-        await connectionManager.saveCompanionTexture(null);
+        await connectionManager.saveCompanionTexture(null, null);
         try {
             const currentPlayer = gameManager.getCurrentGameScene().CurrentPlayer;
             if (currentPlayer) {

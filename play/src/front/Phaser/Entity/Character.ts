@@ -1,12 +1,13 @@
 import type OutlinePipelinePlugin from "phaser3-rex-plugins/plugins/outlinepipeline-plugin.js";
-import type { Unsubscriber, Readable } from "svelte/store";
-import { get, readable } from "svelte/store";
+import type { Unsubscriber, Writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import type CancelablePromise from "cancelable-promise";
 import { Deferred } from "ts-deferred";
 import type { AvailabilityStatus as AvailabilityStatusType } from "@workadventure/messages";
 import { SayMessageType, AvailabilityStatus, PositionMessage_Direction } from "@workadventure/messages";
 import { defaultWoka } from "@workadventure/shared-utils";
 import { currentPlayerWokaStore } from "../../Stores/CurrentPlayerWokaStore";
+import { currentPlayerCompanionStore } from "../../Stores/CurrentPlayerCompanionStore";
 import { PlayerStatusDot } from "../Components/PlayerStatusDot";
 import { TalkIcon } from "../Components/TalkIcon";
 import type { OutlineableInterface } from "../Game/OutlineableInterface";
@@ -55,6 +56,7 @@ export abstract class Character extends Container implements OutlineableInterfac
     private invisible: boolean;
     private clickable: boolean;
     public companion?: Companion;
+    private companionPictureUnsubscribe: Unsubscriber | undefined;
     private emote: Phaser.GameObjects.DOMElement | null = null;
     private emoteTween: Phaser.Tweens.Tween | null = null;
     private texts: Map<string, Phaser.GameObjects.DOMElement> = new Map();
@@ -62,7 +64,7 @@ export abstract class Character extends Container implements OutlineableInterfac
     scene: GameScene;
     private lastRenderedSprite: string | undefined;
     private readonly isCurrentPlayer: boolean;
-    private readonly _pictureStore: Readable<string | undefined>;
+    private readonly _pictureStore: Writable<string | undefined>;
     protected readonly outlineColorStore = createColorStore();
     private outlineColorStoreUnsubscribe: Unsubscriber | undefined;
     private texturePromise: CancelablePromise<string[] | void> | undefined;
@@ -98,16 +100,15 @@ export abstract class Character extends Container implements OutlineableInterfac
         // by the remote player.
         // The sole place where we need the picture store is when you click on a Woka on the map and want to display
         // the Woka sprite in the popup that opens.
-        this._pictureStore = readable<string | undefined>(undefined, (set) => {
-            this.waitAndGetSnapshot()
-                .then((htmlImageElementSrc) => {
-                    set(htmlImageElementSrc);
-                })
-                .catch((e) => {
-                    console.warn(e);
-                    set(defaultWoka);
-                });
-        });
+        this._pictureStore = writable<string | undefined>(undefined);
+        this.waitAndGetSnapshot()
+            .then((htmlImageElementSrc) => {
+                this._pictureStore.set(htmlImageElementSrc);
+            })
+            .catch((e) => {
+                console.warn(e);
+                this._pictureStore.set(defaultWoka);
+            });
 
         this.isCurrentPlayer = userId != undefined;
         if (this.isCurrentPlayer) {
@@ -256,19 +257,39 @@ export abstract class Character extends Container implements OutlineableInterfac
                 .then((htmlImageElementSrc) => {
                     this.lastRenderedSprite = htmlImageElementSrc;
                     currentPlayerWokaStore.set(htmlImageElementSrc);
+                    this._pictureStore.set(htmlImageElementSrc);
                 })
                 .catch((e) => {
                     console.warn(e);
                     this.lastRenderedSprite = defaultWoka;
                     currentPlayerWokaStore.set(defaultWoka);
+                    this._pictureStore.set(defaultWoka);
+                });
+        } else {
+            this.getSnapshot()
+                .then((htmlImageElementSrc) => {
+                    this.lastRenderedSprite = htmlImageElementSrc;
+                    this._pictureStore.set(htmlImageElementSrc);
+                })
+                .catch((e) => {
+                    console.warn(e);
+                    this.lastRenderedSprite = defaultWoka;
+                    this._pictureStore.set(defaultWoka);
                 });
         }
     }
 
     public updateCompanionTexture(texturePromise: CancelablePromise<string> | null): void {
+        if (this.companionPictureUnsubscribe) {
+            this.companionPictureUnsubscribe();
+            this.companionPictureUnsubscribe = undefined;
+        }
         if (this.companion) {
             this.companion.destroy();
             this.companion = undefined;
+        }
+        if (this.isCurrentPlayer) {
+            currentPlayerCompanionStore.set(undefined);
         }
         if (texturePromise) {
             this.addCompanion(texturePromise);
@@ -394,6 +415,11 @@ export abstract class Character extends Container implements OutlineableInterfac
 
     public addCompanion(texturePromise: CancelablePromise<string>): void {
         this.companion = new Companion(this.scene, this.x, this.y, texturePromise);
+        if (this.isCurrentPlayer) {
+            this.companionPictureUnsubscribe = this.companion.pictureStore.subscribe((src) => {
+                currentPlayerCompanionStore.set(src);
+            });
+        }
     }
 
     private addTextures(textures: string[], frame?: string | number): void {
@@ -503,6 +529,13 @@ export abstract class Character extends Container implements OutlineableInterfac
     }
 
     destroy(): void {
+        if (this.companionPictureUnsubscribe) {
+            this.companionPictureUnsubscribe();
+            this.companionPictureUnsubscribe = undefined;
+        }
+        if (this.isCurrentPlayer) {
+            currentPlayerCompanionStore.set(undefined);
+        }
         for (const sprite of this.sprites.values()) {
             if (this.scene) {
                 this.scene.sys.updateList.remove(sprite);
