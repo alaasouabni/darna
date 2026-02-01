@@ -5,6 +5,11 @@ import type { MessageUserJoined } from "../../Connection/ConnexionModels";
 import type { AddPlayerEvent } from "../../Api/Events/AddPlayerEvent";
 import { iframeListener } from "../../Api/IframeListener";
 import { RoomConnection } from "../../Connection/RoomConnection";
+import {
+    PROFILE_COMPANION_VARIABLE,
+    PROFILE_NAME_VARIABLE,
+    PROFILE_TEXTURES_VARIABLE,
+} from "../../Connection/ProfileVariables";
 import { debugAddPlayer, debugRemovePlayer } from "../../Utils/Debuggers";
 
 export interface RemotePlayerData extends MessageUserJoined {
@@ -19,6 +24,9 @@ export type PlayerDetailsUpdate = {
         availabilityStatus: boolean;
         chatID: boolean;
         sayMessage: boolean;
+        name: boolean;
+        characterTextures: boolean;
+        companionTexture: boolean;
     };
 };
 
@@ -45,6 +53,22 @@ export class RemotePlayersRepository {
             ...userJoinedMessage,
             showVoiceIndicator: false,
         };
+
+        // Apply profile variables immediately on join so late joiners see latest data.
+        const profileName = player.variables.get(PROFILE_NAME_VARIABLE);
+        if (typeof profileName === "string" && profileName.length > 0) {
+            player.name = profileName;
+        }
+
+        const profileTextures = player.variables.get(PROFILE_TEXTURES_VARIABLE);
+        if (Array.isArray(profileTextures)) {
+            player.characterTextures = profileTextures as typeof player.characterTextures;
+        }
+
+        if (player.variables.has(PROFILE_COMPANION_VARIABLE)) {
+            const profileCompanion = player.variables.get(PROFILE_COMPANION_VARIABLE);
+            player.companionTexture = (profileCompanion ?? undefined) as typeof player.companionTexture;
+        }
         this.remotePlayersData.set(userJoinedMessage.userId, player);
 
         if (this.removedPlayers.has(userJoinedMessage.userId)) {
@@ -58,6 +82,9 @@ export class RemotePlayersRepository {
                     showVoiceIndicator: true,
                     chatID: true,
                     sayMessage: true,
+                    name: true,
+                    characterTextures: true,
+                    companionTexture: true,
                 },
                 player,
             });
@@ -120,6 +147,9 @@ export class RemotePlayersRepository {
                     showVoiceIndicator: false,
                     chatID: false,
                     sayMessage: false,
+                    name: false,
+                    characterTextures: false,
+                    companionTexture: false,
                 },
                 player,
             };
@@ -163,6 +193,21 @@ export class RemotePlayersRepository {
                 value: value,
                 playerId: player.userId,
             });
+
+            if (details.setVariable.name === PROFILE_NAME_VARIABLE && typeof value === "string") {
+                player.name = value;
+                updateStruct.updated.name = true;
+            }
+
+            if (details.setVariable.name === PROFILE_TEXTURES_VARIABLE && Array.isArray(value)) {
+                player.characterTextures = value as typeof player.characterTextures;
+                updateStruct.updated.characterTextures = true;
+            }
+
+            if (details.setVariable.name === PROFILE_COMPANION_VARIABLE) {
+                player.companionTexture = (value ?? undefined) as typeof player.companionTexture;
+                updateStruct.updated.companionTexture = true;
+            }
         }
         if (details.sayMessage) {
             player.sayMessage = details.sayMessage;

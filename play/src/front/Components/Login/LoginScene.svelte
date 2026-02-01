@@ -17,6 +17,7 @@
     import { localUserStore } from "../../Connection/LocalUserStore";
     import { hasCapability } from "../../Connection/Capabilities";
     import { isUserNameTooLong, isUserNameValid } from "../../Connection/LocalUserUtils";
+    import { PROFILE_NAME_VARIABLE } from "../../Connection/ProfileVariables";
 
     export let game: Game;
 
@@ -111,10 +112,18 @@
         analyticsClient.validationName();
         const didSaveName = await connectionManager.saveName(finalName);
         gameManager.setPlayerName(finalName);
+        try {
+            gameManager.getCurrentGameScene().CurrentPlayer?.updatePlayerName(finalName);
+            gameManager.getCurrentGameScene().setProfileVariable(PROFILE_NAME_VARIABLE, finalName);
+        } catch (e) {
+            console.warn("Could not update player name in scene", e);
+        }
         if (!didSaveName) {
             if (!localUserStore.isLogged() || !hasCapability("api/save-name")) {
                 localUserStore.setName(finalName);
             }
+        } else {
+            localUserStore.setName(finalName);
         }
         closeInGameModal();
     }

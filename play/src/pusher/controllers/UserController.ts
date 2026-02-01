@@ -6,6 +6,7 @@ import { validatePostQuery } from "../services/QueryValidator";
 import type { ResponseWithUserIdentifier } from "../middlewares/Authenticated";
 import { authenticated } from "../middlewares/Authenticated";
 import { BaseHttpController } from "./BaseHttpController";
+import { socketManager } from "../services/SocketManager";
 
 const debug = Debug("pusher:requests");
 
@@ -81,6 +82,7 @@ export class UserController extends BaseHttpController {
             // Not logged? Nothing to save!
             if (res.isLogged) {
                 await adminService.saveName(res.userIdentifier, body.name, body.roomUrl);
+                await socketManager.updateUserProfileName(res.userIdentifier, body.name);
             }
 
             res.status(204).send("");
@@ -154,6 +156,23 @@ export class UserController extends BaseHttpController {
             // Not logged? Nothing to save!
             if (res.isLogged) {
                 await adminService.saveTextures(res.userIdentifier, body.textures, body.roomUrl);
+                if (res.accessToken) {
+                    try {
+                        const profileData = await adminService.fetchMemberDataByUuid(
+                            res.userIdentifier,
+                            res.accessToken,
+                            body.roomUrl,
+                            req.ip,
+                            body.textures,
+                            undefined
+                        );
+                        if (profileData.status === "ok") {
+                            await socketManager.updateUserProfileFromAdminData(res.userIdentifier, profileData);
+                        }
+                    } catch (err) {
+                        console.warn("Could not refresh profile data after save-textures.", err);
+                    }
+                }
             }
 
             res.status(204).send("");
@@ -228,6 +247,23 @@ export class UserController extends BaseHttpController {
                 // Not logged? Nothing to save!
                 if (res.isLogged) {
                     await adminService.saveCompanionTexture(res.userIdentifier, body.texture, body.roomUrl);
+                    if (res.accessToken) {
+                        try {
+                            const profileData = await adminService.fetchMemberDataByUuid(
+                                res.userIdentifier,
+                                res.accessToken,
+                                body.roomUrl,
+                                req.ip,
+                                [],
+                                body.texture ?? undefined
+                            );
+                            if (profileData.status === "ok") {
+                                await socketManager.updateUserProfileFromAdminData(res.userIdentifier, profileData);
+                            }
+                        } catch (err) {
+                            console.warn("Could not refresh profile data after save-companion-texture.", err);
+                        }
+                    }
                 }
 
                 res.status(204).send("");

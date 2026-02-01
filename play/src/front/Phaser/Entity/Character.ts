@@ -48,7 +48,7 @@ export abstract class Character extends Container implements OutlineableInterfac
     protected readonly statusDot: PlayerStatusDot;
     protected readonly speakerIcon: SpeakerIcon;
     protected readonly megaphoneIcon: MegaphoneIcon;
-    public readonly playerName: string;
+    public playerName: string;
     public sprites: Map<string, Sprite>;
     protected _lastDirection: PositionMessage_Direction = PositionMessage_Direction.DOWN;
     //private teleportation: Sprite;
@@ -61,6 +61,7 @@ export abstract class Character extends Container implements OutlineableInterfac
     private textsToBuild = new Map();
     scene: GameScene;
     private lastRenderedSprite: string | undefined;
+    private readonly isCurrentPlayer: boolean;
     private readonly _pictureStore: Readable<string | undefined>;
     protected readonly outlineColorStore = createColorStore();
     private outlineColorStoreUnsubscribe: Unsubscriber | undefined;
@@ -108,7 +109,8 @@ export abstract class Character extends Container implements OutlineableInterfac
                 });
         });
 
-        if (userId != undefined) {
+        this.isCurrentPlayer = userId != undefined;
+        if (this.isCurrentPlayer) {
             this.waitAndGetSnapshot()
                 .then((htmlImageElementSrc) => {
                     currentPlayerWokaStore.set(htmlImageElementSrc);
@@ -226,6 +228,51 @@ export abstract class Character extends Container implements OutlineableInterfac
         this.getBody().setSize(CHARACTER_BODY_WIDTH, CHARACTER_BODY_HEIGHT); //edit the hitbox to better match the character model
         this.getBody().setOffset(CHARACTER_BODY_OFFSET_X, CHARACTER_BODY_OFFSET_Y);
         this.setDepth(this.y + 16);
+    }
+
+    public updatePlayerName(name: string): void {
+        this.playerName = name;
+        if (this.playerNameText) {
+            const fontSize = StringUtils.containsNonLatinCharacters(name) ? "9px" : "7px";
+            this.playerNameText.setText(name);
+            this.playerNameText.setFontSize(fontSize);
+            this.statusDot.x = (this.playerNameText.getLeftCenter().x ?? 0) - 6;
+            this.megaphoneIcon.setX((this.playerNameText.getRightCenter().x ?? 0) + 8);
+        }
+    }
+
+    public updateTextures(textures: string[], frame?: string | number): void {
+        for (const sprite of this.sprites.values()) {
+            this.remove(sprite);
+            sprite.destroy();
+        }
+        this.sprites.clear();
+        this.lastRenderedSprite = undefined;
+        this.addTextures(textures, frame);
+        this.invisible = false;
+        this.playAnimation(this._lastDirection, false);
+        if (this.isCurrentPlayer) {
+            this.getSnapshot()
+                .then((htmlImageElementSrc) => {
+                    this.lastRenderedSprite = htmlImageElementSrc;
+                    currentPlayerWokaStore.set(htmlImageElementSrc);
+                })
+                .catch((e) => {
+                    console.warn(e);
+                    this.lastRenderedSprite = defaultWoka;
+                    currentPlayerWokaStore.set(defaultWoka);
+                });
+        }
+    }
+
+    public updateCompanionTexture(texturePromise: CancelablePromise<string> | null): void {
+        if (this.companion) {
+            this.companion.destroy();
+            this.companion = undefined;
+        }
+        if (texturePromise) {
+            this.addCompanion(texturePromise);
+        }
     }
 
     private waitAndGetSnapshot(): Promise<string> {

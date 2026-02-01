@@ -10,11 +10,15 @@ import {
     selectCompanionSceneVisibleStore,
 } from "../../Stores/SelectCompanionStore";
 import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
-import { get } from "svelte/store";
+import { get, type Unsubscriber } from "svelte/store";
 import { waScaleManager } from "../Services/WaScaleManager";
 import { isMediaBreakpointUp } from "../../Utils/BreakpointsUtils";
 import { SuperLoaderPlugin } from "../Services/SuperLoaderPlugin";
-import { companionListMetakey, CompanionTexturesLoadingManager } from "../Companion/CompanionTexturesLoadingManager";
+import {
+    companionListMetakey,
+    CompanionTexturesLoadingManager,
+    lazyLoadPlayerCompanionTexture,
+} from "../Companion/CompanionTexturesLoadingManager";
 import type { CompanionTextureDescriptionInterface } from "../Companion/CompanionTextures";
 import { CompanionTextures } from "../Companion/CompanionTextures";
 import { collectionsSizeStore, selectedCollection } from "../../Stores/SelectCharacterSceneStore";
@@ -22,6 +26,7 @@ import { connectionManager } from "../../Connection/ConnectionManager";
 import { EnableCameraSceneName } from "./EnableCameraScene";
 import { ResizableScene } from "./ResizableScene";
 import { loaderVisibleStore } from "../../Stores/LoaderStore";
+import { PROFILE_COMPANION_VARIABLE } from "../../Connection/ProfileVariables";
 
 // Event listeners are valid for the lifetime of the Phaser scene and will be garbage collected when the object is destroyed
 /* eslint-disable listeners/no-missing-remove-event-listener, listeners/no-inline-function-event-listener */
@@ -45,6 +50,7 @@ export class SelectCompanionScene extends ResizableScene {
     protected superLoad: SuperLoaderPlugin;
     private sceneCreated = false;
     private companionsInitialized = false;
+    private previewFrameUnsub: Unsubscriber | undefined;
 
     constructor() {
         super({
@@ -126,6 +132,15 @@ export class SelectCompanionScene extends ResizableScene {
         if (gameManager.currentStartedRoom.backgroundColor != undefined) {
             this.cameras.main.setBackgroundColor(gameManager.currentStartedRoom.backgroundColor);
         }
+
+        if (get(inGameProfileEditStore)) {
+            this.previewFrameUnsub?.();
+            this.previewFrameUnsub = selectCompanionPreviewFrameStore.subscribe((frame) => {
+                if (frame && this.companionsInitialized) {
+                    this.moveCompanion();
+                }
+            });
+        }
     }
 
     update(time: number, delta: number): void {
@@ -138,9 +153,30 @@ export class SelectCompanionScene extends ResizableScene {
     }
 
     public async selectCompanion(): Promise<void> {
-        localUserStore.setCompanionTextureId(this.companionCurrentCollection[this.currentCompanion].id);
-        gameManager.setCompanionTextureId(this.companionCurrentCollection[this.currentCompanion].id);
-        await connectionManager.saveCompanionTexture(this.companionCurrentCollection[this.currentCompanion].id);
+        const companionId = this.companionCurrentCollection[this.currentCompanion].id;
+        localUserStore.setCompanionTextureId(companionId);
+        gameManager.setCompanionTextureId(companionId);
+        await connectionManager.saveCompanionTexture(companionId);
+
+        try {
+            const currentPlayer = gameManager.getCurrentGameScene().CurrentPlayer;
+            if (currentPlayer) {
+                const texturePromise = lazyLoadPlayerCompanionTexture(
+                    this.superLoad,
+                    this.companionCurrentCollection[this.currentCompanion]
+                );
+                currentPlayer.updateCompanionTexture(texturePromise);
+            }
+            if (get(inGameProfileEditStore)) {
+                const scene = gameManager.getCurrentGameScene();
+                scene?.setProfileVariable(
+                    PROFILE_COMPANION_VARIABLE,
+                    this.companionCurrentCollection[this.currentCompanion]
+                );
+            }
+        } catch (e) {
+            console.warn("Could not update companion in scene", e);
+        }
 
         this.closeScene();
     }
@@ -149,6 +185,18 @@ export class SelectCompanionScene extends ResizableScene {
         localUserStore.setCompanionTextureId(null);
         gameManager.setCompanionTextureId(null);
         await connectionManager.saveCompanionTexture(null);
+        try {
+            const currentPlayer = gameManager.getCurrentGameScene().CurrentPlayer;
+            if (currentPlayer) {
+                currentPlayer.updateCompanionTexture(null);
+            }
+            if (get(inGameProfileEditStore)) {
+                const scene = gameManager.getCurrentGameScene();
+                scene?.setProfileVariable(PROFILE_COMPANION_VARIABLE, null);
+            }
+        } catch (e) {
+            console.warn("Could not update companion in scene", e);
+        }
 
         this.closeScene();
     }
@@ -164,6 +212,8 @@ export class SelectCompanionScene extends ResizableScene {
         this.scene.remove(SelectCompanionSceneName);
         selectCompanionSceneVisibleStore.set(false);
         selectCompanionReadyStore.set(false);
+        this.previewFrameUnsub?.();
+        this.previewFrameUnsub = undefined;
         if (isInGameEdit) {
             inGameProfileEditStore.set(false);
         }

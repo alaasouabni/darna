@@ -40,23 +40,22 @@
     }
 
     let previewFrameEl: HTMLDivElement | null = null;
-    let modalEl: HTMLDivElement | null = null;
+    let maskEl: HTMLDivElement | null = null;
     let resizeObserver: ResizeObserver | null = null;
 
     function updatePreviewFrameRect() {
-        if (!previewFrameEl || !modalEl) return;
+        if (!previewFrameEl || !maskEl) return;
         const rect = previewFrameEl.getBoundingClientRect();
-        const modalRect = modalEl.getBoundingClientRect();
         selectCompanionPreviewFrameStore.set({
             centerX: rect.left + rect.width / 2,
             centerY: rect.top + rect.height / 2,
             width: rect.width,
             height: rect.height,
         });
-        modalEl.style.setProperty("--hole-left", `${Math.max(0, rect.left - modalRect.left)}px`);
-        modalEl.style.setProperty("--hole-top", `${Math.max(0, rect.top - modalRect.top)}px`);
-        modalEl.style.setProperty("--hole-width", `${Math.max(0, rect.width)}px`);
-        modalEl.style.setProperty("--hole-height", `${Math.max(0, rect.height)}px`);
+        maskEl.style.setProperty("--hole-left", `${Math.max(0, rect.left)}px`);
+        maskEl.style.setProperty("--hole-top", `${Math.max(0, rect.top)}px`);
+        maskEl.style.setProperty("--hole-width", `${Math.max(0, rect.width)}px`);
+        maskEl.style.setProperty("--hole-height", `${Math.max(0, rect.height)}px`);
     }
 
     onMount(() => {
@@ -80,17 +79,15 @@
 
 {#if $inGameProfileEditStore}
     <div class="fixed inset-0 z-40 flex items-center justify-center pointer-events-auto">
-        <div class="absolute inset-0 bg-black/80" />
+        <div bind:this={maskEl} class="modal-dim" aria-hidden="true">
+            <div class="mask-block mask-top" />
+            <div class="mask-block mask-left" />
+            <div class="mask-block mask-right" />
+            <div class="mask-block mask-bottom" />
+        </div>
         <div
-            bind:this={modalEl}
             class="modal-shell relative z-10 w-[min(760px,90vw)] border border-slate-500/30 rounded-xl shadow-2xl"
         >
-            <div class="modal-mask" aria-hidden="true">
-                <div class="mask-block mask-top" />
-                <div class="mask-block mask-left" />
-                <div class="mask-block mask-right" />
-                <div class="mask-block mask-bottom" />
-            </div>
             <div class="relative z-10 p-6">
             <button
                 type="button"
@@ -107,7 +104,7 @@
             </section>
             <section class="flex justify-center mb-4">
                 <div
-                    class="w-[min(72vw,400px)] rounded-xl border border-slate-400/30 bg-slate-800/70 p-3 shadow-[0_12px_24px_rgba(0,0,0,0.35)]"
+                    class="w-[min(72vw,400px)] rounded-xl border border-slate-400/30 bg-transparent p-3 shadow-[0_12px_24px_rgba(0,0,0,0.35)]"
                 >
                     <div
                         bind:this={previewFrameEl}
@@ -132,18 +129,20 @@
                     </button>
                 {/if}
             </section>
-            <section class="action flex flex-col-reverse md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4 justify-between">
-                <button
-                    class="btn btn-light btn-lg btn-ghost w-full md:w-1/2 block selectCompanionSceneFormBack"
-                    on:click|preventDefault={noCompanion}>{$LL.companion.select.any()}</button
-                >
-                <button
-                    type="submit"
-                    class="btn btn-secondary btn-lg w-full md:w-1/2 block selectCompanionSceneFormSubmit"
-                    on:click|preventDefault={() => analyticsClient.selectCompanion()}
-                    on:click|preventDefault={selectCompanion}>{$LL.companion.select.continue()}</button
-                >
-            </section>
+            <div class="action-panel">
+                <section class="action flex flex-col-reverse md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4 justify-between">
+                    <button
+                        class="btn btn-light btn-lg btn-ghost w-full md:w-1/2 block selectCompanionSceneFormBack"
+                        on:click|preventDefault={noCompanion}>{$LL.companion.select.any()}</button
+                    >
+                    <button
+                        type="submit"
+                        class="btn btn-secondary btn-lg w-full md:w-1/2 block selectCompanionSceneFormSubmit"
+                        on:click|preventDefault={() => analyticsClient.selectCompanion()}
+                        on:click|preventDefault={selectCompanion}>{$LL.companion.select.continue()}</button
+                    >
+                </section>
+            </div>
             </div>
         </div>
     </div>
@@ -229,12 +228,10 @@
     .modal-shell {
         background: transparent;
     }
-    .modal-mask {
+    .modal-dim {
         position: absolute;
         inset: 0;
         pointer-events: none;
-        border-radius: 0.75rem;
-        overflow: hidden;
     }
     .mask-block {
         position: absolute;
@@ -263,5 +260,13 @@
         top: var(--hole-top, 0px);
         width: calc(100% - (var(--hole-left, 0px) + var(--hole-width, 0px)));
         height: var(--hole-height, 0px);
+    }
+    .action-panel {
+        margin-top: 1.5rem;
+        padding: 0.75rem;
+        border-radius: 0.75rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(15, 23, 42, 0.9);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
     }
 </style>

@@ -52,6 +52,10 @@ export class PusherRoom {
         socket.getUserData().pusherRoom = undefined;
     }
 
+    public getListenersSnapshot(): Socket[] {
+        return Array.from(this.listeners);
+    }
+
     public isEmpty(): boolean {
         return this.positionNotifier.isEmpty();
     }

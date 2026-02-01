@@ -1,5 +1,9 @@
 import type { FilterType, PusherToBackSpaceMessage, SubMessage } from "@workadventure/messages";
-import { SpaceUser } from "@workadventure/messages";
+import {
+    AvailabilityStatus,
+    PusherToBackSpaceMessage as PusherToBackSpaceMessageCodec,
+    SpaceUser,
+} from "@workadventure/messages";
 import * as Sentry from "@sentry/node";
 import Debug from "debug";
 import { Color } from "@workadventure/shared-utils";
@@ -67,6 +71,13 @@ export class SpaceToBackForwarder implements SpaceToBackForwarderInterface {
             }),
             lowercaseName: socketData.name.toLowerCase(),
         };
+
+        console.info("[addSpaceUser] payload", {
+            spaceName: this._space.name,
+            spaceUserId,
+            availabilityStatus: socketData.availabilityStatus,
+            filterType,
+        });
 
         try {
             socketData.spaces.add(this._space.name);
@@ -196,6 +207,12 @@ export class SpaceToBackForwarder implements SpaceToBackForwarderInterface {
         }
         this._space.spaceStreamToBackPromise
             .then((spaceStreamToBack) => {
+                try {
+                    PusherToBackSpaceMessageCodec.encode({ message: pusherToBackSpaceMessage }).finish();
+                } catch (err) {
+                    console.error("[spaceBack] encode failed", err);
+                    console.error("[spaceBack] encode failed payload", pusherToBackSpaceMessage);
+                }
                 spaceStreamToBack.write(
                     {
                         message: pusherToBackSpaceMessage,
@@ -229,21 +246,31 @@ export class SpaceToBackForwarder implements SpaceToBackForwarderInterface {
     }
 
     addUserToNotify(user: SpaceUser): void {
+        const safeUser: SpaceUser = {
+            ...user,
+            availabilityStatus:
+                user.availabilityStatus ?? AvailabilityStatus.ONLINE,
+        };
         this.forwardMessageToSpaceBack({
             $case: "addSpaceUserToNotifyMessage",
             addSpaceUserToNotifyMessage: {
                 spaceName: this._space.name,
-                user,
+                user: safeUser,
             },
         });
     }
 
     deleteUserFromNotify(user: SpaceUser): void {
+        const safeUser: SpaceUser = {
+            ...user,
+            availabilityStatus:
+                user.availabilityStatus ?? AvailabilityStatus.ONLINE,
+        };
         this.forwardMessageToSpaceBack({
             $case: "deleteSpaceUserToNotifyMessage",
             deleteSpaceUserToNotifyMessage: {
                 spaceName: this._space.name,
-                user,
+                user: safeUser,
             },
         });
     }

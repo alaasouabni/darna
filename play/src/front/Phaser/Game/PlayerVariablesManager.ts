@@ -27,7 +27,7 @@ export class PlayerVariablesManager {
         // So we probably need a special message here (or we should listen to the Update message on our own uuid?)
     }
 
-    private setVariable(event: SetPlayerVariableEvent, source: MessageEventSource | null, emitOnNetwork = true): void {
+    public setVariable(event: SetPlayerVariableEvent, source: MessageEventSource | null, emitOnNetwork = true): void {
         const key = event.key;
 
         // Let's stop any propagation of the value we set is the same as the existing value.

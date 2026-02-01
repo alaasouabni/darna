@@ -24,6 +24,9 @@ import type { AdminSocketData } from "../models/Websocket/AdminSocketData";
 import type { AdminMessageInterface } from "../models/Websocket/Admin/AdminMessages";
 import { isAdminMessageInterface } from "../models/Websocket/Admin/AdminMessages";
 import { adminService } from "../services/AdminService";
+import { mapFetcher } from "@workadventure/map-editor/src/MapFetcher";
+import { ITiledMap } from "@workadventure/tiled-map-type-guard";
+import { isMapDetailsData, isRoomRedirect } from "@workadventure/messages";
 import { openIDClient } from "../services/OpenIDClient";
 import { validateWebsocketQuery } from "../services/QueryValidator";
 import type { SocketData, SpaceName } from "../models/Websocket/SocketData";
@@ -31,6 +34,86 @@ import { emitInBatch } from "../services/IoSocketHelpers";
 import { ClientAbortError } from "../models/ClientAbortError";
 
 const debug = Debug("pusher:requests");
+
+const spawnPositionCache: Map<string, { x: number; y: number }> = new Map();
+
+async function fetchMapFileForRoom(roomUrl: string, redirectCount = 0): Promise<ITiledMap | undefined> {
+    if (redirectCount > 5) {
+        return undefined;
+    }
+    const response = await adminService.fetchMapDetails(roomUrl);
+    const roomRedirect = isRoomRedirect.safeParse(response);
+    if (roomRedirect.success) {
+        return fetchMapFileForRoom(roomRedirect.data.redirectUrl, redirectCount + 1);
+    }
+
+    const mapDetails = isMapDetailsData.safeParse(response);
+    if (!mapDetails.success) {
+        return undefined;
+    }
+
+    const mapUrl = await mapFetcher.getMapUrl(mapDetails.data.mapUrl, mapDetails.data.wamUrl);
+    const fetchedData = await mapFetcher.fetchFile(mapUrl);
+    const checkMapFile = ITiledMap.safeParse(fetchedData.data);
+    return checkMapFile.success ? checkMapFile.data : undefined;
+}
+
+function computeSpawnFromMap(mapFile: ITiledMap): { x: number; y: number } | undefined {
+    const tileWidth = mapFile.tilewidth ?? 0;
+    const tileHeight = mapFile.tileheight ?? 0;
+
+    for (const layer of mapFile.layers ?? []) {
+        if (layer.name !== "start") continue;
+        if (layer.type === "tilelayer" && Array.isArray(layer.data)) {
+            const width = layer.width ?? mapFile.width ?? 0;
+            const index = layer.data.findIndex((gid) => typeof gid === "number" && gid > 0);
+            if (index >= 0 && width > 0 && tileWidth > 0 && tileHeight > 0) {
+                const tileX = index % width;
+                const tileY = Math.floor(index / width);
+                return {
+                    x: tileX * tileWidth + tileWidth / 2,
+                    y: tileY * tileHeight + tileHeight / 2,
+                };
+            }
+        }
+        if (layer.type === "objectgroup" && Array.isArray(layer.objects) && layer.objects.length > 0) {
+            const obj = layer.objects[0];
+            const width = obj.width ?? 0;
+            const height = obj.height ?? 0;
+            return {
+                x: obj.x + width / 2,
+                y: obj.y + height / 2,
+            };
+        }
+    }
+
+    if (mapFile.width && mapFile.height && tileWidth > 0 && tileHeight > 0) {
+        return {
+            x: (mapFile.width * tileWidth) / 2,
+            y: (mapFile.height * tileHeight) / 2,
+        };
+    }
+
+    return undefined;
+}
+
+async function getSpawnPositionForRoom(roomUrl: string): Promise<{ x: number; y: number } | undefined> {
+    const cached = spawnPositionCache.get(roomUrl);
+    if (cached) return cached;
+
+    try {
+        const mapFile = await fetchMapFileForRoom(roomUrl);
+        if (!mapFile) return undefined;
+        const spawn = computeSpawnFromMap(mapFile);
+        if (spawn) {
+            spawnPositionCache.set(roomUrl, spawn);
+        }
+        return spawn;
+    } catch (e) {
+        console.warn("Failed to compute spawn position for room", roomUrl, e);
+        return undefined;
+    }
+}
 
 const isInvalidGrant = (err: unknown): boolean => {
     if (!err || typeof err !== "object") return false;
@@ -307,6 +390,23 @@ export class IoSocketController {
                     } = query;
 
                     const chatID = query.chatID ? query.chatID : undefined;
+                    const safeNumber = (value: number, fallback: number): number =>
+                        Number.isFinite(value) ? value : fallback;
+
+                    let safeX = safeNumber(x, 0);
+                    let safeY = safeNumber(y, 0);
+                    const safeTop = safeNumber(top, 0);
+                    const safeRight = safeNumber(right, 0);
+                    const safeBottom = safeNumber(bottom, 0);
+                    const safeLeft = safeNumber(left, 0);
+
+                    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+                        const spawn = await getSpawnPositionForRoom(roomId);
+                        if (spawn) {
+                            safeX = spawn.x;
+                            safeY = spawn.y;
+                        }
+                    }
 
                     try {
                         if (version !== apiVersionHash) {
@@ -511,16 +611,16 @@ export class IoSocketController {
                             characterTextures,
                             companionTexture,
                             position: {
-                                x: x,
-                                y: y,
+                                x: safeX,
+                                y: safeY,
                                 direction: "down",
                                 moving: false,
                             },
                             viewport: {
-                                top,
-                                right,
-                                bottom,
-                                left,
+                                top: safeTop,
+                                right: safeRight,
+                                bottom: safeBottom,
+                                left: safeLeft,
                             },
                             availabilityStatus,
                             lastCommandId,

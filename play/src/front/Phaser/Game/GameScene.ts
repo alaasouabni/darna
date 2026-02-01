@@ -208,6 +208,7 @@ import type { PlayerDetailsUpdate } from "./RemotePlayersRepository";
 import { RemotePlayersRepository } from "./RemotePlayersRepository";
 import { IframeEventDispatcher } from "./IframeEventDispatcher";
 import { PlayerVariablesManager } from "./PlayerVariablesManager";
+import type { SetPlayerVariableEvent } from "../../Api/Events/SetPlayerVariableEvent";
 import { SayManager } from "./Say/SayManager";
 import { EntitiesCollectionsManager } from "./MapEditor/EntitiesCollectionsManager";
 import { DEPTH_BUBBLE_CHAT_SPRITE, DEPTH_WHITE_MASK } from "./DepthIndexes";
@@ -1443,6 +1444,27 @@ export class GameScene extends DirtyScene {
         if (update.updated.sayMessage) {
             character.say(update.player.sayMessage?.message ?? "", update.player.sayMessage?.type ?? 0);
         }
+        if (update.updated.name) {
+            character.updatePlayerName(update.player.name);
+        }
+        if (update.updated.characterTextures && update.player.characterTextures.length > 0) {
+            lazyLoadPlayerCharacterTextures(this.superLoad, update.player.characterTextures)
+                .then((textures) => {
+                    character.updateTextures(textures);
+                })
+                .catch((e) => {
+                    console.warn("Could not update remote player textures", e);
+                });
+        }
+        if (update.updated.companionTexture) {
+            if (update.player.companionTexture) {
+                character.updateCompanionTexture(
+                    lazyLoadPlayerCompanionTexture(this.superLoad, update.player.companionTexture)
+                );
+            } else {
+                character.updateCompanionTexture(null);
+            }
+        }
     }
 
     /**
@@ -1527,6 +1549,23 @@ export class GameScene extends DirtyScene {
 
     public getRemotePlayersRepository(): RemotePlayersRepository {
         return this.remotePlayersRepository;
+    }
+
+    public setPlayerVariable(event: SetPlayerVariableEvent): void {
+        if (!this.playerVariablesManager) {
+            return;
+        }
+        this.playerVariablesManager.setVariable(event, null, true);
+    }
+
+    public setProfileVariable(key: string, value: unknown): void {
+        this.setPlayerVariable({
+            key,
+            value,
+            public: true,
+            persist: false,
+            scope: "room",
+        });
     }
 
     public getMapEditorModeManager(): MapEditorModeManager {

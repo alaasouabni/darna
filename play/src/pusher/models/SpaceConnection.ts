@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/node";
 import Debug from "debug";
 import type { BackToPusherSpaceMessage } from "@workadventure/messages";
+import { PusherToBackSpaceMessage as PusherToBackSpaceMessageCodec } from "@workadventure/messages";
 import type { SpaceManagerClient } from "@workadventure/messages/src/ts-proto-generated/services";
 import { GRPC_MAX_MESSAGE_SIZE } from "../enums/EnvironmentVariable";
 import { apiClientRepository } from "../services/ApiClientRepository";
@@ -217,7 +218,12 @@ export class SpaceConnection implements SpaceConnectionInterface {
     private joinSpace(spaceStreamToBackPromise: Promise<BackSpaceConnection>, space: SpaceForSpaceConnectionInterface) {
         spaceStreamToBackPromise
             .then((spaceStreamToBack) => {
-                spaceStreamToBack.write({
+                console.info("[joinSpace] payload", {
+                    spaceName: space.name,
+                    filterType: space.filterType,
+                    world: space.world,
+                });
+                const payload = {
                     message: {
                         $case: "joinSpaceMessage",
                         joinSpaceMessage: {
@@ -227,7 +233,14 @@ export class SpaceConnection implements SpaceConnectionInterface {
                             world: space.world,
                         },
                     },
-                });
+                };
+                try {
+                    PusherToBackSpaceMessageCodec.encode(payload).finish();
+                } catch (err) {
+                    console.error("[joinSpace] encode failed", err);
+                    console.error("[joinSpace] encode failed payload", payload);
+                }
+                spaceStreamToBack.write(payload);
             })
             .catch((e) => {
                 // FIXME: if joinspace fails, we have big problems.

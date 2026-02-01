@@ -13,7 +13,6 @@ import type {
     ErrorApiData,
     ErrorMessage,
     ErrorScreenMessage,
-    FilterType,
     GetMemberAnswer,
     GetMemberQuery,
     JoinRoomMessage,
@@ -25,7 +24,7 @@ import type {
     PlayGlobalMessage,
     PrivateEventFrontToPusher,
     PublicEventFrontToPusher,
-    PusherToBackMessage,
+    PusherToBackMessage as PusherToBackMessageType,
     QueryMessage,
     RemoveSpaceFilterMessage,
     ReportPlayerMessage,
@@ -34,12 +33,19 @@ import type {
     SearchTagsAnswer,
     SearchTagsQuery,
     ServerToAdminClientMessage,
-    SetPlayerDetailsMessage,
+    SetPlayerDetailsMessage as SetPlayerDetailsMessageType,
     IceServersAnswer,
     UpdateSpaceUserMessage,
     UserMovesMessage,
     ViewportMessage,
 } from "@workadventure/messages";
+import {
+    AvailabilityStatus,
+    FilterType,
+    SetPlayerDetailsMessage,
+    SetPlayerVariableMessage_Scope,
+} from "@workadventure/messages";
+import { PusherToBackMessage as PusherToBackMessageCodec } from "@workadventure/messages";
 import { noUndefined, ServerToClientMessage } from "@workadventure/messages";
 import * as Sentry from "@sentry/node";
 import type { AxiosResponse } from "axios";
@@ -63,6 +69,12 @@ import { clientEventsEmitter } from "./ClientEventsEmitter";
 import { gaugeManager } from "./GaugeManager";
 import { apiClientRepository } from "./ApiClientRepository";
 import { adminService } from "./AdminService";
+import {
+    PROFILE_COMPANION_VARIABLE,
+    PROFILE_NAME_VARIABLE,
+    PROFILE_TEXTURES_VARIABLE,
+} from "../enums/ProfileVariables";
+import type { FetchMemberDataByUuidSuccessResponse } from "./AdminApi";
 import type { ShortMapDescription } from "./ShortMapDescription";
 import { matrixProvider } from "./MatrixProvider";
 
@@ -220,13 +232,30 @@ export class SocketManager implements ZoneEventListener {
         let streamToBack: BackConnection | undefined;
         let joinRoomEventEmitted = false;
         try {
+            if (!Number.isFinite(socketData.position?.x) || !Number.isFinite(socketData.position?.y)) {
+                socketData.position = { x: 0, y: 0, direction: "down", moving: false };
+            }
+            if (!Number.isFinite(socketData.availabilityStatus)) {
+                socketData.availabilityStatus = AvailabilityStatus.ONLINE;
+            }
+
+            console.info("[joinRoom] payload", {
+                userUuid: socketData.userUuid,
+                roomId: socketData.roomId,
+                position: socketData.position,
+                availabilityStatus: socketData.availabilityStatus,
+            });
+
+            const positionMessage = ProtobufUtils.toPositionMessage(socketData.position);
+            console.info("[joinRoom] positionMessage", positionMessage);
+
             const joinRoomMessage: JoinRoomMessage = {
                 userUuid: socketData.userUuid,
                 IPAddress: socketData.ipAddress,
                 roomId: socketData.roomId,
                 name: socketData.name,
                 availabilityStatus: socketData.availabilityStatus,
-                positionMessage: ProtobufUtils.toPositionMessage(socketData.position),
+                positionMessage,
                 tag: socketData.tags,
                 isLogged: socketData.isLogged,
                 companionTexture: socketData.companionTexture,
@@ -304,12 +333,18 @@ export class SocketManager implements ZoneEventListener {
                     }
                 });
 
-            const pusherToBackMessage: PusherToBackMessage = {
+            const pusherToBackMessage: PusherToBackMessageType = {
                 message: {
                     $case: "joinRoomMessage",
                     joinRoomMessage,
                 },
             };
+            try {
+                PusherToBackMessageCodec.encode(pusherToBackMessage).finish();
+            } catch (err) {
+                console.error("[joinRoom] encode failed", err);
+                console.error("[joinRoom] encode failed payload", pusherToBackMessage);
+            }
             streamToBack.write(pusherToBackMessage);
 
             const pusherRoom = await this.getOrCreateRoom(socketData.roomId);
@@ -344,6 +379,87 @@ export class SocketManager implements ZoneEventListener {
         }
     }
 
+    private getSocketsByUserUuid(userUuid: string): Socket[] {
+        const sockets: Socket[] = [];
+        for (const room of this.rooms.values()) {
+            for (const listener of room.getListenersSnapshot()) {
+                if (listener.getUserData().userUuid === userUuid) {
+                    sockets.push(listener);
+                }
+            }
+        }
+        return sockets;
+    }
+
+    private async emitProfileVariable(socket: Socket, name: string, value: unknown): Promise<void> {
+        const socketData = socket.getUserData();
+        if (!socketData.backConnection || socketData.disconnecting) {
+            return;
+        }
+        try {
+            await this.handleSetPlayerDetails(
+                socket,
+                SetPlayerDetailsMessage.fromPartial({
+                    setVariable: {
+                        name,
+                        value: JSON.stringify(value),
+                        public: true,
+                        persist: true,
+                        ttl: undefined,
+                        scope: SetPlayerVariableMessage_Scope.WORLD,
+                    },
+                })
+            );
+        } catch (err) {
+            console.warn(`emitProfileVariable failed for ${name}`, err);
+        }
+    }
+
+    public async updateUserProfileName(userUuid: string, name: string): Promise<void> {
+        const sockets = this.getSocketsByUserUuid(userUuid);
+        if (sockets.length === 0) {
+            return;
+        }
+
+        await Promise.all(
+            sockets.map(async (socket) => {
+                socket.getUserData().name = name;
+                await this.emitProfileVariable(socket, PROFILE_NAME_VARIABLE, name);
+            })
+        );
+    }
+
+    public async updateUserProfileFromAdminData(
+        userUuid: string,
+        data: FetchMemberDataByUuidSuccessResponse
+    ): Promise<void> {
+        const sockets = this.getSocketsByUserUuid(userUuid);
+        if (sockets.length === 0) {
+            return;
+        }
+
+        await Promise.all(
+            sockets.map(async (socket) => {
+                const socketData = socket.getUserData();
+
+                if (data.username) {
+                    socketData.name = data.username;
+                    await this.emitProfileVariable(socket, PROFILE_NAME_VARIABLE, data.username);
+                }
+
+                socketData.characterTextures = data.characterTextures ?? [];
+                await this.emitProfileVariable(socket, PROFILE_TEXTURES_VARIABLE, data.characterTextures ?? []);
+
+                socketData.companionTexture = data.companionTexture ?? undefined;
+                await this.emitProfileVariable(
+                    socket,
+                    PROFILE_COMPANION_VARIABLE,
+                    data.companionTexture ?? null
+                );
+            })
+        );
+    }
+
     public handleUpdateSpaceMetadata(client: Socket, spaceName: string, metadata: { [key: string]: unknown }): void {
         try {
             const space = this.spaces.get(spaceName);
@@ -371,6 +487,10 @@ export class SocketManager implements ZoneEventListener {
         const socketData = client.getUserData();
 
         let space: SpaceInterface | undefined = this.spaces.get(spaceName);
+
+        if (!Number.isFinite(filterType)) {
+            filterType = FilterType.ALL_USERS;
+        }
 
         if (!space) {
             const onSpaceEmpty = (space: SpaceInterface) => {
@@ -579,12 +699,12 @@ export class SocketManager implements ZoneEventListener {
     }
 
     // Useless now, will be useful again if we allow editing details in game
-    async handleSetPlayerDetails(client: Socket, playerDetailsMessage: SetPlayerDetailsMessage): Promise<void> {
+    async handleSetPlayerDetails(client: Socket, playerDetailsMessage: SetPlayerDetailsMessageType): Promise<void> {
         const socketData = client.getUserData();
         if (playerDetailsMessage.chatID !== undefined) {
             socketData.chatID = playerDetailsMessage.chatID;
         }
-        const pusherToBackMessage: PusherToBackMessage["message"] = {
+        const pusherToBackMessage: PusherToBackMessageType["message"] = {
             $case: "setPlayerDetailsMessage",
             setPlayerDetailsMessage: playerDetailsMessage,
         };
@@ -1016,9 +1136,9 @@ export class SocketManager implements ZoneEventListener {
         }
     }
 
-    forwardMessageToBack(client: Socket, message: PusherToBackMessage["message"]): void {
+    forwardMessageToBack(client: Socket, message: PusherToBackMessageType["message"]): void {
         const socketData = client.getUserData();
-        const pusherToBackMessage: PusherToBackMessage = {
+        const pusherToBackMessage: PusherToBackMessageType = {
             message: message,
         };
 
@@ -1027,10 +1147,17 @@ export class SocketManager implements ZoneEventListener {
             throw new Error("forwardMessageToBack => client.backConnection is undefined");
         }
 
+        try {
+            PusherToBackMessageCodec.encode(pusherToBackMessage).finish();
+        } catch (err) {
+            console.error("[toBack] encode failed", err);
+            console.error("[toBack] encode failed payload", pusherToBackMessage);
+        }
+
         socketData.backConnection.write(pusherToBackMessage);
     }
 
-    forwardAdminMessageToBack(client: Socket, message: PusherToBackMessage["message"]): void {
+    forwardAdminMessageToBack(client: Socket, message: PusherToBackMessageType["message"]): void {
         const socketData = client.getUserData();
         if (!socketData.canEdit) {
             Sentry.captureException(

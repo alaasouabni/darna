@@ -8,12 +8,54 @@
     import { selectCharacterSceneVisibleStore } from "../../Stores/SelectCharacterStore";
     import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
     import { EnableCameraSceneName } from "../../Phaser/Login/EnableCameraScene";
+    import { lazyLoadPlayerCharacterTextures } from "../../Phaser/Entity/PlayerTexturesLoadingManager";
+    import { ABSOLUTE_PUSHER_URL } from "../../Enum/ComputedConst";
+    import { localUserStore } from "../../Connection/LocalUserStore";
+    import type { WokaData } from "./WokaTypes";
+    import type { WokaTextureDescriptionInterface } from "../../Phaser/Entity/PlayerTextures";
+    import { PROFILE_TEXTURES_VARIABLE } from "../../Connection/ProfileVariables";
     import XIcon from "../Icons/XIcon.svelte";
     import WokaSelectScene from "./WokaSelectScene.svelte";
     import WokaCustomizeScene from "./WokaCustomizeScene.svelte";
 
     let buildOwnWoka = false;
     let error: string | null = null;
+    let wokaDataCache: WokaData | null = null;
+
+    async function getWokaData(): Promise<WokaData> {
+        if (wokaDataCache) {
+            return wokaDataCache;
+        }
+        const roomUrl = gameManager.currentStartedRoom.href;
+        const response = await fetch(`${ABSOLUTE_PUSHER_URL}woka/list?roomUrl=${encodeURIComponent(roomUrl)}`, {
+            headers: {
+                Authorization: localUserStore.getAuthToken() || "",
+            },
+            credentials: "include",
+        });
+        if (!response.ok) {
+            throw new Error("Failed to load Woka data");
+        }
+        wokaDataCache = await response.json();
+        return wokaDataCache;
+    }
+
+    function mapTextureIdsToDescriptors(wokaData: WokaData, texturesId: string[]): WokaTextureDescriptionInterface[] {
+        const textureById = new Map<string, string>();
+        for (const layer of Object.values(wokaData)) {
+            for (const collection of layer.collections) {
+                for (const texture of collection.textures) {
+                    textureById.set(texture.id, texture.url);
+                }
+            }
+        }
+        return texturesId
+            .map((id) => {
+                const url = textureById.get(id);
+                return url ? { id, url } : undefined;
+            })
+            .filter((texture): texture is WokaTextureDescriptionInterface => texture !== undefined);
+    }
 
     async function saveAndContinue(texturesId: string[]) {
         error = null; // Reset error message
@@ -26,6 +68,28 @@
             analyticsClient.validationWoka("SelectWoka");
             gameManager.setCharacterTextureIds(texturesId);
             await connectionManager.saveTextures(texturesId);
+            if ($inGameProfileEditStore) {
+                try {
+                    const scene = gameManager.getCurrentGameScene();
+                    let descriptors: WokaTextureDescriptionInterface[] | null = null;
+                    try {
+                        const wokaData = await getWokaData();
+                        descriptors = mapTextureIdsToDescriptors(wokaData, texturesId);
+                    } catch (e) {
+                        console.warn("Could not fetch Woka data for profile update", e);
+                    }
+
+                    if (descriptors && descriptors.length > 0) {
+                        await lazyLoadPlayerCharacterTextures(scene.superLoad, descriptors);
+                        scene.CurrentPlayer?.updateTextures(descriptors.map((texture) => texture.id));
+                        scene.setProfileVariable(PROFILE_TEXTURES_VARIABLE, descriptors);
+                    } else {
+                        scene.CurrentPlayer?.updateTextures(texturesId);
+                    }
+                } catch (e) {
+                    console.warn("Could not update textures in scene", e);
+                }
+            }
             selectCharacterSceneVisibleStore.set(false);
             gameManager.tryToStopScene(SelectCharacterSceneName);
             if ($inGameProfileEditStore) {
