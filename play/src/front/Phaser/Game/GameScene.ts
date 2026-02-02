@@ -12,7 +12,7 @@ import { ForwardableStore, MapStore } from "@workadventure/store-utils";
 import { MathUtils } from "@workadventure/math-utils";
 import CancelablePromise from "cancelable-promise";
 import { Deferred } from "ts-deferred";
-import type { GroupUsersUpdateMessage } from "@workadventure/messages";
+import type { CharacterTextureMessage, GroupUsersUpdateMessage, SpaceUser } from "@workadventure/messages";
 import {
     AvailabilityStatus,
     availabilityStatusToJSON,
@@ -170,7 +170,7 @@ import { isActivatedStore as isCalendarActiveStore, calendarEventsStore } from "
 import { isActivatedStore as isTodoListActiveStore, todoListsStore } from "../../Stores/TodoListStore";
 import { externalSvelteComponentService } from "../../Stores/Utils/externalSvelteComponentService";
 import type { ExtensionModule } from "../../ExternalModule/ExtensionModule";
-import type { SpaceInterface } from "../../Space/SpaceInterface";
+import type { SpaceInterface, SpaceUserUpdate } from "../../Space/SpaceInterface";
 import type { UserProviderInterface } from "../../Chat/UserProvider/UserProviderInterface";
 import { registerAdditionalMenuItem, unregisterAdditionalMenuItem } from "../../Stores/AdditionalItemsMenuStore";
 import { popupStore } from "../../Stores/PopupStore";
@@ -1566,6 +1566,52 @@ export class GameScene extends DirtyScene {
             persist: false,
             scope: "room",
         });
+    }
+
+    public syncLocalUserSpaceProfile(update: {
+        name?: string;
+        characterTextures?: CharacterTextureMessage[];
+    }): void {
+        const userUuid = localUserStore.getLocalUser()?.uuid;
+        if (!userUuid || !this._spaceRegistry) {
+            return;
+        }
+
+        const updateMask: string[] = [];
+        const spaceUserUpdate: SpaceUserUpdate = {};
+
+        if (update.name !== undefined) {
+            spaceUserUpdate.name = update.name;
+            updateMask.push("name");
+        }
+
+        if (update.characterTextures !== undefined) {
+            spaceUserUpdate.characterTextures = update.characterTextures;
+            updateMask.push("characterTextures");
+        }
+
+        if (updateMask.length === 0) {
+            return;
+        }
+
+        for (const space of this._spaceRegistry.getAll()) {
+            const spaceUser = space.getSpaceUserByUuid(userUuid);
+            if (!spaceUser) {
+                continue;
+            }
+
+            space.emitUpdateUser(spaceUserUpdate);
+
+            const spaceWithUpdate = space as unknown as {
+                updateUserData?: (user: SpaceUser, updateMask: string[]) => void;
+            };
+            if (spaceWithUpdate.updateUserData) {
+                spaceWithUpdate.updateUserData(
+                    { ...(spaceUser as unknown as SpaceUser), ...spaceUserUpdate } as SpaceUser,
+                    updateMask
+                );
+            }
+        }
     }
 
     public getMapEditorModeManager(): MapEditorModeManager {

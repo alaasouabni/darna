@@ -51,13 +51,15 @@
     import HeaderMenuItem from "./HeaderMenuItem.svelte";
     import AdditionalMenuItems from "./AdditionalMenuItems.svelte";
     import { IconBug, IconLogout } from "@wa-icons";
+    import { currentPlayerNameStore } from "../../../Stores/CurrentPlayerProfileStore";
 
     // The ActionBarButton component is displayed differently in the profile menu.
     // We use the context to decide how to render it.
     setContext("profileMenu", true);
     setContext("inMenu", true);
 
-    let userName = gameManager.getPlayerName() || "";
+    let userName = "";
+    $: userName = $currentPlayerNameStore || "";
     let hasPersonalDesk = false;
     let personalAreaData: AreaData | null = null;
     let personalAreaProperty: PersonalAreaPropertyData | null = null;

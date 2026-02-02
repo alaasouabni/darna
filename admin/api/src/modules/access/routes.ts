@@ -123,24 +123,35 @@ export async function accessRoutes(app: FastifyInstance) {
             return;
         }
 
-        const member = await app.db.member.upsert({
-            where: { externalId },
-            update: {
-                email: tokenUser?.email ?? identifierEmail ?? undefined,
-                displayName: tokenUser?.name ?? tokenUser?.preferredUsername ?? undefined,
-                chatId: query.chatID ?? undefined,
-                lastSeenAt: new Date(),
-                lastRoomUrl: room?.roomUrl ?? roomPath,
-            },
-            create: {
-                externalId,
-                email: tokenUser?.email ?? identifierEmail,
-                displayName: tokenUser?.name ?? tokenUser?.preferredUsername ?? null,
-                chatId: query.chatID ?? null,
-                lastSeenAt: new Date(),
-                lastRoomUrl: room?.roomUrl ?? roomPath,
-            },
-        });
+        const existingMember = await app.db.member.findUnique({ where: { externalId } });
+        const displayNameFromToken = tokenUser?.name ?? tokenUser?.preferredUsername ?? null;
+
+        const updateData: Record<string, unknown> = {
+            email: tokenUser?.email ?? identifierEmail ?? undefined,
+            chatId: query.chatID ?? undefined,
+            lastSeenAt: new Date(),
+            lastRoomUrl: room?.roomUrl ?? roomPath,
+        };
+
+        if (existingMember?.displayName == null && displayNameFromToken) {
+            updateData.displayName = displayNameFromToken;
+        }
+
+        const member = existingMember
+            ? await app.db.member.update({
+                  where: { externalId },
+                  data: updateData,
+              })
+            : await app.db.member.create({
+                  data: {
+                      externalId,
+                      email: tokenUser?.email ?? identifierEmail,
+                      displayName: displayNameFromToken,
+                      chatId: query.chatID ?? null,
+                      lastSeenAt: new Date(),
+                      lastRoomUrl: room?.roomUrl ?? roomPath,
+                  },
+              });
 
         if (tokenUser?.tags.length) {
             await app.db.memberTag.createMany({
@@ -215,7 +226,7 @@ export async function accessRoutes(app: FastifyInstance) {
         reply.send({
             status: "ok",
             email: tokenUser?.email ?? member.email ?? fallbackEmail,
-            username: tokenUser?.name ?? member.displayName ?? null,
+            username: member.displayName ?? tokenUser?.name ?? null,
             userUuid: externalId,
             tags: Array.from(tagSet),
             visitCardUrl: member.visitCardUrl ?? null,

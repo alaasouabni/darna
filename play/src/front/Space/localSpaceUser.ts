@@ -1,13 +1,22 @@
-import { get, readable, writable } from "svelte/store";
+import { derived, get, readable, writable } from "svelte/store";
 import type { PrivateSpaceEvent, SpaceEvent } from "@workadventure/messages";
+import type { CharacterTextureMessage } from "@workadventure/messages";
 import { localUserStore } from "../Connection/LocalUserStore";
 import { gameManager } from "../Phaser/Game/GameManager";
 import { availabilityStatusStore } from "../Stores/MediaStore";
+import { currentPlayerCharacterTexturesStore, currentPlayerNameStore } from "../Stores/CurrentPlayerProfileStore";
 import LL from "../../i18n/i18n-svelte";
 import type { SpaceUserExtended } from "./SpaceInterface";
 
 export const localSpaceUser = (name?: string): SpaceUserExtended => {
-    return {
+    const nameStore = currentPlayerNameStore;
+    const characterTexturesStore = derived(currentPlayerCharacterTexturesStore, (ids): CharacterTextureMessage[] =>
+        ids.map((id) => ({ id, url: id.startsWith("http") || id.startsWith("/") ? id : "" }))
+    );
+    const initialName = name ?? get(nameStore) ?? get(LL).camera.my.nameTag();
+    const initialTextures = get(characterTexturesStore);
+
+    const spaceUser: SpaceUserExtended = {
         isLogged: localUserStore.isLogged(),
         availabilityStatus: get(availabilityStatusStore),
         roomName: undefined,
@@ -21,11 +30,11 @@ export const localSpaceUser = (name?: string): SpaceUserExtended => {
         chatID: localUserStore.getChatId() ?? undefined,
         showVoiceIndicator: true,
         spaceUserId: "local",
-        name: name ?? get(LL).camera.my.nameTag(),
+        name: initialName,
         playUri: "local",
         color: "local",
         jitsiParticipantId: undefined,
-        characterTextures: [],
+        characterTextures: initialTextures,
         pictureStore: readable<string | undefined>(undefined, (set) => {
             const unsubscribe = gameManager
                 .getCurrentGameScene()
@@ -48,9 +57,9 @@ export const localSpaceUser = (name?: string): SpaceUserExtended => {
             spaceUserId: "",
             playUri: "",
             roomName: "",
-            name: writable(localUserStore.getName() ?? ""),
+            name: nameStore,
             color: writable("local"),
-            characterTextures: writable([]),
+            characterTextures: characterTexturesStore,
             showVoiceIndicator: writable(true),
             availabilityStatus: writable(get(availabilityStatusStore)),
             isLogged: writable(localUserStore.isLogged()),
@@ -65,4 +74,13 @@ export const localSpaceUser = (name?: string): SpaceUserExtended => {
             chatID: writable(localUserStore.getChatId() ?? undefined),
         },
     };
+
+    nameStore.subscribe((value) => {
+        spaceUser.name = value;
+    });
+    characterTexturesStore.subscribe((value) => {
+        spaceUser.characterTextures = value;
+    });
+
+    return spaceUser;
 };

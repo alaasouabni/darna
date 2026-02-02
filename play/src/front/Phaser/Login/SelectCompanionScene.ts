@@ -2,6 +2,7 @@ import type { CompanionTextureCollection } from "@workadventure/messages";
 import { Loader } from "../Components/Loader";
 import { gameManager } from "../Game/GameManager";
 import { localUserStore } from "../../Connection/LocalUserStore";
+import { setCurrentPlayerCompanionTextureId } from "../../Stores/CurrentPlayerProfileStore";
 import { touchScreenManager } from "../../Touch/TouchScreenManager";
 import { PinchManager } from "../UserInput/PinchManager";
 import {
@@ -125,7 +126,7 @@ export class SelectCompanionScene extends ResizableScene {
         this.input.keyboard?.on("keydown-RIGHT", this.moveToRight.bind(this));
         this.input.keyboard?.on("keydown-LEFT", this.moveToLeft.bind(this));
 
-        localUserStore.setCompanionTextureId(null);
+        setCurrentPlayerCompanionTextureId(null);
         gameManager.setCompanionTextureId(null);
 
         this.tryInitializeCompanions();
@@ -155,7 +156,7 @@ export class SelectCompanionScene extends ResizableScene {
     public async selectCompanion(): Promise<void> {
         const companionDescriptor = this.companionCurrentCollection[this.currentCompanion];
         const companionId = companionDescriptor.id;
-        localUserStore.setCompanionTextureId(companionId);
+        setCurrentPlayerCompanionTextureId(companionId);
         gameManager.setCompanionTextureId(companionId);
         await connectionManager.saveCompanionTexture(companionId, companionDescriptor);
 
@@ -183,7 +184,7 @@ export class SelectCompanionScene extends ResizableScene {
     }
 
     public async noCompagnion(): Promise<void> {
-        localUserStore.setCompanionTextureId(null);
+        setCurrentPlayerCompanionTextureId(null);
         gameManager.setCompanionTextureId(null);
         await connectionManager.saveCompanionTexture(null, null);
         try {

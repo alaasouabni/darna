@@ -1,5 +1,10 @@
 import * as Sentry from "@sentry/node";
-import type { FilterType, UpdateSpaceUserMessage, SetPlayerDetailsMessage } from "@workadventure/messages";
+import type {
+    FilterType,
+    UpdateSpaceUserMessage,
+    SetPlayerDetailsMessage,
+    CharacterTextureMessage,
+} from "@workadventure/messages";
 import { SpaceUser, AvailabilityStatus } from "@workadventure/messages";
 import Debug from "debug";
 import { merge } from "lodash";
@@ -13,6 +18,11 @@ import type { SpaceToFrontDispatcherInterface } from "./SpaceToFrontDispatcher";
 import { SpaceToFrontDispatcher } from "./SpaceToFrontDispatcher";
 import { Query } from "./SpaceQuery";
 import type { SpaceConnectionInterface } from "./SpaceConnection";
+import {
+    PROFILE_NAME_VARIABLE,
+    PROFILE_TEXTURES_VARIABLE,
+    PROFILE_COMPANION_VARIABLE,
+} from "../enums/ProfileVariables";
 
 export type SpaceUserExtended = {
     lowercaseName: string;
@@ -284,14 +294,20 @@ export class Space implements SpaceForSpaceConnectionInterface {
         const oldStatus = spaceUser.availabilityStatus;
         const newStatus = playerDetails.availabilityStatus;
 
+        const partialSpaceUser: PartialSpaceUser = {
+            spaceUserId: spaceUser.spaceUserId,
+        };
+
         if (newStatus !== oldStatus && newStatus !== AvailabilityStatus.UNCHANGED) {
             fieldMask.push("availabilityStatus");
             spaceUser.availabilityStatus = newStatus;
+            partialSpaceUser.availabilityStatus = newStatus;
         }
 
         if (playerDetails.chatID !== undefined && playerDetails.chatID !== spaceUser.chatID) {
             fieldMask.push("chatID");
             spaceUser.chatID = playerDetails.chatID;
+            partialSpaceUser.chatID = playerDetails.chatID;
         }
         if (
             playerDetails.showVoiceIndicator !== undefined &&
@@ -299,15 +315,42 @@ export class Space implements SpaceForSpaceConnectionInterface {
         ) {
             fieldMask.push("showVoiceIndicator");
             spaceUser.showVoiceIndicator = playerDetails.showVoiceIndicator;
+            partialSpaceUser.showVoiceIndicator = playerDetails.showVoiceIndicator;
         }
-        if (fieldMask.length > 0) {
-            const partialSpaceUser: SpaceUser = SpaceUser.fromPartial({
-                availabilityStatus: playerDetails.availabilityStatus,
-                spaceUserId: spaceUser.spaceUserId,
-                chatID: playerDetails.chatID,
-                showVoiceIndicator: playerDetails.showVoiceIndicator,
-            });
 
+        const setVariable = playerDetails.setVariable;
+        if (setVariable?.name === PROFILE_NAME_VARIABLE) {
+            try {
+                const nextName = JSON.parse(setVariable.value);
+                if (typeof nextName === "string" && nextName !== spaceUser.name) {
+                    fieldMask.push("name");
+                    spaceUser.name = nextName;
+                    spaceUser.lowercaseName = nextName.toLowerCase();
+                    partialSpaceUser.name = nextName;
+                }
+            } catch (error) {
+                console.warn("Failed to parse profile name variable", error);
+            }
+        }
+
+        if (setVariable?.name === PROFILE_TEXTURES_VARIABLE) {
+            try {
+                const nextTextures = JSON.parse(setVariable.value) as CharacterTextureMessage[];
+                if (Array.isArray(nextTextures)) {
+                    fieldMask.push("characterTextures");
+                    spaceUser.characterTextures = nextTextures;
+                    partialSpaceUser.characterTextures = nextTextures;
+                }
+            } catch (error) {
+                console.warn("Failed to parse profile textures variable", error);
+            }
+        }
+
+        if (setVariable?.name === PROFILE_COMPANION_VARIABLE) {
+            // Companion is not part of SpaceUser; ignore here so space updates stay valid.
+        }
+
+        if (fieldMask.length > 0) {
             return {
                 changedFields: fieldMask,
                 partialSpaceUser: partialSpaceUser,

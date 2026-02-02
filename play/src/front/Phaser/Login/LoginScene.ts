@@ -1,5 +1,6 @@
 import { loginSceneVisibleIframeStore, loginSceneVisibleStore } from "../../Stores/LoginSceneStore";
 import { localUserStore } from "../../Connection/LocalUserStore";
+import { setCurrentPlayerName } from "../../Stores/CurrentPlayerProfileStore";
 import { connectionManager } from "../../Connection/ConnectionManager";
 import { gameManager } from "../Game/GameManager";
 import { analyticsClient } from "../../Administration/AnalyticsClient";
@@ -65,7 +66,7 @@ export class LoginScene extends ResizableScene {
             // Only save the name if the user is not logged in
             // If the user is logged in, the name will be fetched from the server. No need to save it locally.
             if (!localUserStore.isLogged() || !hasCapability("api/save-name")) {
-                localUserStore.setName(name);
+                setCurrentPlayerName(name);
             }
         }
 

@@ -33,7 +33,9 @@
 
     const pictureStore = extendedSpaceUser.pictureStore;
 
-    let name = videoBox.spaceUser.name;
+    let name: string | undefined;
+    const nameStore = extendedSpaceUser.reactiveUser.name;
+    $: name = $nameStore;
 
     let showUserSubMenu = false;
 

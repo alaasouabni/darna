@@ -47,6 +47,7 @@ import { axiosToPusher, axiosWithRetry } from "./AxiosUtils";
 import { Room } from "./Room";
 import { LocalUser } from "./LocalUser";
 import { localUserStore } from "./LocalUserStore";
+import { setCurrentPlayerName } from "../Stores/CurrentPlayerProfileStore";
 import type { OnConnectInterface, PositionInterface, ViewportInterface } from "./ConnexionModels";
 import { RoomConnection } from "./RoomConnection";
 import { HtmlUtils } from "./../WebRtc/HtmlUtils";
@@ -703,13 +704,24 @@ class ConnectionManager {
         }
 
         const opidWokaNamePolicy = this.currentRoom?.opidWokaNamePolicy;
-        if (username != undefined && opidWokaNamePolicy != undefined) {
+        if (opidWokaNamePolicy != undefined) {
+            const localName = localUserStore.getName();
             if (hasCapability("api/save-name")) {
-                gameManager.setPlayerName(username);
+                if (opidWokaNamePolicy === "force_opid") {
+                    if (username != undefined) {
+                        gameManager.setPlayerName(username);
+                    }
+                } else if (localName) {
+                    gameManager.setPlayerName(localName);
+                } else if (username != undefined) {
+                    gameManager.setPlayerName(username);
+                }
             } else {
                 if (opidWokaNamePolicy === "force_opid") {
-                    gameManager.setPlayerName(username);
-                } else if (opidWokaNamePolicy === "allow_override_opid" && localUserStore.getName() == undefined) {
+                    if (username != undefined) {
+                        gameManager.setPlayerName(username);
+                    }
+                } else if (opidWokaNamePolicy === "allow_override_opid" && localName == undefined && username != undefined) {
                     gameManager.setPlayerName(username);
                 }
             }

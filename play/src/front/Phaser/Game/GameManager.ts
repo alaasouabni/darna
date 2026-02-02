@@ -21,7 +21,6 @@ import { gameSceneIsLoadedStore, waitForGameSceneStore } from "../../Stores/Game
 import { myCameraStore } from "../../Stores/MyMediaStore";
 import { SelectCompanionSceneName } from "../Login/SelectCompanionScene";
 import { errorScreenStore } from "../../Stores/ErrorScreenStore";
-import { hasCapability } from "../../Connection/Capabilities";
 import type { ChatConnectionInterface } from "../../Chat/Connection/ChatConnection";
 import { MATRIX_PUBLIC_URI } from "../../Enum/EnvironmentVariable";
 import { InvalidLoginTokenError, MatrixClientWrapper } from "../../Chat/Connection/Matrix/MatrixClientWrapper";
@@ -31,6 +30,12 @@ import { loginTokenErrorStore, isMatrixChatEnabledStore } from "../../Stores/Cha
 import { initializeChatVisibilitySubscription } from "../../Chat/Stores/ChatStore";
 import { urlManager } from "../../Url/UrlManager";
 import { GameScene } from "./GameScene";
+import {
+    currentPlayerProfileStore,
+    setCurrentPlayerCharacterTextures,
+    setCurrentPlayerCompanionTextureId,
+    setCurrentPlayerName,
+} from "../../Stores/CurrentPlayerProfileStore";
 /**
  * This class should be responsible for any scene starting/stopping
  */
@@ -50,10 +55,16 @@ export class GameManager {
     private chatVisibilitySubscription: Unsubscriber | undefined;
 
     constructor() {
-        this.playerName = localUserStore.getName();
-        this.characterTextureIds = localUserStore.getCharacterTextures();
-        this.companionTextureId = localUserStore.getCompanionTextureId();
+        const profile = get(currentPlayerProfileStore);
+        this.playerName = profile.name || null;
+        this.characterTextureIds = profile.characterTextureIds.length ? profile.characterTextureIds : null;
+        this.companionTextureId = profile.companionTextureId;
         this.chatVisibilitySubscription = initializeChatVisibilitySubscription();
+        currentPlayerProfileStore.subscribe((next) => {
+            this.playerName = next.name || null;
+            this.characterTextureIds = next.characterTextureIds.length ? next.characterTextureIds : null;
+            this.companionTextureId = next.companionTextureId;
+        });
     }
 
     public async init(scenePlugin: Phaser.Scenes.ScenePlugin): Promise<string> {
@@ -108,7 +119,7 @@ export class GameManager {
     }
 
     public setPlayerName(name: string): void {
-        this.playerName = name;
+        setCurrentPlayerName(name);
     }
 
     public setVisitCardUrl(visitCardUrl: string): void {
@@ -116,12 +127,7 @@ export class GameManager {
     }
 
     public setCharacterTextureIds(textureIds: string[]): void {
-        this.characterTextureIds = textureIds;
-        // Only save the textures if the user is not logged in
-        // If the user is logged in, the textures will be fetched from the server. No need to save them locally.
-        if (!localUserStore.isLogged() || !hasCapability("api/save-textures")) {
-            localUserStore.setCharacterTextures(textureIds);
-        }
+        setCurrentPlayerCharacterTextures(textureIds);
     }
 
     getPlayerName(): string | null {
@@ -137,7 +143,7 @@ export class GameManager {
     }
 
     setCompanionTextureId(textureId: string | null): void {
-        this.companionTextureId = textureId;
+        setCurrentPlayerCompanionTextureId(textureId);
     }
 
     getCompanionTextureId(): string | null {

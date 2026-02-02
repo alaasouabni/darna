@@ -122,6 +122,10 @@ import type {
     ViewportInterface,
 } from "./ConnexionModels";
 import { localUserStore } from "./LocalUserStore";
+import {
+    setCurrentPlayerCharacterTextures,
+    setCurrentPlayerCompanionTextureId,
+} from "../Stores/CurrentPlayerProfileStore";
 import { ConnectionClosedError } from "./ConnectionClosedError";
 
 // This must be greater than RoomManager's PING_INTERVAL
@@ -539,9 +543,9 @@ export class RoomConnection implements RoomConnection {
                         );
                         const characterTextureIds = roomJoinedMessage.characterTextures.map((texture) => texture.id);
                         if (characterTextureIds.length > 0) {
-                            localUserStore.setCharacterTextures(characterTextureIds);
+                            setCurrentPlayerCharacterTextures(characterTextureIds);
                         }
-                        localUserStore.setCompanionTextureId(roomJoinedMessage.companionTexture?.id ?? null);
+                        setCurrentPlayerCompanionTextureId(roomJoinedMessage.companionTexture?.id ?? null);
 
                         this._roomJoinedMessageStream.next({
                             connection: this,

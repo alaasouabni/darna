@@ -76,13 +76,10 @@
                 console.warn("Could not fetch Woka data for profile update", e);
             }
 
-            const didSave = await connectionManager.saveTextures(
+            await connectionManager.saveTextures(
                 texturesId,
                 descriptors && descriptors.length > 0 ? descriptors : undefined
             );
-            if (didSave) {
-                localUserStore.setCharacterTextures(texturesId);
-            }
             if ($inGameProfileEditStore) {
                 try {
                     const scene = gameManager.getCurrentGameScene();
@@ -90,6 +87,7 @@
                         await lazyLoadPlayerCharacterTextures(scene.superLoad, descriptors);
                         scene.CurrentPlayer?.updateTextures(descriptors.map((texture) => texture.id));
                         scene.setProfileVariable(PROFILE_TEXTURES_VARIABLE, descriptors);
+                        scene.syncLocalUserSpaceProfile({ characterTextures: descriptors });
                     } else {
                         scene.CurrentPlayer?.updateTextures(texturesId);
                     }
