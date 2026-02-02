@@ -707,14 +707,10 @@ class ConnectionManager {
         if (opidWokaNamePolicy != undefined) {
             const localName = localUserStore.getName();
             if (hasCapability("api/save-name")) {
-                if (opidWokaNamePolicy === "force_opid") {
-                    if (username != undefined) {
-                        gameManager.setPlayerName(username);
-                    }
-                } else if (localName) {
-                    gameManager.setPlayerName(localName);
-                } else if (username != undefined) {
+                if (username != undefined) {
                     gameManager.setPlayerName(username);
+                } else if (opidWokaNamePolicy !== "force_opid" && localName) {
+                    gameManager.setPlayerName(localName);
                 }
             } else {
                 if (opidWokaNamePolicy === "force_opid") {

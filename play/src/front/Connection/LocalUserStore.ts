@@ -78,9 +78,17 @@ interface PlayerVariable {
 class LocalUserStore {
     private jwt: JwtAuthToken | undefined;
     private name: string | undefined;
+    private getScopedKey(baseKey: string): string {
+        const uuid = this.getLocalUser()?.uuid;
+        if (uuid && uuid.trim().length > 0) {
+            return `${baseKey}_${uuid}`;
+        }
+        return baseKey;
+    }
 
     saveUser(localUser: LocalUser) {
         localStorage.setItem("localUser", JSON.stringify(localUser));
+        this.name = undefined;
     }
 
     getLocalUser(): LocalUser | null {
@@ -90,14 +98,14 @@ class LocalUserStore {
 
     setName(name: string): void {
         this.name = name;
-        localStorage.setItem(playerNameKey, name);
+        localStorage.setItem(this.getScopedKey(playerNameKey), name);
     }
 
     getName(): string | null {
         if (this.name) {
             return this.name;
         }
-        const value = localStorage.getItem(playerNameKey) || "";
+        const value = localStorage.getItem(this.getScopedKey(playerNameKey)) || "";
         return isUserNameValid(value) ? value : null;
     }
 
@@ -134,20 +142,20 @@ class LocalUserStore {
     }
 
     setCharacterTextures(textureIds: string[]): void {
-        localStorage.setItem(characterTexturesKey, JSON.stringify(textureIds));
+        localStorage.setItem(this.getScopedKey(characterTexturesKey), JSON.stringify(textureIds));
     }
 
     getCharacterTextures(): string[] | null {
-        const value = JSON.parse(localStorage.getItem(characterTexturesKey) || "null");
+        const value = JSON.parse(localStorage.getItem(this.getScopedKey(characterTexturesKey)) || "null");
         return areCharacterTexturesValid(value) ? value : null;
     }
 
     setCompanionTextureId(textureId: string | null): void {
-        return localStorage.setItem(companionKey, JSON.stringify(textureId));
+        return localStorage.setItem(this.getScopedKey(companionKey), JSON.stringify(textureId));
     }
 
     getCompanionTextureId(): string | null {
-        const companion = JSON.parse(localStorage.getItem(companionKey) || "null");
+        const companion = JSON.parse(localStorage.getItem(this.getScopedKey(companionKey)) || "null");
 
         if (typeof companion !== "string" || companion === "") {
             return null;
@@ -157,7 +165,7 @@ class LocalUserStore {
     }
 
     wasCompanionSet(): boolean {
-        return localStorage.getItem(companionKey) ? true : false;
+        return localStorage.getItem(this.getScopedKey(companionKey)) ? true : false;
     }
 
     setAudioPlayerVolume(value: number): void {
