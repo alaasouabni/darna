@@ -200,6 +200,7 @@ export class GameManager {
             this.scenePlugin.add(targetSceneName, sceneClass, false);
         }
         this.scenePlugin.run(targetSceneName);
+        this.scenePlugin.bringToTop(targetSceneName);
     }
 
     /**

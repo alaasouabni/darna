@@ -35,6 +35,12 @@ function extractMapStorageSlug(path: string): string | null {
 
 export async function accessRoutes(app: FastifyInstance) {
     app.get("/room/access", { preHandler: requireAdminAuth }, async (request, reply) => {
+        // User-specific response: never cache.
+        reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        reply.header("Pragma", "no-cache");
+        reply.header("Expires", "0");
+        reply.header("Vary", "Authorization");
+
         const query = querySchema.parse(request.query);
         const parsedRoom = parseRoomPath(query.playUri);
         const roomPath = parsedRoom.path;

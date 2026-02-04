@@ -276,17 +276,35 @@ export class AuthenticateController extends BaseHttpController {
                     return;
                 }
 
+
+                const adminUsername =
+                    typeof resUserData.username === "string" ? resUserData.username.trim() : undefined;
+                const resolvedUsername =
+                    adminUsername && adminUsername.length > 0 ? adminUsername : authTokenData.username;
+
+                if (resolvedUsername !== authTokenData.username) {
+                    refreshedAuthToken = jwtTokenManager.createAuthToken(
+                        authTokenData.identifier,
+                        accessToken,
+                        resolvedUsername,
+                        authTokenData.locale,
+                        authTokenData.tags,
+                        authTokenData.matrixUserId,
+                        refreshToken
+                    );
+                }
+
                 if (accessToken == undefined) {
                     //if not nonce and code, anonymous user connected
                     //get data with identifier and return token
                     res.json({
                         authToken: refreshedAuthToken,
-                        username: authTokenData?.username,
                         locale: authTokenData?.locale,
                         // TODO: replace ... with each property
                         ...resUserData,
                         matrixUserId: authTokenData?.matrixUserId,
                         matrixServerUrl: MATRIX_PUBLIC_URI,
+                        username: resolvedUsername,
                     } satisfies MeResponse);
                     return;
                 }
@@ -304,7 +322,6 @@ export class AuthenticateController extends BaseHttpController {
                         }
                     }
                     res.json({
-                        username: authTokenData?.username,
                         authToken: refreshedAuthToken,
                         locale: authTokenData?.locale,
                         matrixUserId: authTokenData?.matrixUserId,
@@ -312,6 +329,7 @@ export class AuthenticateController extends BaseHttpController {
                         // TODO: replace ... with each property
                         ...resUserData,
                         ...resCheckTokenAuth,
+                        username: resolvedUsername,
                     } satisfies MeResponse);
                 } catch (err) {
                     console.warn("Error while checking token auth", err);

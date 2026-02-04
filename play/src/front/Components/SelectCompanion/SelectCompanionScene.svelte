@@ -75,6 +75,13 @@
         window.removeEventListener("resize", updatePreviewFrameRect);
         selectCompanionPreviewFrameStore.set(null);
     });
+
+    $: if ($selectCompanionReadyStore) {
+        requestAnimationFrame(() => {
+            updatePreviewFrameRect();
+            requestAnimationFrame(updatePreviewFrameRect);
+        });
+    }
 </script>
 
 {#if $inGameProfileEditStore}

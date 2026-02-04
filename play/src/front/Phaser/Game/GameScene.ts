@@ -61,6 +61,8 @@ import {
 import { Room } from "../../Connection/Room";
 import { CharacterTextureError } from "../../Exception/CharacterTextureError";
 import { localUserStore } from "../../Connection/LocalUserStore";
+import { isUserNameValid } from "../../Connection/LocalUserUtils";
+import { PROFILE_NAME_VARIABLE } from "../../Connection/ProfileVariables";
 import { HtmlUtils } from "../../WebRtc/HtmlUtils";
 import { Loader } from "../Components/Loader";
 import { RemotePlayer } from "../Entity/RemotePlayer";
@@ -1572,8 +1574,8 @@ export class GameScene extends DirtyScene {
         name?: string;
         characterTextures?: CharacterTextureMessage[];
     }): void {
-        const userUuid = localUserStore.getLocalUser()?.uuid;
-        if (!userUuid || !this._spaceRegistry) {
+        const localUserUuid = localUserStore.getLocalUser()?.uuid;
+        if (!localUserUuid || !this._spaceRegistry) {
             return;
         }
 
@@ -1583,6 +1585,7 @@ export class GameScene extends DirtyScene {
         if (update.name !== undefined) {
             spaceUserUpdate.name = update.name;
             updateMask.push("name");
+            this.playerName = update.name;
         }
 
         if (update.characterTextures !== undefined) {
@@ -1595,22 +1598,24 @@ export class GameScene extends DirtyScene {
         }
 
         for (const space of this._spaceRegistry.getAll()) {
-            const spaceUser = space.getSpaceUserByUuid(userUuid);
-            if (!spaceUser) {
-                continue;
-            }
-
             space.emitUpdateUser(spaceUserUpdate);
 
             const spaceWithUpdate = space as unknown as {
                 updateUserData?: (user: SpaceUser, updateMask: string[]) => void;
             };
-            if (spaceWithUpdate.updateUserData) {
-                spaceWithUpdate.updateUserData(
-                    { ...(spaceUser as unknown as SpaceUser), ...spaceUserUpdate } as SpaceUser,
-                    updateMask
-                );
+            if (!spaceWithUpdate.updateUserData) {
+                continue;
             }
+
+            const localSpaceUser = space.getSpaceUserBySpaceUserId(space.mySpaceUserId);
+            if (!localSpaceUser) {
+                continue;
+            }
+
+            spaceWithUpdate.updateUserData(
+                { ...(localSpaceUser as unknown as SpaceUser), ...spaceUserUpdate } as SpaceUser,
+                updateMask
+            );
         }
     }
 
@@ -1871,6 +1876,10 @@ export class GameScene extends DirtyScene {
                         this.allUserSpace = space;
                         worldUserProvider = new WorldUserProvider(space);
                         this._worldUserCounter.forward(worldUserProvider.userCount);
+                        const currentName = gameManager.getPlayerName();
+                        if (currentName) {
+                            this.syncLocalUserSpaceProfile({ name: currentName });
+                        }
                         return gameManager.getChatConnection();
                     })
                     .then((chatConnection) => {
@@ -2136,6 +2145,19 @@ export class GameScene extends DirtyScene {
                         playerVariables.set(key, value);
                     }
                 }
+
+                const profileName = playerVariables.get(PROFILE_NAME_VARIABLE);
+                if (typeof profileName === "string") {
+                    const normalizedProfileName = profileName.trim();
+                    if (isUserNameValid(normalizedProfileName) && normalizedProfileName !== this.playerName) {
+                        // Align local profile name with persisted profile variable so space users stay in sync after reloads.
+                        this.playerName = normalizedProfileName;
+                        gameManager.setPlayerName(normalizedProfileName);
+                        this.CurrentPlayer?.updatePlayerName(normalizedProfileName);
+                        this.syncLocalUserSpaceProfile({ name: normalizedProfileName });
+                    }
+                }
+
                 this.playerVariablesManager = new PlayerVariablesManager(
                     this.connection,
                     this.playersEventDispatcher,

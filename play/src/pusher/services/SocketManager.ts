@@ -742,6 +742,16 @@ export class SocketManager implements ZoneEventListener {
         if (playerDetailsMessage.chatID !== undefined) {
             socketData.chatID = playerDetailsMessage.chatID;
         }
+        if (playerDetailsMessage.setVariable?.name === PROFILE_NAME_VARIABLE) {
+            try {
+                const nextName = JSON.parse(playerDetailsMessage.setVariable.value);
+                if (typeof nextName === "string" && nextName !== socketData.name) {
+                    socketData.name = nextName;
+                }
+            } catch (err) {
+                console.warn("Failed to parse profile name variable from setPlayerDetails", err);
+            }
+        }
         const pusherToBackMessage: PusherToBackMessageType["message"] = {
             $case: "setPlayerDetailsMessage",
             setPlayerDetailsMessage: playerDetailsMessage,
@@ -1281,6 +1291,12 @@ export class SocketManager implements ZoneEventListener {
 
         const updatedSpaceUser = space.applyAndGetUpdatedFieldsForUserFromUpdateSpaceUserMessage(client, message);
         if (updatedSpaceUser) {
+            if (updatedSpaceUser.changedFields.includes("name")) {
+                const nextName = updatedSpaceUser.partialSpaceUser.name;
+                if (typeof nextName === "string" && nextName !== client.getUserData().name) {
+                    client.getUserData().name = nextName;
+                }
+            }
             space.forwarder.updateUser(updatedSpaceUser.partialSpaceUser, updatedSpaceUser.changedFields);
         }
     }

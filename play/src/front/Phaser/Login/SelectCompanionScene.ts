@@ -52,6 +52,12 @@ export class SelectCompanionScene extends ResizableScene {
     private sceneCreated = false;
     private companionsInitialized = false;
     private previewFrameUnsub: Unsubscriber | undefined;
+    private initRetryEvent: Phaser.Time.TimerEvent | undefined;
+    private waitingForTexture = false;
+    private debugEnabled: boolean | undefined;
+    private debugCount = 0;
+    private texturesReadyPromise: Promise<void> | undefined;
+    private resolveTexturesReady: (() => void) | undefined;
 
     constructor() {
         super({
@@ -66,6 +72,10 @@ export class SelectCompanionScene extends ResizableScene {
         const isInGameEdit = get(inGameProfileEditStore);
         this.cache.json.remove(companionListMetakey());
         selectCompanionReadyStore.set(false);
+        this.debugLog("preload", { isInGameEdit });
+        this.texturesReadyPromise = new Promise((resolve) => {
+            this.resolveTexturesReady = resolve;
+        });
 
         const companionLoadingManager = new CompanionTexturesLoadingManager(this.superLoad, this.load);
 
@@ -73,11 +83,30 @@ export class SelectCompanionScene extends ResizableScene {
             this.companionTextures.mapTexturesMetadataIntoResources(collections);
             collectionsSizeStore.set(this.companionTextures.getCollectionsKeys().length);
             this.companionModels = companionLoadingManager.loadModels(this.load, this.companionTextures);
-            const initAfterLoad = () => this.tryInitializeCompanions();
+            const firstId = this.companionModels[0]?.id;
+            this.debugLog("loadTextures", {
+                collections: collections.length,
+                models: this.companionModels.length,
+                firstId,
+            });
+            if (firstId) {
+                this.load.once(`filecomplete-spritesheet-${firstId}`, () => {
+                    this.debugLog("filecomplete-spritesheet", {
+                        id: firstId,
+                        frameTotal: this.textures.get(firstId)?.frameTotal,
+                    });
+                });
+            }
+            const initAfterLoad = () => {
+                this.resolveTexturesReady?.();
+                this.resolveTexturesReady = undefined;
+                this.tryInitializeCompanions();
+            };
+            this.load.once(Phaser.Loader.Events.COMPLETE, initAfterLoad);
             if (this.load.isLoading()) {
-                this.load.once(Phaser.Loader.Events.COMPLETE, initAfterLoad);
+                // Ensure newly queued files are picked up by the running loader
+                this.load.update();
             } else {
-                this.load.once(Phaser.Loader.Events.COMPLETE, initAfterLoad);
                 this.load.start();
             }
         });
@@ -110,12 +139,15 @@ export class SelectCompanionScene extends ResizableScene {
                 this.currentCompanionId = companionTextureId;
                 const [companionCollectionKey, companionIndex] = companionCollectionKeyAndIndex;
 
-                this.selectedCollectionIndex = this.companionCollectionKeys.indexOf(companionCollectionKey);
-                if (companionIndex > -1 || companionIndex < this.companions.length) {
-                    this.currentCompanion = companionIndex;
-                    this.selectedCompanion = this.companions[companionIndex];
+                const index = this.companionCollectionKeys.indexOf(companionCollectionKey);
+                if (index >= 0) {
+                    this.selectedCollectionIndex = index;
+                    if (companionIndex > -1 && companionIndex < this.companions.length) {
+                        this.currentCompanion = companionIndex;
+                        this.selectedCompanion = this.companions[companionIndex];
+                    }
+                    selectedCollection.set(this.getSelectedCollectionName());
                 }
-                selectedCollection.set(this.getSelectedCollectionName());
             }
         }
         // input events
@@ -130,6 +162,22 @@ export class SelectCompanionScene extends ResizableScene {
         gameManager.setCompanionTextureId(null);
 
         this.tryInitializeCompanions();
+        this.texturesReadyPromise?.then(() => {
+            this.tryInitializeCompanions();
+        });
+        this.initRetryEvent?.remove(false);
+        this.initRetryEvent = this.time.addEvent({
+            delay: 100,
+            repeat: -1,
+            callback: () => {
+                if (this.companionsInitialized) {
+                    this.initRetryEvent?.remove(false);
+                    this.initRetryEvent = undefined;
+                    return;
+                }
+                this.tryInitializeCompanions();
+            },
+        });
         if (gameManager.currentStartedRoom.backgroundColor != undefined) {
             this.cameras.main.setBackgroundColor(gameManager.currentStartedRoom.backgroundColor);
         }
@@ -141,6 +189,9 @@ export class SelectCompanionScene extends ResizableScene {
                     this.moveCompanion();
                 }
             });
+            if (get(selectCompanionPreviewFrameStore) && this.companionsInitialized) {
+                this.moveCompanion();
+            }
         }
     }
 
@@ -216,6 +267,10 @@ export class SelectCompanionScene extends ResizableScene {
         selectCompanionReadyStore.set(false);
         this.previewFrameUnsub?.();
         this.previewFrameUnsub = undefined;
+        this.initRetryEvent?.remove(false);
+        this.initRetryEvent = undefined;
+        this.resolveTexturesReady = undefined;
+        this.texturesReadyPromise = undefined;
         if (isInGameEdit) {
             inGameProfileEditStore.set(false);
         }
@@ -225,6 +280,9 @@ export class SelectCompanionScene extends ResizableScene {
         this.companionCurrentCollection = this.companionTextures.getCompanionCollectionTextures(
             this.getSelectedCollectionName()
         );
+        if (this.currentCompanion < 0 || this.currentCompanion >= this.companionCurrentCollection.length) {
+            this.currentCompanion = 0;
+        }
 
         this.companionCurrentCollection.forEach((companionResource, index) => {
             const [middleX, middleY] = this.getCompanionPosition();
@@ -238,6 +296,17 @@ export class SelectCompanionScene extends ResizableScene {
             });
 
             companion.setInteractive().on("pointerdown", () => {
+                this.debugLog("companion:pointerdown", {
+                    index,
+                    id: companionResource.id,
+                    currentCompanion: this.currentCompanion,
+                    visible: companion.visible,
+                    alpha: companion.alpha,
+                    x: companion.x,
+                    y: companion.y,
+                    texture: companion.texture?.key,
+                    frameTotal: this.textures.get(companionResource.id)?.frameTotal,
+                });
                 if (this.pointerClicked) {
                     return;
                 }
@@ -273,10 +342,39 @@ export class SelectCompanionScene extends ResizableScene {
             this.setUpCompanion(companion, i);
         }
         this.updateSelectedCompanion();
+        this.debugCompanionState("moveCompanion");
     }
 
     private tryInitializeCompanions(): void {
+        const firstId = this.companionModels?.[0]?.id;
+        this.debugLog("tryInitializeCompanions", {
+            sceneCreated: this.sceneCreated,
+            companionsInitialized: this.companionsInitialized,
+            isLoading: this.load.isLoading(),
+            models: this.companionModels?.length ?? 0,
+            firstId,
+            exists: firstId ? this.textures.exists(firstId) : false,
+            frameTotal: firstId ? this.textures.get(firstId)?.frameTotal : undefined,
+        });
         if (!this.sceneCreated || this.companionsInitialized) {
+            return;
+        }
+        if (this.load.isLoading()) {
+            this.load.once(Phaser.Loader.Events.COMPLETE, () => this.tryInitializeCompanions());
+            return;
+        }
+        if (!this.companionModels || this.companionModels.length === 0) {
+            return;
+        }
+        const missingTexture = this.companionModels.find((model) => !this.textures.exists(model.id));
+        if (missingTexture) {
+            if (!this.waitingForTexture) {
+                this.waitingForTexture = true;
+                this.textures.once("addtexture", () => {
+                    this.waitingForTexture = false;
+                    this.tryInitializeCompanions();
+                });
+            }
             return;
         }
         const keys = this.companionTextures.getCollectionsKeys();
@@ -284,12 +382,62 @@ export class SelectCompanionScene extends ResizableScene {
             return;
         }
         this.companionCollectionKeys = keys;
+        if (this.selectedCollectionIndex < 0 || this.selectedCollectionIndex >= keys.length) {
+            this.selectedCollectionIndex = 0;
+            this.currentCompanion = 0;
+        }
         selectedCollection.set(this.getSelectedCollectionName());
         this.createCurrentCompanion();
         this.updateSelectedCompanion();
+        this.debugCompanionState("initialized");
         this.companionsInitialized = true;
         selectCompanionSceneVisibleStore.set(true);
         selectCompanionReadyStore.set(true);
+        if (get(inGameProfileEditStore) && get(selectCompanionPreviewFrameStore)) {
+            this.moveCompanion();
+        }
+    }
+
+    private isDebugEnabled(): boolean {
+        if (this.debugEnabled !== undefined) {
+            return this.debugEnabled;
+        }
+        try {
+            this.debugEnabled = localStorage.getItem("debugCompanion") === "1";
+        } catch (e) {
+            this.debugEnabled = false;
+        }
+        return this.debugEnabled;
+    }
+
+    private debugLog(message: string, data?: Record<string, unknown>): void {
+        if (!this.isDebugEnabled()) return;
+        if (this.debugCount++ > 50) return;
+        console.log("[SelectCompanionScene]", message, data ?? {});
+    }
+
+    private debugCompanionState(stage: string): void {
+        if (!this.isDebugEnabled()) return;
+        const frame = get(selectCompanionPreviewFrameStore);
+        const sample = this.companions.slice(0, 6).map((companion, index) => ({
+            index,
+            id: this.companionCurrentCollection?.[index]?.id,
+            visible: companion.visible,
+            alpha: companion.alpha,
+            x: companion.x,
+            y: companion.y,
+            texture: companion.texture?.key,
+            frameTotal: companion.texture?.frameTotal,
+            width: companion.width,
+            height: companion.height,
+        }));
+        this.debugLog("state:" + stage, {
+            currentCompanion: this.currentCompanion,
+            collectionSize: this.companionCurrentCollection?.length ?? 0,
+            companions: this.companions.length,
+            previewFrame: frame,
+            sample,
+        });
     }
 
     public moveToRight() {
@@ -346,9 +494,7 @@ export class SelectCompanionScene extends ResizableScene {
         let companionVisible = true;
         let companionScale = 1.5;
         let companionOpactity = 1;
-        if (this.currentCompanion !== num) {
-            companionVisible = false;
-        }
+        companionVisible = num === this.currentCompanion;
         if (num === this.currentCompanion + 1) {
             companionY -= deltaY;
             companionX += deltaX;
