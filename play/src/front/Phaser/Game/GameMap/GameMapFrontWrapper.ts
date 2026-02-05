@@ -282,7 +282,15 @@ export class GameMapFrontWrapper {
         const gameMapAreas = this.getGameMap().getGameMapAreas();
         // If gameMapAreas is undefined, we are on a public map
         if (gameMapAreas !== undefined) {
-            this.areasManager = new AreasManager(this.scene, gameMapAreas, userConnectedTags, userCanEdit);
+            this.areasManager = new AreasManager(
+                this.scene,
+                gameMapAreas,
+                userConnectedTags,
+                userCanEdit,
+                this.scene.handlePersonalAreaHover?.bind(this.scene),
+                this.scene.handlePersonalAreaHoverOut?.bind(this.scene),
+                this.scene.handlePersonalAreaHoverOutAll?.bind(this.scene)
+            );
             gameMapAreas.triggerAreasChange(undefined, this.position);
         }
         // Once we have the tags, we can compute the colliding layer again

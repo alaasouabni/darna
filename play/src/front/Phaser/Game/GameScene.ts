@@ -22,7 +22,7 @@ import {
 } from "@workadventure/messages";
 import { z } from "zod";
 import type { ITiledMap, ITiledMapLayer, ITiledMapObject, ITiledMapTileset } from "@workadventure/tiled-map-type-guard";
-import type { AreaData, EntityPrefabType } from "@workadventure/map-editor";
+import type { AreaData, EntityPrefabType, PersonalAreaPropertyData } from "@workadventure/map-editor";
 import {
     ENTITIES_FOLDER_PATH_NO_PREFIX,
     ENTITY_COLLECTION_FILE,
@@ -138,6 +138,7 @@ import { extensionModuleStore, gameSceneIsLoadedStore, gameSceneStore } from "..
 import { myCameraBlockedStore, myMicrophoneBlockedStore } from "../../Stores/MyMediaStore";
 import type { GameStateEvent } from "../../Api/Events/GameStateEvent";
 import { currentPlayerWokaStore } from "../../Stores/CurrentPlayerWokaStore";
+import { wokaMenuStore } from "../../Stores/WokaMenuStore";
 import {
     mapEditorModeStore,
     mapEditorRestrictedPropertiesStore,
@@ -155,6 +156,7 @@ import { BroadcastService } from "../../Streaming/BroadcastService";
 import { megaphoneCanBeUsedStore, megaphoneSpaceStore } from "../../Stores/MegaphoneStore";
 import { CompanionTextureError } from "../../Exception/CompanionTextureError";
 import { SelectCompanionScene, SelectCompanionSceneName } from "../Login/SelectCompanionScene";
+import type { Area } from "../Entity/Area";
 import { scriptUtils } from "../../Api/ScriptUtils";
 import { statusChanger } from "../../Components/ActionBar/AvailabilityStatus/statusChanger";
 import { warningMessageStore } from "../../Stores/ErrorStore";
@@ -335,6 +337,18 @@ export class GameScene extends DirtyScene {
     private locateManager!: LocateManager;
     private hasMovedThisFrame: boolean = false;
     private gameMapPropertiesListener?: GameMapPropertiesListener;
+    private personalAreaHoverTimeoutId: number | undefined;
+    private personalAreaHoverOutTimeoutId: number | undefined;
+    private personalAreaHoverOwnerId: string | undefined;
+    private personalAreaOwnerCache = new Map<
+        string,
+        {
+            name: string;
+            visitCardUrl?: string;
+            characterTextures?: CharacterTextureMessage[];
+            userId?: number;
+        }
+    >();
 
     private proximitySpaceManager: ProximitySpaceManager | undefined;
     private scriptingVideoManager: ScriptingVideoManager | undefined;
@@ -1617,6 +1631,190 @@ export class GameScene extends DirtyScene {
                 updateMask
             );
         }
+    }
+
+    private async resolvePersonalAreaOwner(ownerId: string): Promise<{
+        name: string;
+        userId: number;
+        userUuid: string;
+        visitCardUrl?: string;
+        characterTextures?: CharacterTextureMessage[];
+    } | null> {
+        const remote = this.getRemotePlayersRepository().getPlayerByUuid(ownerId);
+        if (remote) {
+            const entry = {
+                name: remote.name,
+                userId: remote.userId,
+                userUuid: remote.userUuid,
+                visitCardUrl: remote.visitCardUrl ?? undefined,
+                characterTextures: remote.characterTextures as unknown as CharacterTextureMessage[],
+            };
+            this.personalAreaOwnerCache.set(ownerId, entry);
+            return entry;
+        }
+
+        const cached = this.personalAreaOwnerCache.get(ownerId);
+        if (cached) {
+            return {
+                name: cached.name,
+                userId: cached.userId ?? -1,
+                userUuid: ownerId,
+                visitCardUrl: cached.visitCardUrl,
+                characterTextures: cached.characterTextures,
+            };
+        }
+
+        if (this.connection && ADMIN_URL) {
+            try {
+                const member = await this.connection.queryMember(ownerId);
+                if (member?.name) {
+                    const characterTextures =
+                        member.characterTextureIds?.map((id) => ({ id, url: "" })) ?? [];
+                    const entry = {
+                        name: member.name,
+                        userId: -1,
+                        userUuid: ownerId,
+                        visitCardUrl: member.visitCardUrl ?? undefined,
+                        characterTextures: characterTextures.length ? characterTextures : undefined,
+                    };
+                    this.personalAreaOwnerCache.set(ownerId, entry);
+                    return entry;
+                }
+            } catch (error) {
+                console.warn("Could not fetch personal area owner profile", error);
+            }
+        }
+
+        return null;
+    }
+
+    private isPointerOverScreenShare(pointer?: Phaser.Input.Pointer): boolean {
+        const clientX = pointer?.event?.clientX;
+        const clientY = pointer?.event?.clientY;
+        if (clientX === undefined || clientY === undefined) {
+            return false;
+        }
+        const element = document.elementFromPoint(clientX, clientY);
+        if (!element) {
+            return false;
+        }
+        return !!element.closest(".screen-blocker");
+    }
+
+    public handlePersonalAreaHover(
+        area: Area,
+        areaData: AreaData,
+        property: PersonalAreaPropertyData,
+        pointer?: Phaser.Input.Pointer
+    ): void {
+        if (this.isPointerOverScreenShare(pointer)) {
+            return;
+        }
+        if (!property.ownerId) {
+            return;
+        }
+
+        const currentMenu = get(wokaMenuStore);
+        if (currentMenu?.source === "click") {
+            return;
+        }
+
+        if (this.personalAreaHoverOutTimeoutId !== undefined) {
+            window.clearTimeout(this.personalAreaHoverOutTimeoutId);
+            this.personalAreaHoverOutTimeoutId = undefined;
+        }
+
+        if (
+            this.personalAreaHoverOwnerId === property.ownerId &&
+            currentMenu?.source === "hover" &&
+            currentMenu.userUuid === property.ownerId
+        ) {
+            return;
+        }
+
+        if (this.personalAreaHoverTimeoutId !== undefined) {
+            window.clearTimeout(this.personalAreaHoverTimeoutId);
+        }
+
+        const ownerId = property.ownerId;
+        this.personalAreaHoverOwnerId = ownerId;
+        this.personalAreaHoverTimeoutId = window.setTimeout(() => {
+            this.resolvePersonalAreaOwner(ownerId)
+                .then((owner) => {
+                    if (!owner) return;
+                    if (this.personalAreaHoverOwnerId !== ownerId) return;
+                    wokaMenuStore.initialize(
+                        owner.name,
+                        owner.userId,
+                        owner.userUuid,
+                        owner.visitCardUrl ?? undefined,
+                        "hover",
+                        owner.characterTextures
+                    );
+                })
+                .catch((error) => {
+                    console.warn("Failed to resolve personal area owner", error);
+                });
+        }, 180);
+    }
+
+    public handlePersonalAreaHoverOut(
+        area: Area,
+        areaData: AreaData,
+        property: PersonalAreaPropertyData,
+        pointer?: Phaser.Input.Pointer
+    ): void {
+        if (this.personalAreaHoverTimeoutId !== undefined) {
+            window.clearTimeout(this.personalAreaHoverTimeoutId);
+            this.personalAreaHoverTimeoutId = undefined;
+        }
+
+        const currentMenu = get(wokaMenuStore);
+        if (!currentMenu || currentMenu.source !== "hover") {
+            return;
+        }
+
+        if (property.ownerId && currentMenu.userUuid !== property.ownerId) {
+            return;
+        }
+
+        if (this.personalAreaHoverOwnerId === property.ownerId) {
+            this.personalAreaHoverOwnerId = undefined;
+        }
+        if (this.personalAreaHoverOutTimeoutId !== undefined) {
+            window.clearTimeout(this.personalAreaHoverOutTimeoutId);
+        }
+
+        this.personalAreaHoverOutTimeoutId = window.setTimeout(() => {
+            const latestMenu = get(wokaMenuStore);
+            if (!latestMenu || latestMenu.source !== "hover") {
+                return;
+            }
+            if (property.ownerId && latestMenu.userUuid !== property.ownerId) {
+                return;
+            }
+            wokaMenuStore.clear();
+            this.personalAreaHoverOwnerId = undefined;
+        }, 120);
+    }
+
+    public handlePersonalAreaHoverOutAll(pointer?: Phaser.Input.Pointer): void {
+        if (this.personalAreaHoverTimeoutId !== undefined) {
+            window.clearTimeout(this.personalAreaHoverTimeoutId);
+            this.personalAreaHoverTimeoutId = undefined;
+        }
+        if (this.personalAreaHoverOutTimeoutId !== undefined) {
+            window.clearTimeout(this.personalAreaHoverOutTimeoutId);
+            this.personalAreaHoverOutTimeoutId = undefined;
+        }
+
+        const currentMenu = get(wokaMenuStore);
+        if (!currentMenu || currentMenu.source !== "hover") {
+            return;
+        }
+
+        wokaMenuStore.clear();
+        this.personalAreaHoverOwnerId = undefined;
     }
 
     public getMapEditorModeManager(): MapEditorModeManager {

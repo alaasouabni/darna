@@ -5,9 +5,14 @@
     import ButtonClose from "../Input/ButtonClose.svelte";
     import VisitCard from "../VisitCard/VisitCard.svelte";
     import WokaFromUserId from "../Woka/WokaFromUserId.svelte";
+    import WokaImage from "../Woka/WokaImage.svelte";
     import { analyticsClient } from "../../Administration/AnalyticsClient";
     import LL from "../../../i18n/i18n-svelte";
     import { gameManager } from "../../Phaser/Game/GameManager";
+    import { ABSOLUTE_PUSHER_URL } from "../../Enum/ComputedConst";
+    import { localUserStore } from "../../Connection/LocalUserStore";
+    import type { WokaData } from "../Woka/WokaTypes";
+    import type { CharacterTextureMessage } from "@workadventure/messages";
 
     import type { WokaMenuAction, WokaMenuData } from "../../Stores/WokaMenuStore";
 
@@ -16,6 +21,9 @@
     let remotePlayer: { chatID?: string } | undefined;
 
     let wokaMenuStoreUnsubscriber: Unsubscriber | null;
+    let wokaDataCache: WokaData | null = null;
+    let offlineSelectedTextures: Record<string, string> | null = null;
+    let offlineWokaData: WokaData | null = null;
 
     function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Escape") {
@@ -58,6 +66,55 @@
         }
     });
 
+    async function getWokaData(): Promise<WokaData> {
+        if (wokaDataCache) {
+            return wokaDataCache;
+        }
+        const roomUrl = gameManager.currentStartedRoom.href;
+        const response = await fetch(`${ABSOLUTE_PUSHER_URL}woka/list?roomUrl=${encodeURIComponent(roomUrl)}`, {
+            headers: {
+                Authorization: localUserStore.getAuthToken() || "",
+            },
+            credentials: "include",
+        });
+        if (!response.ok) {
+            throw new Error("Failed to load Woka data");
+        }
+        wokaDataCache = await response.json();
+        return wokaDataCache;
+    }
+
+    function mapTexturesToSelected(wokaData: WokaData, textures: CharacterTextureMessage[]): Record<string, string> {
+        const ids = new Set(textures.map((t) => t.id));
+        const selected: Record<string, string> = {};
+        for (const [part, partData] of Object.entries(wokaData)) {
+            for (const collection of partData.collections) {
+                const match = collection.textures.find((t) => ids.has(t.id));
+                if (match) {
+                    selected[part] = match.id;
+                    break;
+                }
+            }
+        }
+        return selected;
+    }
+
+    $: if (wokaMenuData?.characterTextures && wokaMenuData.userId === -1) {
+        offlineSelectedTextures = null;
+        offlineWokaData = null;
+        getWokaData()
+            .then((data) => {
+                offlineWokaData = data;
+                offlineSelectedTextures = mapTexturesToSelected(data, wokaMenuData?.characterTextures ?? []);
+            })
+            .catch((err) => {
+                console.warn("Could not load Woka data for hover card", err);
+            });
+    } else {
+        offlineSelectedTextures = null;
+        offlineWokaData = null;
+    }
+
     onDestroy(() => {
         if (wokaMenuStoreUnsubscriber) {
             wokaMenuStoreUnsubscriber();
@@ -90,6 +147,20 @@
                                     placeholderSrc="/assets/placeholder-woka.png"
                                     customWidth="4rem"
                                 />
+                            </div>
+                        {:else if offlineSelectedTextures && offlineWokaData}
+                            <div
+                                id="woka"
+                                class=" bt-3 overflow-hidden mt-9 border w-fit h-fit pt-3 rounded-lg cursor-not-allowed bg-[rgb(103,185,133)]"
+                            >
+                                <WokaImage selectedTextures={offlineSelectedTextures} wokaData={offlineWokaData} canvasSize={64} />
+                            </div>
+                        {:else}
+                            <div
+                                id="woka"
+                                class=" bt-3 overflow-hidden mt-9 border w-fit h-fit pt-3 rounded-lg cursor-not-allowed bg-[rgb(103,185,133)]"
+                            >
+                                <img src="/assets/placeholder-woka.png" alt="" class="w-16 h-16" />
                             </div>
                         {/if}
                         <div class=" w-max mt-[29px]">

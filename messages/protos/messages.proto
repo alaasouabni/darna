@@ -628,6 +628,8 @@ message Member {
   optional string email = 3;
   optional string visitCardUrl = 4;
   optional string chatID = 5;
+  repeated string characterTextureIds = 6;
+  optional string companionTextureId = 7;
 }
 
 message IceServer {

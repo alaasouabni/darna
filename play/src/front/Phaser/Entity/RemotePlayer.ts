@@ -135,7 +135,13 @@ export class RemotePlayer extends Character implements ActivatableInterface {
         }
 
         // Initialize the woka menu
-        wokaMenuStore.initialize(this.playerName, this.userId, this.userUuid, this.visitCardUrl ?? undefined);
+        wokaMenuStore.initialize(
+            this.playerName,
+            this.userId,
+            this.userUuid,
+            this.visitCardUrl ?? undefined,
+            "click"
+        );
 
         // Add the default actions to the woka menu
         for (const action of this.getDefaultWokaMenuActions()) {

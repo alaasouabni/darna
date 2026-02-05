@@ -1499,6 +1499,8 @@ export class SocketManager implements ZoneEventListener {
                 name: member.name ?? undefined,
                 id: member.id,
                 email: member.email ?? undefined,
+                characterTextureIds: member.characterTextureIds ?? [],
+                companionTextureId: member.companionTextureId ?? undefined,
             })),
         };
     }
@@ -1530,6 +1532,8 @@ export class SocketManager implements ZoneEventListener {
                     email: memberFromApi.email ?? undefined,
                     visitCardUrl: memberFromApi.visitCardUrl ?? undefined,
                     chatID: memberFromApi.chatID ?? undefined,
+                    characterTextureIds: memberFromApi.characterTextureIds ?? [],
+                    companionTextureId: memberFromApi.companionTextureId ?? undefined,
                 },
             };
         } catch (e) {

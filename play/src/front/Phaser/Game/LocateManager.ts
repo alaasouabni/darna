@@ -17,6 +17,7 @@ export class LocateManager {
     private locatePositionTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
     private locatePositionClearProgressTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
     private wokaMenuStoreUnsubscriber?: () => void;
+    private followingRemoteUserUuid: string | null = null;
 
     constructor(private scene: GameScene, private cameraManager: CameraManager, private connection: RoomConnection) {
         this.subscribeToLocatePositionMessages();
@@ -42,10 +43,21 @@ export class LocateManager {
         // Subscribe to woka menu store to stop following the remote player when the woka menu is closed
         this.wokaMenuStoreUnsubscriber = wokaMenuStore.subscribe((value) => {
             if (value === undefined) {
-                // TODO: Stop following the remote player
-                this.cameraManager.stopFollowRemotePlayer();
-            } else if (value.userUuid !== undefined && value.userUuid !== "") {
+                if (this.followingRemoteUserUuid) {
+                    this.cameraManager.stopFollowRemotePlayer();
+                    this.followingRemoteUserUuid = null;
+                }
+                return;
+            }
+
+            // Do not auto-follow on hover-based cards (personal area hover).
+            if (value.source === "hover") {
+                return;
+            }
+
+            if (value.userUuid !== undefined && value.userUuid !== "") {
                 this.cameraManager.followRemotePlayer(value.userUuid);
+                this.followingRemoteUserUuid = value.userUuid;
             }
         });
     }
@@ -72,7 +84,7 @@ export class LocateManager {
         const visitCardUrl = userData?.visitCardUrl ?? undefined;
 
         // Initialize woka menu with progress
-        wokaMenuStore.initialize(userName, -1, userUuid, visitCardUrl || undefined);
+        wokaMenuStore.initialize(userName, -1, userUuid, visitCardUrl || undefined, "click");
 
         // Set up progress messages with fun explanations
         const progressMessages = [
