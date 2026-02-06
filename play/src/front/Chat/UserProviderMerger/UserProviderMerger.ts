@@ -46,18 +46,25 @@ export class UserProviderMerger {
                 const mergedUsers = new Map<ChatId | UserUuid, AnyKindOfUser>();
                 for (const chatUserList of usersByChatId.values()) {
                     const mergedUser = chatUserList.reduce((acc, user) => {
+                        const shouldPreferIncoming = Boolean(user.playUri || user.spaceUserId);
                         return {
                             chatId: user.chatId || acc.chatId,
                             uuid: user.uuid || acc.uuid,
-                            username: user.username || acc.username,
-                            availabilityStatus: user.availabilityStatus || acc.availabilityStatus,
-                            pictureStore: user.pictureStore || acc.pictureStore,
+                            username: shouldPreferIncoming ? user.username || acc.username : acc.username || user.username,
+                            availabilityStatus: shouldPreferIncoming
+                                ? user.availabilityStatus || acc.availabilityStatus
+                                : acc.availabilityStatus || user.availabilityStatus,
+                            pictureStore: shouldPreferIncoming
+                                ? user.pictureStore || acc.pictureStore
+                                : acc.pictureStore || user.pictureStore,
                             roomName: user.roomName || acc.roomName,
                             playUri: user.playUri || acc.playUri,
                             isAdmin: user.isAdmin || acc.isAdmin,
                             isMember: user.isMember || acc.isMember,
-                            visitCardUrl: user.visitCardUrl || acc.visitCardUrl,
-                            color: user.color || acc.color,
+                            visitCardUrl: shouldPreferIncoming
+                                ? user.visitCardUrl || acc.visitCardUrl
+                                : acc.visitCardUrl || user.visitCardUrl,
+                            color: shouldPreferIncoming ? user.color || acc.color : acc.color || user.color,
                             spaceUserId: user.spaceUserId || acc.spaceUserId,
                         } as AnyKindOfUser;
                     });
