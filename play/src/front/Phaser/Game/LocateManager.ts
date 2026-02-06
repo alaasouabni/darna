@@ -84,7 +84,15 @@ export class LocateManager {
         const visitCardUrl = userData?.visitCardUrl ?? undefined;
 
         // Initialize woka menu with progress
-        wokaMenuStore.initialize(userName, -1, userUuid, visitCardUrl || undefined, "click");
+        wokaMenuStore.initialize(
+            userName,
+            -1,
+            userUuid,
+            visitCardUrl || undefined,
+            "click",
+            undefined,
+            userData?.availabilityStatus
+        );
 
         // Set up progress messages with fun explanations
         const progressMessages = [

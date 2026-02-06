@@ -347,6 +347,7 @@ export class GameScene extends DirtyScene {
             visitCardUrl?: string;
             characterTextures?: CharacterTextureMessage[];
             userId?: number;
+            chatId?: string;
         }
     >();
 
@@ -1633,12 +1634,39 @@ export class GameScene extends DirtyScene {
         }
     }
 
+    private async getAvailabilityStatusFromChat(
+        userUuid: string,
+        chatId?: string
+    ): Promise<AvailabilityStatus | undefined> {
+        try {
+            const merger = await raceTimeout(this.userProviderMerger, 200);
+            const usersByRoom = get(merger.usersByRoomStore);
+            for (const { users } of usersByRoom.values()) {
+                const found = users.find(
+                    (user) => (chatId && user.chatId === chatId) || (user.uuid && user.uuid === userUuid)
+                );
+                if (found) {
+                    return get(found.availabilityStatus);
+                }
+            }
+            if (chatId) {
+                return AvailabilityStatus.UNCHANGED;
+            }
+        } catch (error) {
+            if (!(error instanceof TimeoutError)) {
+                console.warn("Could not read chat availability status", error);
+            }
+        }
+        return undefined;
+    }
+
     private async resolvePersonalAreaOwner(ownerId: string): Promise<{
         name: string;
         userId: number;
         userUuid: string;
         visitCardUrl?: string;
         characterTextures?: CharacterTextureMessage[];
+        availabilityStatus?: AvailabilityStatus;
     } | null> {
         const remote = this.getRemotePlayersRepository().getPlayerByUuid(ownerId);
         if (remote) {
@@ -1648,6 +1676,7 @@ export class GameScene extends DirtyScene {
                 userUuid: remote.userUuid,
                 visitCardUrl: remote.visitCardUrl ?? undefined,
                 characterTextures: remote.characterTextures as unknown as CharacterTextureMessage[],
+                availabilityStatus: remote.availabilityStatus,
             };
             this.personalAreaOwnerCache.set(ownerId, entry);
             return entry;
@@ -1655,13 +1684,17 @@ export class GameScene extends DirtyScene {
 
         const cached = this.personalAreaOwnerCache.get(ownerId);
         if (cached) {
-            return {
-                name: cached.name,
-                userId: cached.userId ?? -1,
-                userUuid: ownerId,
-                visitCardUrl: cached.visitCardUrl,
-                characterTextures: cached.characterTextures,
-            };
+            if (cached.chatId || !this.connection || !ADMIN_URL) {
+                const availabilityStatus = await this.getAvailabilityStatusFromChat(ownerId, cached.chatId);
+                return {
+                    name: cached.name,
+                    userId: cached.userId ?? -1,
+                    userUuid: ownerId,
+                    visitCardUrl: cached.visitCardUrl,
+                    characterTextures: cached.characterTextures,
+                    availabilityStatus,
+                };
+            }
         }
 
         if (this.connection && ADMIN_URL) {
@@ -1670,12 +1703,15 @@ export class GameScene extends DirtyScene {
                 if (member?.name) {
                     const characterTextures =
                         member.characterTextureIds?.map((id) => ({ id, url: "" })) ?? [];
+                    const availabilityStatus = await this.getAvailabilityStatusFromChat(ownerId, member.chatID ?? undefined);
                     const entry = {
                         name: member.name,
                         userId: -1,
                         userUuid: ownerId,
                         visitCardUrl: member.visitCardUrl ?? undefined,
                         characterTextures: characterTextures.length ? characterTextures : undefined,
+                        availabilityStatus,
+                        chatId: member.chatID ?? undefined,
                     };
                     this.personalAreaOwnerCache.set(ownerId, entry);
                     return entry;
@@ -1749,7 +1785,8 @@ export class GameScene extends DirtyScene {
                         owner.userUuid,
                         owner.visitCardUrl ?? undefined,
                         "hover",
-                        owner.characterTextures
+                        owner.characterTextures,
+                        owner.availabilityStatus
                     );
                 })
                 .catch((error) => {

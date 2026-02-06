@@ -140,7 +140,9 @@ export class RemotePlayer extends Character implements ActivatableInterface {
             this.userId,
             this.userUuid,
             this.visitCardUrl ?? undefined,
-            "click"
+            "click",
+            undefined,
+            this.getAvailabilityStatus()
         );
 
         // Add the default actions to the woka menu

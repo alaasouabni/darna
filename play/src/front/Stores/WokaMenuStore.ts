@@ -1,7 +1,7 @@
 import type { ComponentType } from "svelte";
 import { writable } from "svelte/store";
 import { v4 } from "uuid";
-import type { CharacterTextureMessage } from "@workadventure/messages";
+import type { AvailabilityStatus, CharacterTextureMessage } from "@workadventure/messages";
 
 export type WokaMenuAction = {
     uuid?: string;
@@ -21,6 +21,7 @@ export interface WokaMenuData {
     userUuid: string;
     source?: "click" | "hover";
     characterTextures?: CharacterTextureMessage[];
+    availabilityStatus?: AvailabilityStatus;
 }
 
 function createWokaMenuStore() {
@@ -34,7 +35,8 @@ function createWokaMenuStore() {
             userUuid: string,
             visitCardUrl: string | undefined,
             source: "click" | "hover" = "click",
-            characterTextures?: CharacterTextureMessage[]
+            characterTextures?: CharacterTextureMessage[],
+            availabilityStatus?: AvailabilityStatus
         ) => {
             set({
                 wokaName,
@@ -44,6 +46,7 @@ function createWokaMenuStore() {
                 userUuid,
                 source,
                 characterTextures,
+                availabilityStatus,
             });
         },
         addAction: (action: WokaMenuAction) => {

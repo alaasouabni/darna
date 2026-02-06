@@ -12,7 +12,9 @@
     import { ABSOLUTE_PUSHER_URL } from "../../Enum/ComputedConst";
     import { localUserStore } from "../../Connection/LocalUserStore";
     import type { WokaData } from "../Woka/WokaTypes";
+    import { AvailabilityStatus } from "@workadventure/messages";
     import type { CharacterTextureMessage } from "@workadventure/messages";
+    import { getColorHexOfStatus, getStatusLabel } from "../../Utils/AvailabilityStatus";
 
     import type { WokaMenuAction, WokaMenuData } from "../../Stores/WokaMenuStore";
 
@@ -24,6 +26,22 @@
     let wokaDataCache: WokaData | null = null;
     let offlineSelectedTextures: Record<string, string> | null = null;
     let offlineWokaData: WokaData | null = null;
+    const OFFLINE_COLOR = "#94a3b8";
+
+    $: statusToDisplay = wokaMenuData?.availabilityStatus;
+    $: isOfflineStatus = statusToDisplay === AvailabilityStatus.UNCHANGED;
+    $: statusLabel =
+        statusToDisplay !== undefined
+            ? isOfflineStatus
+                ? $LL.actionbar.status.OFFLINE()
+                : getStatusLabel(statusToDisplay)
+            : "";
+    $: statusColor =
+        statusToDisplay !== undefined
+            ? isOfflineStatus
+                ? OFFLINE_COLOR
+                : getColorHexOfStatus(statusToDisplay)
+            : "";
 
     function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Escape") {
@@ -136,7 +154,7 @@
                 </div>
 
                 <div class="flex items-center justify-center p-2">
-                    <div class="text-white flex flex-col justify-center items-center font-bold text-xl">
+                        <div class="text-white flex flex-col justify-center items-center font-bold text-xl">
                         {#if wokaMenuData.userId != undefined && wokaMenuData.userId != -1}
                             <div
                                 id="woka"
@@ -163,8 +181,17 @@
                                 <img src="/assets/placeholder-woka.png" alt="" class="w-16 h-16" />
                             </div>
                         {/if}
-                        <div class=" w-max mt-[29px]">
-                            <h3>{wokaMenuData.wokaName}</h3>
+                        <div class="mt-[24px] flex flex-col items-center gap-2">
+                            <h3 class="text-center">{wokaMenuData.wokaName}</h3>
+                            {#if statusToDisplay !== undefined}
+                                <div class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white/80">
+                                    <span
+                                        class="inline-block h-2.5 w-2.5 rounded-full ring-2 ring-white/10"
+                                        style="background-color: {statusColor}"
+                                    />
+                                    {statusLabel}
+                                </div>
+                            {/if}
                         </div>
                     </div>
                 </div>
