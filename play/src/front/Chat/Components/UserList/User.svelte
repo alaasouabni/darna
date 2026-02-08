@@ -14,7 +14,7 @@
     import { analyticsClient } from "../../../Administration/AnalyticsClient";
     import UserActionButton from "./UserActionButton.svelte";
     import ImageWithFallback from "./ImageWithFallback.svelte";
-    import { IconLoader, IconSend } from "@wa-icons";
+    import { IconHandStop, IconLoader, IconSend } from "@wa-icons";
 
     export let user: ChatUser;
 
@@ -34,6 +34,7 @@
     });
 
     const roomCreationInProgress = gameManager.chatConnection.roomCreationInProgress;
+    const currentScene = gameManager.getCurrentGameScene();
 
     function getNameOfAvailabilityStatus(status: AvailabilityStatus) {
         switch (status) {
@@ -85,6 +86,14 @@
             user.playUri ?? "",
             AskPositionMessage_AskType.LOCATE
         );
+    }
+
+    $: waveTargetUser = user.uuid ? currentScene.getRemotePlayersRepository().getPlayerByUuid(user.uuid) : undefined;
+    $: canWaveUser = !isMe && !!waveTargetUser && $userStatus != 0;
+
+    function waveUser() {
+        if (!waveTargetUser) return;
+        currentScene.sendWaveToUser(waveTargetUser.userId, waveTargetUser.userUuid, waveTargetUser.name ?? username ?? "User");
     }
 </script>
 
@@ -164,7 +173,7 @@
                     {/if}
                 </div>
             </div>
-            <div class="flex flex-wrap justify-start items-start content-start">
+            <div class="flex flex-wrap justify-start items-start content-start gap-1">
                 <div class="transition-all">
                     {#if !isMe && $userStatus != 0}
                         <UserActionButton {user} />
@@ -173,7 +182,7 @@
                 {#if !isMe && !showRoomCreationInProgress && isMatrixChatEnabled}
                     <div class="relative group">
                         <div
-                            class="bg-contrast/90 backdrop-blur-xl text-white tooltip absolute text-nowrap p-2 opacity-0 transition-all group-hover:opacity-100 rounded top-1/2 -translate-y-1/2 start-[130%]"
+                            class="bg-contrast/90 backdrop-blur-xl text-white tooltip absolute text-nowrap p-2 opacity-0 transition-all group-hover:opacity-100 rounded bottom-[calc(100%+6px)] start-1/2 -translate-x-1/2 pointer-events-none z-10"
                         >
                             {#if user.chatId === undefined}
                                 {$LL.chat.remoteUserNotConnected()}
@@ -205,6 +214,22 @@
                             <IconSend font-size="16" />
                         </button>
                     </div>
+                    {#if canWaveUser}
+                        <div class="relative group">
+                            <div
+                                class="bg-contrast/90 backdrop-blur-xl text-white tooltip absolute text-nowrap p-2 opacity-0 transition-all group-hover:opacity-100 rounded bottom-[calc(100%+6px)] start-1/2 -translate-x-1/2 pointer-events-none z-10"
+                            >
+                                Wave
+                            </div>
+                            <button
+                                class="transition-all hover:bg-white/10 p-2 rounded-md aspect-square flex items-center justify-center m-0 text-white"
+                                data-testId={`wave-${user.username}`}
+                                on:click|stopPropagation={waveUser}
+                            >
+                                <IconHandStop font-size="16" />
+                            </button>
+                        </div>
+                    {/if}
                 {:else if $roomCreationInProgress && showRoomCreationInProgress}
                     <div class="min-h-[30px] text-md flex gap-2 justify-center flex-row items-center p-1">
                         <IconLoader class="animate-spin" />

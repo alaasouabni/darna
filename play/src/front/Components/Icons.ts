@@ -103,6 +103,7 @@ export { default as IconLamp } from "~icons/tabler/lamp";
 export { default as IconTexture } from "~icons/tabler/texture";
 export { default as IconTools } from "~icons/tabler/tools";
 export { default as IconMessageShare } from "~icons/tabler/message-2-share";
+export { default as IconHandStop } from "~icons/tabler/hand-stop";
 export { default as IconMusicShare } from "~icons/tabler/music-share";
 export { default as IconTableOptions } from "~icons/tabler/table-options";
 export { default as IconVideoOff } from "~icons/tabler/video-off";

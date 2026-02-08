@@ -7,6 +7,8 @@ export type WokaMenuAction = {
     uuid?: string;
     actionName: string;
     callback: () => void;
+    closeMenuOnClick?: boolean;
+    preserveCameraOnClose?: boolean;
     protected?: boolean;
     priority?: number;
     style?: "is-success" | "is-error" | "is-primary" | string;
@@ -19,13 +21,14 @@ export interface WokaMenuData {
     visitCardUrl?: string;
     userId: number; // -1 if the user is not found yet and woka menu is in progress
     userUuid: string;
-    source?: "click" | "hover";
+    source?: "click" | "hover" | "locate";
     characterTextures?: CharacterTextureMessage[];
     availabilityStatus?: AvailabilityStatus;
 }
 
 function createWokaMenuStore() {
     const { subscribe, update, set } = writable<WokaMenuData | undefined>(undefined);
+    const skipFollowResetOnNextClear = writable(false);
 
     return {
         subscribe,
@@ -34,7 +37,7 @@ function createWokaMenuStore() {
             userId: number,
             userUuid: string,
             visitCardUrl: string | undefined,
-            source: "click" | "hover" = "click",
+            source: "click" | "hover" | "locate" = "click",
             characterTextures?: CharacterTextureMessage[],
             availabilityStatus?: AvailabilityStatus
         ) => {
@@ -73,8 +76,17 @@ function createWokaMenuStore() {
         /**
          * Hides menu
          */
-        clear: () => {
+        clear: (options?: { skipFollowReset?: boolean }) => {
+            skipFollowResetOnNextClear.set(options?.skipFollowReset === true);
             set(undefined);
+        },
+        consumeSkipFollowResetOnNextClear: () => {
+            let shouldSkip = false;
+            skipFollowResetOnNextClear.update((value) => {
+                shouldSkip = value;
+                return false;
+            });
+            return shouldSkip;
         },
         removeRemotePlayer: (userUuid: string) => {
             update((data) => {

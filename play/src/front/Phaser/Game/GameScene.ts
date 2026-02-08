@@ -219,6 +219,7 @@ import { DEPTH_BUBBLE_CHAT_SPRITE, DEPTH_WHITE_MASK } from "./DepthIndexes";
 import { ScriptingEventsManager } from "./ScriptingEventsManager";
 import { FollowManager } from "./FollowManager";
 import { LocateManager } from "./LocateManager";
+import { WaveManager } from "./WaveManager";
 import { uiWebsiteManager } from "./UI/UIWebsiteManager";
 import { ScriptingVideoManager } from "./ScriptingVideoManager";
 import EVENT_TYPE = Phaser.Scenes.Events;
@@ -333,6 +334,7 @@ export class GameScene extends DirtyScene {
     private sharedVariablesManager!: SharedVariablesManager;
     private playerVariablesManager!: PlayerVariablesManager;
     private scriptingEventsManager!: ScriptingEventsManager;
+    private waveManager: WaveManager | undefined;
     private followManager!: FollowManager;
     private locateManager!: LocateManager;
     private hasMovedThisFrame: boolean = false;
@@ -1235,6 +1237,8 @@ export class GameScene extends DirtyScene {
         this.sharedVariablesManager?.close();
         this.playerVariablesManager?.close();
         this.scriptingEventsManager?.close();
+        this.waveManager?.destroy();
+        this.waveManager = undefined;
         this.embeddedWebsiteManager?.close();
         this.scriptingVideoManager?.close();
         this.areaManager?.close();
@@ -1568,6 +1572,13 @@ export class GameScene extends DirtyScene {
         return this.remotePlayersRepository;
     }
 
+    public sendWaveToUser(targetUserId: number, targetUserUuid: string, targetUserName: string): void {
+        if (!this.waveManager) {
+            return;
+        }
+        void this.waveManager.sendWave(targetUserId, targetUserUuid, targetUserName);
+    }
+
     public setPlayerVariable(event: SetPlayerVariableEvent): void {
         if (!this.playerVariablesManager) {
             return;
@@ -1751,7 +1762,7 @@ export class GameScene extends DirtyScene {
         }
 
         const currentMenu = get(wokaMenuStore);
-        if (currentMenu?.source === "click") {
+        if (currentMenu?.source && currentMenu.source !== "hover") {
             return;
         }
 
@@ -2332,6 +2343,9 @@ export class GameScene extends DirtyScene {
 
                 // Set up events manager
                 this.scriptingEventsManager = new ScriptingEventsManager(this.connection);
+                this.waveManager = new WaveManager(this.connection, this.remotePlayersRepository, () => {
+                    this.playBubbleInSound();
+                });
 
                 // Set up follow manager
                 this.followManager = new FollowManager(this.connection, this.remotePlayersRepository);

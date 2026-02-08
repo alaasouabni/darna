@@ -49,8 +49,8 @@
         }
     }
 
-    function closeActionsMenu() {
-        wokaMenuStore.clear();
+    function closeActionsMenu(options?: { skipFollowReset?: boolean }) {
+        wokaMenuStore.clear(options);
     }
 
     let buttonsLayout: "row" | "column" | "wrap" = "row";
@@ -236,7 +236,9 @@
                         class:mx-2={buttonsLayout === "column"}
                         on:click={() => analyticsClient.clickPropertyMapEditor(action.actionName, action.style)}
                         on:click|preventDefault={() => {
-                            closeActionsMenu();
+                            if (action.closeMenuOnClick !== false) {
+                                closeActionsMenu({ skipFollowReset: action.preserveCameraOnClose === true });
+                            }
                             action.callback();
                         }}
                     >

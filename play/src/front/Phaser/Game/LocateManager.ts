@@ -44,14 +44,19 @@ export class LocateManager {
         this.wokaMenuStoreUnsubscriber = wokaMenuStore.subscribe((value) => {
             if (value === undefined) {
                 if (this.followingRemoteUserUuid) {
-                    this.cameraManager.stopFollowRemotePlayer();
+                    const shouldSkipFollowReset = wokaMenuStore.consumeSkipFollowResetOnNextClear();
+                    if (!shouldSkipFollowReset) {
+                        this.cameraManager.stopFollowRemotePlayer();
+                    } else {
+                        this.cameraManager.setExplorationMode();
+                    }
                     this.followingRemoteUserUuid = null;
                 }
                 return;
             }
 
             // Do not auto-follow on hover-based cards (personal area hover).
-            if (value.source === "hover") {
+            if (value.source !== "locate") {
                 return;
             }
 
@@ -89,7 +94,7 @@ export class LocateManager {
             -1,
             userUuid,
             visitCardUrl || undefined,
-            "click",
+            "locate",
             undefined,
             userData?.availabilityStatus
         );
