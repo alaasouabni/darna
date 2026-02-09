@@ -119,6 +119,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.animateCallback = this.animate.bind(this);
 
         this.camera = scene.cameras.main;
+        // Pixel-art map: keep camera sampling on integer pixels to reduce seams/ghosting while zooming.
+        this.camera.roundPixels = true;
         this.cameraLocked = false;
         this.zoomLocked = false;
 
@@ -179,7 +181,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const zoomModifierChange = this.getZoomModifierChange(setTo.width, setTo.height);
 
         if (duration === 0) {
-            this.waScaleManager.zoomModifier = currentZoomModifier + zoomModifierChange;
+            this.waScaleManager.setRuntimeZoomModifier(currentZoomModifier + zoomModifierChange, this.camera);
             this.camera.centerOn(setTo.x, setTo.y);
             this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
             this.playerToFollow?.once(hasMovedEventName, () => {
@@ -193,7 +195,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.camera.pan(setTo.x, setTo.y, duration, Easing.SineEaseOut, true, (camera, progress, x, y) => {
             if (this.cameraMode === CameraMode.Positioned) {
                 if (zoomModifierChange !== 0) {
-                    this.waScaleManager.zoomModifier = currentZoomModifier + progress * zoomModifierChange;
+                    this.waScaleManager.setRuntimeZoomModifier(
+                        currentZoomModifier + progress * zoomModifierChange,
+                        this.camera
+                    );
                 }
                 this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
             }
@@ -236,7 +241,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const zoomModifierChange = this.getZoomModifierChange(focusOn.width, focusOn.height, 1 + margin);
 
         if (duration === 0) {
-            this.waScaleManager.zoomModifier = currentZoomModifier + zoomModifierChange;
+            this.waScaleManager.setRuntimeZoomModifier(currentZoomModifier + zoomModifierChange, this.camera);
             this.camera.centerOn(focusOn.x, focusOn.y);
             this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
             return;
@@ -244,7 +249,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.stopPan();
         this.camera.pan(focusOn.x, focusOn.y, duration, Easing.SineEaseOut, true, (camera, progress, x, y) => {
             if (zoomModifierChange) {
-                this.waScaleManager.zoomModifier = currentZoomModifier + progress * zoomModifierChange;
+                this.waScaleManager.setRuntimeZoomModifier(
+                    currentZoomModifier + progress * zoomModifierChange,
+                    this.camera
+                );
             }
             if (progress === 1) {
                 // NOTE: Making sure the last action will be centering after zoom change
@@ -333,8 +341,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 this.explorerFocusOn.x = oldPos.x + shiftX;
                 this.explorerFocusOn.y = oldPos.y + shiftY;
                 if (targetZoomLevel !== undefined) {
-                    this.waScaleManager.zoomModifier =
-                        (targetZoomLevel - startZoomModifier) * progress + startZoomModifier;
+                    this.waScaleManager.setRuntimeZoomModifier(
+                        (targetZoomLevel - startZoomModifier) * progress + startZoomModifier,
+                        this.camera
+                    );
                 }
 
                 this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
@@ -474,7 +484,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     private restoreZoom(duration = 0): void {
         if (duration === 0) {
-            this.waScaleManager.zoomModifier = this.waScaleManager.getSaveZoom();
+            this.waScaleManager.setRuntimeZoomModifier(this.waScaleManager.getSaveZoom(), this.camera);
             return;
         }
         this.animationInProgress = true;
@@ -485,7 +495,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             duration,
             ease: Easing.SineEaseOut,
             onUpdate: (tween: Phaser.Tweens.Tween) => {
-                this.waScaleManager.zoomModifier = tween.getValue() ?? 0;
+                this.waScaleManager.setRuntimeZoomModifier(tween.getValue() ?? 0, this.camera);
                 this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
             },
             onComplete: () => {
@@ -571,6 +581,21 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         return this.waScaleManager.getTargetZoomModifierFor(this.mapSize.width, this.mapSize.height);
     }
 
+    /**
+     * Runtime wheel/pinch zoom must never expose blank map borders.
+     * We derive the minimum modifier from the current camera zoom->modifier ratio.
+     */
+    private getMinimumZoomModifierForCurrentView(): number {
+        const minCameraZoom = Math.max(this.camera.width / this.mapSize.width, this.camera.height / this.mapSize.height);
+        const currentCameraZoom = Math.max(this.camera.zoom, Number.EPSILON);
+        const currentZoomModifier = Math.max(this.waScaleManager.zoomModifier, Number.EPSILON);
+        return (minCameraZoom * currentZoomModifier) / currentCameraZoom;
+    }
+
+    private getMaximumZoomModifierForCurrentView(): number {
+        return this.waScaleManager.getMaximumZoomModifierForCurrentView();
+    }
+
     public triggerMaxZoomOutAnimation(): void {
         const targetZoomModifier = this.getFitZoomModifier();
 
@@ -612,8 +637,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
      */
     public zoomByFactor(zoomFactor: number, smooth: boolean): void {
         // Keep zoom-out clamped to map bounds (avoid blank space around the map)
-        this.refreshZoomBounds();
-        const fitZoomModifier = this.getFitZoomModifier();
+        const minZoomModifier = this.getMinimumZoomModifierForCurrentView();
+        const maxZoomModifier = this.getMaximumZoomModifierForCurrentView();
 
         const wallBroken = Date.now() - this.wallDownDate < 10000 || this.enableResistanceWall === false;
         if (
@@ -644,10 +669,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         }
 
         const targetZoom = this.waScaleManager.zoomModifier * zoomFactor;
-        const clampedZoom = Math.max(targetZoom, fitZoomModifier);
+        const clampedZoom = Clamp(targetZoom, minZoomModifier, maxZoomModifier);
 
         if (!smooth) {
-            waScaleManager.setZoomModifier(clampedZoom, this.camera);
+            waScaleManager.setRuntimeZoomModifier(clampedZoom, this.camera);
             this.applyZoomAnchor();
             this.clearZoomAnchor();
         } else {
@@ -719,6 +744,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         if (this.animationInProgress) {
             return;
         }
+        const minZoomModifier = this.getMinimumZoomModifierForCurrentView();
+        const maxZoomModifier = this.getMaximumZoomModifierForCurrentView();
         if (this.targetZoomModifier !== undefined) {
             let targetZoomModifier;
             if (this.targetDirection === "zoom_in") {
@@ -739,13 +766,17 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 this.targetZoomModifier = undefined;
             }
 
-            waScaleManager.setZoomModifier(newZoom, this.camera);
-            if (this.waScaleManager.isMaximumZoomInReached) {
-                this.targetZoomModifier = undefined;
+            if (newZoom < minZoomModifier || newZoom > maxZoomModifier) {
+                newZoom = Clamp(newZoom, minZoomModifier, maxZoomModifier);
+                if (this.targetDirection === "zoom_out") {
+                    this.targetZoomModifier = undefined;
+                }
+                if (this.targetDirection === "zoom_in") {
+                    this.targetZoomModifier = undefined;
+                }
             }
-            if (this.waScaleManager.isMaximumZoomOutReached) {
-                this.targetZoomModifier = undefined;
-            }
+
+            waScaleManager.setRuntimeZoomModifier(newZoom, this.camera);
         }
 
         // Let's move the camera according to the speed
@@ -784,7 +815,9 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 this.explorerFocusOnTarget = undefined;
             }
 
-            waScaleManager.zoomModifier = newZoom;
+            newZoom = Clamp(newZoom, minZoomModifier, maxZoomModifier);
+
+            waScaleManager.setRuntimeZoomModifier(newZoom, this.camera);
             this.explorerFocusOn.x = x;
             this.explorerFocusOn.y = y;
         }
@@ -953,6 +986,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
         this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
         this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
+        this.explorerFocusOn.x = Math.round(this.explorerFocusOn.x);
+        this.explorerFocusOn.y = Math.round(this.explorerFocusOn.y);
 
         this.explorerFocusOnTarget = undefined;
 
@@ -994,8 +1029,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         }
         const { screenX, screenY, worldX, worldY } = this.zoomAnchor;
         const current = this.camera.getWorldPoint(screenX, screenY);
-        const deltaX = worldX - current.x;
-        const deltaY = worldY - current.y;
+        const rawDeltaX = worldX - current.x;
+        const rawDeltaY = worldY - current.y;
+        const deltaX = Math.abs(rawDeltaX) > 0.5 ? Math.round(rawDeltaX) : 0;
+        const deltaY = Math.abs(rawDeltaY) > 0.5 ? Math.round(rawDeltaY) : 0;
         if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
             this.adjustCameraAnchor(deltaX, deltaY);
         }

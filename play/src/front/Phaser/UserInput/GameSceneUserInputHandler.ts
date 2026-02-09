@@ -104,7 +104,7 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
         deltaY: number,
         deltaZ: number
     ): void {
-        this.gameScene.handleMouseWheel(deltaY);
+        this.gameScene.handleMouseWheel(deltaY, pointer);
     }
 
     public handlePointerUpEvent(pointer: Phaser.Input.Pointer, gameObjects: Phaser.GameObjects.GameObject[]): void {

@@ -4315,7 +4315,7 @@ ${escapedMessage}
         });
     }
 
-    handleMouseWheel(deltaY: number) {
+    handleMouseWheel(deltaY: number, pointer?: Phaser.Input.Pointer) {
         // Calculate the velocity of the zoom
         //const velocity = deltaY / 30;
 
@@ -4331,6 +4331,17 @@ ${escapedMessage}
         zoomFactor = Clamp(zoomFactor, 0.5, 2);
 
         debugZoom("DeltaY: ", deltaY, "Zoom factor", zoomFactor);
+
+        if (pointer) {
+            const camera = this.cameraManager.getCamera();
+            const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
+            this.cameraManager.setZoomAnchor({
+                screenX: pointer.x,
+                screenY: pointer.y,
+                worldX: worldPoint.x,
+                worldY: worldPoint.y,
+            });
+        }
 
         // Apply the zoom
         this.zoomByFactor(zoomFactor, true);
