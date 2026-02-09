@@ -17,6 +17,7 @@ const WAVE_GLOBAL_MAX_EVENTS = 5;
 const WAVE_DEDUPE_WINDOW_MS = 60_000;
 const WAVE_AVATAR_CACHE_TTL_MS = 10 * 60_000;
 const WAVE_AVATAR_CACHE_MAX_SIZE = 100;
+const WAVE_HIDDEN_FLUSH_MAX_TOASTS = 3;
 
 const wavePayloadSchema = z.object({
     waveId: z.string().min(1),
@@ -28,12 +29,25 @@ const wavePayloadSchema = z.object({
 
 type WavePayload = z.infer<typeof wavePayloadSchema>;
 
+type PendingHiddenWave = {
+    senderKey: string;
+    senderUuid: string;
+    senderUserId: number;
+    senderName: string;
+    count: number;
+    firstAt: number;
+    lastAt: number;
+    icon?: string;
+};
+
 export class WaveManager {
     private readonly targetCooldowns = new Map<number, number>();
     private readonly seenWaveIds = new Map<string, number>();
     private readonly waveAvatarCache = new Map<string, { icon: string; lastUsedAt: number }>();
+    private readonly pendingHiddenWavesBySender = new Map<string, PendingHiddenWave>();
     private globalWaveTimestamps: number[] = [];
     private readonly receivedEventSubscription: Subscription;
+    private readonly visibilityChangeListener?: () => void;
 
     constructor(
         private readonly roomConnection: RoomConnection,
@@ -43,6 +57,15 @@ export class WaveManager {
         this.receivedEventSubscription = this.roomConnection.receivedEventMessageStream.subscribe((event) => {
             this.handleReceivedEvent(event);
         });
+
+        if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+            this.visibilityChangeListener = () => {
+                if (document.visibilityState === "visible") {
+                    void this.flushHiddenWaveNotifications();
+                }
+            };
+            document.addEventListener("visibilitychange", this.visibilityChangeListener);
+        }
     }
 
     public async sendWave(targetUserId: number, targetUserUuid: string, targetUserName: string): Promise<void> {
@@ -94,9 +117,13 @@ export class WaveManager {
 
     public destroy(): void {
         this.receivedEventSubscription.unsubscribe();
+        if (this.visibilityChangeListener && typeof document !== "undefined") {
+            document.removeEventListener("visibilitychange", this.visibilityChangeListener);
+        }
         this.targetCooldowns.clear();
         this.seenWaveIds.clear();
         this.waveAvatarCache.clear();
+        this.pendingHiddenWavesBySender.clear();
         this.globalWaveTimestamps = [];
     }
 
@@ -123,8 +150,27 @@ export class WaveManager {
         }
         this.seenWaveIds.set(parsedPayload.data.waveId, now);
 
-        const senderName = this.resolveSenderName(event.senderId, parsedPayload.data);
-        void this.notifyIncomingWave(senderName, event.senderId);
+        void this.handleIncomingWave(parsedPayload.data, event.senderId, now);
+    }
+
+    private async handleIncomingWave(payload: WavePayload, senderUserId: number, now: number): Promise<void> {
+        const senderName = this.resolveSenderName(senderUserId, payload);
+        const senderUuid = this.resolveSenderUuid(senderUserId, payload);
+
+        if (this.isDocumentHidden()) {
+            this.queueHiddenWave({
+                senderUuid,
+                senderUserId,
+                senderName,
+                receivedAt: now,
+            });
+            // Best effort: play cue immediately even while tab is hidden.
+            // Some browsers may still suppress background audio.
+            this.onWaveReceived?.();
+            return;
+        }
+
+        await this.notifyIncomingWave(senderName, senderUserId);
     }
 
     private resolveSenderName(senderId: number, payload: WavePayload): string {
@@ -140,10 +186,90 @@ export class WaveManager {
         return "Someone";
     }
 
+    private resolveSenderUuid(senderId: number, payload: WavePayload): string {
+        const remotePlayer = this.remotePlayersRepository.getPlayers().get(senderId);
+        if (remotePlayer?.userUuid && remotePlayer.userUuid.trim().length > 0) {
+            return remotePlayer.userUuid;
+        }
+
+        if (payload.senderUuid && payload.senderUuid.trim().length > 0) {
+            return payload.senderUuid;
+        }
+
+        return `sender:${senderId}`;
+    }
+
     private async notifyIncomingWave(senderName: string, senderUserId: number): Promise<void> {
         const icon = await this.resolveWaveIconForUserId(senderUserId);
         notificationPlayingStore.playNotification(`${senderName} waved at you.`, icon);
+    }
+
+    private queueHiddenWave(params: {
+        senderUuid: string;
+        senderUserId: number;
+        senderName: string;
+        receivedAt: number;
+    }): void {
+        const senderKey = params.senderUuid.trim().length > 0 ? params.senderUuid : `sender:${params.senderUserId}`;
+        const existing = this.pendingHiddenWavesBySender.get(senderKey);
+
+        if (existing) {
+            existing.count += 1;
+            existing.lastAt = params.receivedAt;
+            if (params.senderName.trim().length > 0) {
+                existing.senderName = params.senderName;
+            }
+        } else {
+            this.pendingHiddenWavesBySender.set(senderKey, {
+                senderKey,
+                senderUuid: params.senderUuid,
+                senderUserId: params.senderUserId,
+                senderName: params.senderName,
+                count: 1,
+                firstAt: params.receivedAt,
+                lastAt: params.receivedAt,
+            });
+        }
+
+        void this.resolveWaveIconForUserId(params.senderUserId).then((icon) => {
+            if (!icon) {
+                return;
+            }
+            const pending = this.pendingHiddenWavesBySender.get(senderKey);
+            if (pending) {
+                pending.icon = icon;
+            }
+        });
+    }
+
+    private async flushHiddenWaveNotifications(): Promise<void> {
+        if (this.pendingHiddenWavesBySender.size === 0) {
+            return;
+        }
+
+        const pending = Array.from(this.pendingHiddenWavesBySender.values()).sort((a, b) => b.lastAt - a.lastAt);
+        this.pendingHiddenWavesBySender.clear();
+
+        const toNotify = pending.slice(0, WAVE_HIDDEN_FLUSH_MAX_TOASTS);
+        const overflowCount = pending.length - toNotify.length;
+
+        for (const wave of toNotify) {
+            const icon = wave.icon ?? (await this.resolveWaveIconForUserId(wave.senderUserId));
+            const message =
+                wave.count > 1 ? `${wave.senderName} waved at you (x${wave.count}).` : `${wave.senderName} waved at you.`;
+            notificationPlayingStore.playNotification(message, icon);
+        }
+
+        if (overflowCount > 0) {
+            const suffix = overflowCount > 1 ? "people" : "person";
+            notificationPlayingStore.playNotification(`+${overflowCount} other ${suffix} waved at you.`);
+        }
+
         this.onWaveReceived?.();
+    }
+
+    private isDocumentHidden(): boolean {
+        return typeof document !== "undefined" && document.visibilityState === "hidden";
     }
 
     private async resolveWaveIconForUserId(userId: number): Promise<string | undefined> {
