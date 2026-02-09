@@ -202,6 +202,7 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
             }
             this.dragMoved = true;
             this.panUsedSinceSpaceDown = true;
+            this.gameScene.getCameraManager().cancelSmoothZoomAndAnchor();
             this.gameScene.getCameraManager().setExplorationMode(false);
             this.gameScene.input.setDefaultCursor("grabbing");
         }
@@ -213,7 +214,6 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
                 (this.dragLast.y - pointer.y) / this.gameScene.getCameraManager().getCamera().zoom
             );
         this.dragLast = { x: pointer.x, y: pointer.y };
-        this.gameScene.sendViewportToServer();
     }
 
     private handleKeyC() {

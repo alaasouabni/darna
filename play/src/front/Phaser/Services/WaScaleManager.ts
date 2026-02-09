@@ -155,7 +155,10 @@ export class WaScaleManager {
             return;
         }
 
-        this.scaleManager.setZoom(this.actualZoom);
+        // Keep canvas scale stable during runtime wheel zoom to avoid costly display-size churn.
+        if (Math.abs(this.scaleManager.zoom - this.actualZoom) > 1e-6) {
+            this.scaleManager.setZoom(this.actualZoom);
+        }
         if (camera) {
             const canScaleFromCurrent =
                 Number.isFinite(previousZoomModifier) &&

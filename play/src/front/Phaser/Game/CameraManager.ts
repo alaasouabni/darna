@@ -66,6 +66,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private zoomLocked: boolean;
 
     private readonly EDITOR_MODE_SCROLL_SPEED: number = 5;
+    private readonly FOLLOW_MIN_ZOOM_MARGIN = 1.08;
 
     private unsubscribeMapEditorModeStore: () => void;
 
@@ -106,6 +107,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
           }
         | undefined;
     private focusTargetSpeed = 0.2;
+    private explorationAllowOutsideMap = true;
 
     // The tween for the camera offset
     private cameraOffsetCurrentTween?: Phaser.Tweens.Tween;
@@ -119,7 +121,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.animateCallback = this.animate.bind(this);
 
         this.camera = scene.cameras.main;
-        // Pixel-art map: keep camera sampling on integer pixels to reduce seams/ghosting while zooming.
+        // Keep pixel rounding enabled by default (follow/positioned modes).
         this.camera.roundPixels = true;
         this.cameraLocked = false;
         this.zoomLocked = false;
@@ -273,24 +275,24 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         let sendViewportUpdate = false;
         if (moveEvents.get(UserInputEvent.MoveUp)) {
             this.explorerFocusOn.y -= this.EDITOR_MODE_SCROLL_SPEED;
-            this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
+            this.clampExplorerFocus();
             this.scene.markDirty();
             sendViewportUpdate = true;
         } else if (moveEvents.get(UserInputEvent.MoveDown)) {
             this.explorerFocusOn.y += this.EDITOR_MODE_SCROLL_SPEED;
-            this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
+            this.clampExplorerFocus();
             this.scene.markDirty();
             sendViewportUpdate = true;
         }
 
         if (moveEvents.get(UserInputEvent.MoveLeft)) {
             this.explorerFocusOn.x -= this.EDITOR_MODE_SCROLL_SPEED;
-            this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
+            this.clampExplorerFocus();
             this.scene.markDirty();
             sendViewportUpdate = true;
         } else if (moveEvents.get(UserInputEvent.MoveRight)) {
             this.explorerFocusOn.x += this.EDITOR_MODE_SCROLL_SPEED;
-            this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
+            this.clampExplorerFocus();
             this.scene.markDirty();
             sendViewportUpdate = true;
         }
@@ -480,6 +482,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             return;
         }
         this.cameraMode = mode;
+        this.updateRoundPixelsForMode();
+    }
+
+    public isInExplorationMode(): boolean {
+        return this.cameraMode === CameraMode.Exploration;
     }
 
     private restoreZoom(duration = 0): void {
@@ -545,6 +552,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.cameraLocked = false;
         //this.stopFollow();
         this.setCameraMode(CameraMode.Exploration);
+        this.explorationAllowOutsideMap = allowOutsideMap;
 
         this.camera.setFollowOffset(0, 0);
 
@@ -564,7 +572,9 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             x: this.camera.scrollX + this.camera.width / 2,
             y: this.camera.scrollY + this.camera.height / 2,
         };
-        this.camera.startFollow(this.explorerFocusOn, true);
+        this.clampExplorerFocus();
+        // In exploration mode, keep sub-pixel camera movement for smooth drag/pan.
+        this.camera.startFollow(this.explorerFocusOn, false);
 
         // Center the camera on the player
         //this.scene.cameras.main.centerOn(this.scene.CurrentPlayer.x, this.scene.CurrentPlayer.y);
@@ -589,7 +599,19 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const minCameraZoom = Math.max(this.camera.width / this.mapSize.width, this.camera.height / this.mapSize.height);
         const currentCameraZoom = Math.max(this.camera.zoom, Number.EPSILON);
         const currentZoomModifier = Math.max(this.waScaleManager.zoomModifier, Number.EPSILON);
-        return (minCameraZoom * currentZoomModifier) / currentCameraZoom;
+        const baseMinimum = (minCameraZoom * currentZoomModifier) / currentCameraZoom;
+        const fitMinimum = this.getFitZoomModifier();
+        let minimum = Math.max(baseMinimum, fitMinimum);
+
+        if (this.cameraMode !== CameraMode.Follow) {
+            return minimum;
+        }
+
+        // Avoid exact "fit map" zoom while following the player.
+        // Reaching exact fit causes hard snapping to map center near bounds.
+        const followMinimum = fitMinimum * this.FOLLOW_MIN_ZOOM_MARGIN;
+        minimum = Math.max(minimum, followMinimum);
+        return Math.min(minimum, this.getMaximumZoomModifierForCurrentView());
     }
 
     private getMaximumZoomModifierForCurrentView(): number {
@@ -777,15 +799,14 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             }
 
             waScaleManager.setRuntimeZoomModifier(newZoom, this.camera);
+            this.clampExplorerFocus();
         }
 
         // Let's move the camera according to the speed
         if (this.cameraSpeed) {
             this.explorerFocusOn.x += (this.cameraSpeed.x * delta) / 400;
             this.explorerFocusOn.y += (this.cameraSpeed.y * delta) / 400;
-
-            this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
-            this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
+            this.clampExplorerFocus();
 
             // Now, let's slow down the camera a bit
             this.cameraSpeed.x *= 1 - delta / 500;
@@ -820,6 +841,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             waScaleManager.setRuntimeZoomModifier(newZoom, this.camera);
             this.explorerFocusOn.x = x;
             this.explorerFocusOn.y = y;
+            this.clampExplorerFocus();
         }
 
         this.applyZoomAnchor();
@@ -980,14 +1002,16 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.cameraSpeed = undefined;
     }
 
+    public cancelSmoothZoomAndAnchor(): void {
+        this.targetZoomModifier = undefined;
+        this.targetDirection = undefined;
+        this.clearZoomAnchor();
+    }
+
     scrollCamera(x: number, y: number): void {
         this.explorerFocusOn.x += x;
         this.explorerFocusOn.y += y;
-
-        this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
-        this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
-        this.explorerFocusOn.x = Math.round(this.explorerFocusOn.x);
-        this.explorerFocusOn.y = Math.round(this.explorerFocusOn.y);
+        this.clampExplorerFocus();
 
         this.explorerFocusOnTarget = undefined;
 
@@ -1001,7 +1025,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             return;
         }
 
-        if (this.camera.followTarget) {
+        const hasFollowTarget = Boolean(
+            (this.camera as unknown as { followTarget?: Phaser.GameObjects.GameObject }).followTarget
+        );
+        if (hasFollowTarget) {
             this.camera.setFollowOffset(
                 this.camera.followOffset.x + deltaX,
                 this.camera.followOffset.y + deltaY
@@ -1023,18 +1050,49 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.zoomAnchor = undefined;
     }
 
+    private clampExplorerFocus(): void {
+        if (this.explorationAllowOutsideMap) {
+            this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
+            this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
+            return;
+        }
+
+        const halfViewWidth = this.camera.worldView.width / 2;
+        const halfViewHeight = this.camera.worldView.height / 2;
+        const minX = halfViewWidth;
+        const maxX = this.mapSize.width - halfViewWidth;
+        const minY = halfViewHeight;
+        const maxY = this.mapSize.height - halfViewHeight;
+
+        if (minX > maxX) {
+            this.explorerFocusOn.x = this.mapSize.width / 2;
+        } else {
+            this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, minX, maxX);
+        }
+
+        if (minY > maxY) {
+            this.explorerFocusOn.y = this.mapSize.height / 2;
+        } else {
+            this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, minY, maxY);
+        }
+
+    }
+
     private applyZoomAnchor(): void {
         if (!this.zoomAnchor) {
             return;
         }
         const { screenX, screenY, worldX, worldY } = this.zoomAnchor;
         const current = this.camera.getWorldPoint(screenX, screenY);
-        const rawDeltaX = worldX - current.x;
-        const rawDeltaY = worldY - current.y;
-        const deltaX = Math.abs(rawDeltaX) > 0.5 ? Math.round(rawDeltaX) : 0;
-        const deltaY = Math.abs(rawDeltaY) > 0.5 ? Math.round(rawDeltaY) : 0;
+        const deltaX = worldX - current.x;
+        const deltaY = worldY - current.y;
         if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
             this.adjustCameraAnchor(deltaX, deltaY);
         }
+    }
+
+    private updateRoundPixelsForMode(): void {
+        // Exploration uses sub-pixel movement (smoother pan/zoom), other modes keep pixel snapping.
+        this.camera.roundPixels = this.cameraMode !== CameraMode.Exploration;
     }
 }

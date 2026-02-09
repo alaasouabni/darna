@@ -3863,6 +3863,7 @@ ${escapedMessage}
         //listen event to share position of user
         this.pushPlayerPosition(event);
         this.gameMapFrontWrapper.setPosition(event.x, event.y);
+        this.ensureCameraFollowsCurrentPlayerWhenOutOfView(event);
         this.activatablesManager.updateActivatableObjectsDistances([
             ...Array.from(this.MapPlayersByKey.values()),
             ...this.actionableItems.values(),
@@ -3876,6 +3877,28 @@ ${escapedMessage}
         }
         this.hasMovedThisFrame = true;
         this.throttledSaveLastPosition(event);
+    }
+
+    private ensureCameraFollowsCurrentPlayerWhenOutOfView(event: HasPlayerMovedInterface): void {
+        // If the user explicitly enabled exploration mode, do not override camera behavior.
+        if (get(mapExplorationModeStore)) {
+            return;
+        }
+        if (!this.cameraManager.isInExplorationMode()) {
+            return;
+        }
+
+        const view = this.cameraManager.getCamera().worldView;
+        const margin = 24;
+        const minX = view.x + margin;
+        const maxX = view.x + view.width - margin;
+        const minY = view.y + margin;
+        const maxY = view.y + view.height - margin;
+        const isOutOfView = event.x < minX || event.x > maxX || event.y < minY || event.y > maxY;
+
+        if (isOutOfView) {
+            this.cameraManager.startFollowPlayer(this.CurrentPlayer, 180);
+        }
     }
 
     private isHardLeaveStatus(status: AvailabilityStatus): boolean {
@@ -4332,7 +4355,7 @@ ${escapedMessage}
 
         debugZoom("DeltaY: ", deltaY, "Zoom factor", zoomFactor);
 
-        if (pointer) {
+        if (pointer && this.cameraManager.isInExplorationMode()) {
             const camera = this.cameraManager.getCamera();
             const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
             this.cameraManager.setZoomAnchor({
@@ -4341,6 +4364,9 @@ ${escapedMessage}
                 worldX: worldPoint.x,
                 worldY: worldPoint.y,
             });
+        } else {
+            // In follow mode, pointer-anchor zoom creates unstable camera offsets/jumps.
+            this.cameraManager.setZoomAnchor(undefined);
         }
 
         // Apply the zoom
