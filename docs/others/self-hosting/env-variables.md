@@ -87,6 +87,9 @@ Environment variables for the Play service (frontend and pusher).
 | `MAP_EDITOR_ALLOWED_USERS` | No | Comma-separated list of user IDs allowed to edit maps |
 | `MAP_EDITOR_ALLOW_ALL_USERS` | No | If set to true, all users can edit the map. If set to false, only the users in MAP_EDITOR_ALLOWED_USERS or users with the "admin" or "editor" tag can edit the map. Note: this setting is ignored if an Admin API is configured. |
 | `WOKA_SPEED` | No | Avatar (WOKA) movement speed. Defaults to 9 |
+| `ZOOM_DISCRETE_LEVEL_COUNT` | No | Number of wheel zoom levels between min and max zoom. Higher is smoother but slower per wheel step. Defaults to 32 |
+| `ZOOM_WHEEL_STEP` | No | Normalized wheel delta required to consume one discrete zoom step. Lower values zoom faster. Defaults to 100 |
+| `ZOOM_MAX_STEPS_PER_EVENT` | No | Maximum discrete zoom steps consumed from a single wheel event burst. Prevents huge jumps on lag spikes. Defaults to 8 |
 | `FEATURE_FLAG_BROADCAST_AREAS` | No | Enable broadcast areas feature. Defaults to false |
 | `KLAXOON_ENABLED` | No | Enable Klaxoon embedded application integration. Defaults to false |
 | `KLAXOON_CLIENT_ID` | No | Klaxoon OAuth2 client ID |

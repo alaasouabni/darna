@@ -229,7 +229,6 @@ import DOMElement = Phaser.GameObjects.DOMElement;
 import Tileset = Phaser.Tilemaps.Tileset;
 import SpriteSheetFile = Phaser.Loader.FileTypes.SpriteSheetFile;
 import FILE_LOAD_ERROR = Phaser.Loader.Events.FILE_LOAD_ERROR;
-import Clamp = Phaser.Math.Clamp;
 
 export interface GameSceneInitInterface {
     reconnecting: boolean;
@@ -4339,38 +4338,77 @@ ${escapedMessage}
     }
 
     handleMouseWheel(deltaY: number, pointer?: Phaser.Input.Pointer) {
-        // Calculate the velocity of the zoom
-        //const velocity = deltaY / 30;
-
-        // Calculate the zoom factor
-        //const zoomFactor = 1 - velocity * 0.1;
-
-        // Explanation of the formula: to Zoom x 2, we need a delta of 200
-        // Question: Why 200 ? For mac usage, it's too slow
-        let zoomFactor = Math.exp((-deltaY * Math.log(2)) /* / 200 */ / 100);
-
-        // Sometimes, deltaY can be really high (this happens when the browser is lagging for 1 second or so)
-        // Let's clamp the value to avoid zooming too much
-        zoomFactor = Clamp(zoomFactor, 0.5, 2);
-
-        debugZoom("DeltaY: ", deltaY, "Zoom factor", zoomFactor);
-
         if (pointer && this.cameraManager.isInExplorationMode()) {
             const camera = this.cameraManager.getCamera();
-            const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-            this.cameraManager.setZoomAnchor({
-                screenX: pointer.x,
-                screenY: pointer.y,
-                worldX: worldPoint.x,
-                worldY: worldPoint.y,
-            });
+            const canvas = this.game.canvas;
+            let screenX = pointer.x;
+            let screenY = pointer.y;
+            let shouldSetAnchor = true;
+            let clientX: number | undefined;
+            let clientY: number | undefined;
+            let isInsideCanvas: boolean | undefined;
+
+            // Phaser's pointer x/y can be stale on wheel-only movement.
+            // Prefer native wheel coordinates when available.
+            const nativeEvent = pointer.event;
+            if (canvas && nativeEvent && "clientX" in nativeEvent && "clientY" in nativeEvent) {
+                clientX = nativeEvent.clientX;
+                clientY = nativeEvent.clientY;
+                const rect = canvas.getBoundingClientRect();
+                isInsideCanvas =
+                    clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+
+                if (isInsideCanvas) {
+                    const pageX = "pageX" in nativeEvent ? nativeEvent.pageX : clientX + window.scrollX;
+                    const pageY = "pageY" in nativeEvent ? nativeEvent.pageY : clientY + window.scrollY;
+                    screenX = this.scale.transformX(pageX);
+                    screenY = this.scale.transformY(pageY);
+                } else {
+                    // Ignore stale/off-canvas anchors. Falling back to center feels worse than no anchor.
+                    shouldSetAnchor = false;
+                }
+            }
+
+            if (shouldSetAnchor) {
+                const worldPoint = camera.getWorldPoint(screenX, screenY);
+                console.log("[ZoomDebug][wheel-anchor]", {
+                    deltaY,
+                    pointerX: pointer.x,
+                    pointerY: pointer.y,
+                    clientX,
+                    clientY,
+                    isInsideCanvas,
+                    screenX,
+                    screenY,
+                    worldX: worldPoint.x,
+                    worldY: worldPoint.y,
+                });
+                this.cameraManager.setZoomAnchor({
+                    screenX,
+                    screenY,
+                    worldX: worldPoint.x,
+                    worldY: worldPoint.y,
+                });
+            } else {
+                console.log("[ZoomDebug][wheel-anchor-skipped]", {
+                    deltaY,
+                    pointerX: pointer.x,
+                    pointerY: pointer.y,
+                    clientX,
+                    clientY,
+                    isInsideCanvas,
+                });
+                this.cameraManager.setZoomAnchor(undefined);
+            }
         } else {
             // In follow mode, pointer-anchor zoom creates unstable camera offsets/jumps.
             this.cameraManager.setZoomAnchor(undefined);
         }
 
-        // Apply the zoom
-        this.zoomByFactor(zoomFactor, true);
+        debugZoom("DeltaY: ", deltaY);
+        // In exploration mode, immediate discrete steps are visually more stable than continuous tweening.
+        // In follow mode, keep smoothing.
+        this.cameraManager.zoomByWheelDelta(deltaY, !this.cameraManager.isInExplorationMode());
     }
 
     zoomByFactor(zoomFactor: number, smooth: boolean) {

@@ -149,32 +149,15 @@ export class WaScaleManager {
      * It intentionally avoids resizing the canvas and DOM to prevent jitter.
      */
     public setRuntimeZoomModifier(zoomModifier: number, camera?: Phaser.Cameras.Scene2D.Camera): void {
-        const previousZoomModifier = this.hdpiManager.zoomModifier;
         this.hdpiManager.zoomModifier = zoomModifier;
         if (this.scaleManager === undefined) {
             return;
         }
 
-        // Keep canvas scale stable during runtime wheel zoom to avoid costly display-size churn.
-        if (Math.abs(this.scaleManager.zoom - this.actualZoom) > 1e-6) {
-            this.scaleManager.setZoom(this.actualZoom);
-        }
+        // Runtime wheel/pinch must only change camera zoom.
+        // Canvas/DOM zoom is handled by resize flow (applyNewSize) to avoid runtime jumps.
         if (camera) {
-            const canScaleFromCurrent =
-                Number.isFinite(previousZoomModifier) &&
-                previousZoomModifier > 0 &&
-                Number.isFinite(camera.zoom) &&
-                camera.zoom > 0;
-            if (canScaleFromCurrent) {
-                const factor = zoomModifier / previousZoomModifier;
-                if (Number.isFinite(factor) && factor > 0) {
-                    camera.setZoom(camera.zoom * factor);
-                } else {
-                    camera.setZoom(this.zoomModifierToCameraZoom(zoomModifier));
-                }
-            } else {
-                camera.setZoom(this.zoomModifierToCameraZoom(zoomModifier));
-            }
+            camera.setZoom(this.zoomModifierToCameraZoom(zoomModifier));
         }
         this.game.markDirty();
     }

@@ -350,6 +350,21 @@ export const EnvironmentVariables = z.object({
     WOKA_SPEED: PositiveIntAsString.optional()
         .transform((val) => toNumber(val, 9))
         .describe("Avatar (WOKA) movement speed. Defaults to 9"),
+    ZOOM_DISCRETE_LEVEL_COUNT: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 32))
+        .describe(
+            "Number of wheel zoom levels between min and max zoom. Higher is smoother but slower per wheel step. Defaults to 32"
+        ),
+    ZOOM_WHEEL_STEP: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 100))
+        .describe(
+            "Normalized wheel delta required to consume one discrete zoom step. Lower values zoom faster. Defaults to 100"
+        ),
+    ZOOM_MAX_STEPS_PER_EVENT: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 8))
+        .describe(
+            "Maximum discrete zoom steps consumed from a single wheel event burst. Prevents huge jumps on lag spikes. Defaults to 8"
+        ),
     FEATURE_FLAG_BROADCAST_AREAS: BoolAsString.optional()
         .transform((val) => toBool(val, false))
         .describe("Enable broadcast areas feature. Defaults to false"),

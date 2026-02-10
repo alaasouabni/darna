@@ -2,6 +2,11 @@ import { mapEditorModeStore } from "../../Stores/MapEditorStore";
 import { Easing } from "../../types";
 import { HtmlUtils } from "../../WebRtc/HtmlUtils";
 import type { Box } from "../../WebRtc/LayoutManager";
+import {
+    ZOOM_DISCRETE_LEVEL_COUNT,
+    ZOOM_MAX_STEPS_PER_EVENT,
+    ZOOM_WHEEL_STEP,
+} from "../../Enum/EnvironmentVariable";
 import type { Player } from "../Player/Player";
 import { hasMovedEventName } from "../Player/Player";
 import type { WaScaleManagerFocusTarget, WaScaleManager } from "../Services/WaScaleManager";
@@ -67,6 +72,9 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     private readonly EDITOR_MODE_SCROLL_SPEED: number = 5;
     private readonly FOLLOW_MIN_ZOOM_MARGIN = 1.08;
+    private readonly DISCRETE_ZOOM_LEVEL_COUNT = Math.max(2, ZOOM_DISCRETE_LEVEL_COUNT);
+    private readonly NORMALIZED_WHEEL_STEP = Math.max(1, ZOOM_WHEEL_STEP);
+    private readonly MAX_WHEEL_STEPS_PER_EVENT = Math.max(1, ZOOM_MAX_STEPS_PER_EVENT);
 
     private unsubscribeMapEditorModeStore: () => void;
 
@@ -108,6 +116,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         | undefined;
     private focusTargetSpeed = 0.2;
     private explorationAllowOutsideMap = true;
+    private wheelZoomAccumulator = 0;
 
     // The tween for the camera offset
     private cameraOffsetCurrentTween?: Phaser.Tweens.Tween;
@@ -601,6 +610,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const currentZoomModifier = Math.max(this.waScaleManager.zoomModifier, Number.EPSILON);
         const baseMinimum = (minCameraZoom * currentZoomModifier) / currentCameraZoom;
         const fitMinimum = this.getFitZoomModifier();
+        if (this.cameraMode === CameraMode.Exploration) {
+            // Exploration must be able to reach the exact map-fit zoom.
+            return Math.min(fitMinimum, this.getMaximumZoomModifierForCurrentView());
+        }
         let minimum = Math.max(baseMinimum, fitMinimum);
 
         if (this.cameraMode !== CameraMode.Follow) {
@@ -616,6 +629,123 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     private getMaximumZoomModifierForCurrentView(): number {
         return this.waScaleManager.getMaximumZoomModifierForCurrentView();
+    }
+
+    private buildDiscreteZoomLevels(minZoomModifier: number, maxZoomModifier: number): number[] {
+        if (
+            !Number.isFinite(minZoomModifier) ||
+            !Number.isFinite(maxZoomModifier) ||
+            minZoomModifier <= 0 ||
+            maxZoomModifier <= 0
+        ) {
+            return [this.waScaleManager.zoomModifier];
+        }
+
+        if (maxZoomModifier <= minZoomModifier) {
+            return [minZoomModifier];
+        }
+
+        const levels: number[] = [];
+        const minLog = Math.log(minZoomModifier);
+        const maxLog = Math.log(maxZoomModifier);
+        const denom = this.DISCRETE_ZOOM_LEVEL_COUNT - 1;
+
+        for (let i = 0; i < this.DISCRETE_ZOOM_LEVEL_COUNT; i++) {
+            const t = i / denom;
+            levels.push(Math.exp(minLog + t * (maxLog - minLog)));
+        }
+
+        return levels;
+    }
+
+    private getClosestZoomLevelIndex(levels: number[], zoomModifier: number): number {
+        let closestIndex = 0;
+        let closestDistance = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < levels.length; i++) {
+            const distance = Math.abs(levels[i] - zoomModifier);
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestIndex = i;
+            }
+        }
+        return closestIndex;
+    }
+
+    private normalizeWheelDelta(deltaY: number): number {
+        // Phaser already gives us pixel-like deltas in most environments.
+        // Clamp outliers so stalled frames don't cause giant zoom jumps.
+        return Clamp(deltaY, -1000, 1000);
+    }
+
+    public zoomByWheelDelta(deltaY: number, smooth: boolean): void {
+        if (this.isZoomLocked() || !Number.isFinite(deltaY) || deltaY === 0) {
+            return;
+        }
+
+        const normalizedDelta = this.normalizeWheelDelta(deltaY);
+        this.wheelZoomAccumulator += normalizedDelta;
+        const accumulatorAfterInput = this.wheelZoomAccumulator;
+
+        let steps = 0;
+        while (Math.abs(this.wheelZoomAccumulator) >= this.NORMALIZED_WHEEL_STEP) {
+            const direction = Math.sign(this.wheelZoomAccumulator);
+            this.wheelZoomAccumulator -= direction * this.NORMALIZED_WHEEL_STEP;
+            steps += direction;
+            if (Math.abs(steps) >= this.MAX_WHEEL_STEPS_PER_EVENT) {
+                break;
+            }
+        }
+
+        if (steps === 0) {
+            return;
+        }
+
+        const minZoomModifier = this.getMinimumZoomModifierForCurrentView();
+        const maxZoomModifier = this.getMaximumZoomModifierForCurrentView();
+        const levels = this.buildDiscreteZoomLevels(minZoomModifier, maxZoomModifier);
+        const currentZoomModifier = Clamp(this.waScaleManager.zoomModifier, minZoomModifier, maxZoomModifier);
+        const currentIndex = this.getClosestZoomLevelIndex(levels, currentZoomModifier);
+
+        // Positive wheel delta means zoom-out in browser semantics.
+        const nextIndex = Clamp(currentIndex - steps, 0, levels.length - 1);
+        if (nextIndex === currentIndex) {
+            console.log("[ZoomDebug][wheel-step-noop]", {
+                mode: this.cameraMode,
+                deltaY,
+                normalizedDelta,
+                accumulatorAfterInput,
+                residualAccumulator: this.wheelZoomAccumulator,
+                steps,
+                currentIndex,
+                nextIndex,
+                currentZoomModifier,
+            });
+            return;
+        }
+
+        const nextZoomModifier = levels[nextIndex];
+        console.log("[ZoomDebug][wheel-step]", {
+            mode: this.cameraMode,
+            deltaY,
+            normalizedDelta,
+            accumulatorAfterInput,
+            residualAccumulator: this.wheelZoomAccumulator,
+            steps,
+            currentIndex,
+            nextIndex,
+            currentZoomModifier,
+            nextZoomModifier,
+            smooth,
+            hasAnchor: !!this.zoomAnchor,
+        });
+        if (smooth) {
+            this.animateToZoomLevel(nextZoomModifier);
+        } else {
+            waScaleManager.setRuntimeZoomModifier(nextZoomModifier, this.camera);
+            // Camera matrices/worldView are not always fully coherent in the same tick as setZoom().
+            // Defer anchor correction to the next update frame to keep cursor-anchored zoom reliable.
+            this.startAnimation();
+        }
     }
 
     public triggerMaxZoomOutAnimation(): void {
@@ -1083,6 +1213,22 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             return;
         }
         const { screenX, screenY, worldX, worldY } = this.zoomAnchor;
+
+        if (this.cameraMode === CameraMode.Exploration) {
+            // In exploration mode, the camera follows explorerFocusOn.
+            // Compute the center directly from anchor + zoom to avoid one-frame lag from getWorldPoint().
+            const zoom = this.camera.zoom || 1;
+            const desiredCenterX = worldX - (screenX - this.camera.width / 2) / zoom;
+            const desiredCenterY = worldY - (screenY - this.camera.height / 2) / zoom;
+            const deltaX = desiredCenterX - this.explorerFocusOn.x;
+            const deltaY = desiredCenterY - this.explorerFocusOn.y;
+
+            if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
+                this.scrollCamera(deltaX, deltaY);
+            }
+            return;
+        }
+
         const current = this.camera.getWorldPoint(screenX, screenY);
         const deltaX = worldX - current.x;
         const deltaY = worldY - current.y;

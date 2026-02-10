@@ -34,6 +34,9 @@ export interface FrontConfigurationInterface {
     SENTRY_RELEASE: string | undefined;
     SENTRY_TRACES_SAMPLE_RATE: number | undefined;
     WOKA_SPEED: number;
+    ZOOM_DISCRETE_LEVEL_COUNT: number;
+    ZOOM_WHEEL_STEP: number;
+    ZOOM_MAX_STEPS_PER_EVENT: number;
     FEATURE_FLAG_BROADCAST_AREAS: boolean;
     KLAXOON_ENABLED: boolean;
     KLAXOON_CLIENT_ID: string | undefined;
