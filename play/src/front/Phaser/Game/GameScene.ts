@@ -205,7 +205,7 @@ import { StartPositionCalculator } from "./StartPositionCalculator";
 import { GameMapPropertiesListener } from "./GameMapPropertiesListener";
 import { ActivatablesManager } from "./ActivatablesManager";
 import type { AddPlayerInterface } from "./AddPlayerInterface";
-import type { CameraManagerEventCameraUpdateData } from "./CameraManager";
+import type { CameraManagerEventCameraUpdateData, CameraZoomStateSnapshot } from "./CameraManager";
 import { CameraManager, CameraManagerEvent } from "./CameraManager";
 import { EditorToolName, MapEditorModeManager } from "./MapEditor/MapEditorModeManager";
 import type { PlayerDetailsUpdate } from "./RemotePlayersRepository";
@@ -371,6 +371,9 @@ export class GameScene extends DirtyScene {
     private remotePlayersRepository = new RemotePlayersRepository();
     private throttledSendViewportToServer!: throttle<() => void>;
     private throttledSaveLastPosition!: throttle<(position: PositionInterface) => void>;
+    private resizeTransactionRaf1: number | undefined;
+    private resizeTransactionRaf2: number | undefined;
+    private resizeTransactionZoomSnapshot: CameraZoomStateSnapshot | undefined;
     private playersDebugLogAlreadyDisplayed = false;
     private hideTimeout: ReturnType<typeof setTimeout> | undefined;
     // The promise that will resolve to the current player textures. This will be available only after connection is established.
@@ -1253,6 +1256,16 @@ export class GameScene extends DirtyScene {
             this.localVolumeStoreUnsubscriber = undefined;
         }
         this.throttledSendViewportToServer?.cancel();
+        if (this.resizeTransactionRaf1 !== undefined) {
+            cancelAnimationFrame(this.resizeTransactionRaf1);
+            this.resizeTransactionRaf1 = undefined;
+        }
+        if (this.resizeTransactionRaf2 !== undefined) {
+            cancelAnimationFrame(this.resizeTransactionRaf2);
+            this.resizeTransactionRaf2 = undefined;
+        }
+        this.resizeTransactionZoomSnapshot = undefined;
+        this.cameraManager?.setResizeInProgress(false);
 
         this._focusFx?.destroy();
 
@@ -1495,11 +1508,41 @@ export class GameScene extends DirtyScene {
     }
 
     public onResize(): void {
-        super.onResize();
-        this.reposition(true);
-        this.cameraManager.refreshZoomBounds();
+        this.cameraManager.cancelSmoothZoomAndAnchor();
+        this.cameraManager.snapCurrentZoomToDiscreteLevel();
+        if (this.resizeTransactionZoomSnapshot === undefined) {
+            this.resizeTransactionZoomSnapshot = this.cameraManager.captureZoomStateSnapshot();
+        }
 
-        this.throttledSendViewportToServer();
+        this.cameraManager.setResizeInProgress(true);
+
+        if (this.resizeTransactionRaf1 !== undefined) {
+            cancelAnimationFrame(this.resizeTransactionRaf1);
+            this.resizeTransactionRaf1 = undefined;
+        }
+        if (this.resizeTransactionRaf2 !== undefined) {
+            cancelAnimationFrame(this.resizeTransactionRaf2);
+            this.resizeTransactionRaf2 = undefined;
+        }
+
+        this.resizeTransactionRaf1 = requestAnimationFrame(() => {
+            this.resizeTransactionRaf1 = undefined;
+            this.resizeTransactionRaf2 = requestAnimationFrame(() => {
+                this.resizeTransactionRaf2 = undefined;
+                const zoomSnapshot =
+                    this.resizeTransactionZoomSnapshot ?? this.cameraManager.captureZoomStateSnapshot();
+                this.resizeTransactionZoomSnapshot = undefined;
+                try {
+                    super.onResize();
+                    this.reposition(true);
+                    this.cameraManager.refreshZoomBounds();
+                    this.cameraManager.restoreZoomStateSnapshotAfterResize(zoomSnapshot);
+                    this.throttledSendViewportToServer();
+                } finally {
+                    this.cameraManager.setResizeInProgress(false);
+                }
+            });
+        });
     }
 
     public sendViewportToServer(margin = 300): void {
@@ -1595,10 +1638,7 @@ export class GameScene extends DirtyScene {
         });
     }
 
-    public syncLocalUserSpaceProfile(update: {
-        name?: string;
-        characterTextures?: CharacterTextureMessage[];
-    }): void {
+    public syncLocalUserSpaceProfile(update: { name?: string; characterTextures?: CharacterTextureMessage[] }): void {
         const localUserUuid = localUserStore.getLocalUser()?.uuid;
         if (!localUserUuid || !this._spaceRegistry) {
             return;
@@ -1711,9 +1751,11 @@ export class GameScene extends DirtyScene {
             try {
                 const member = await this.connection.queryMember(ownerId);
                 if (member?.name) {
-                    const characterTextures =
-                        member.characterTextureIds?.map((id) => ({ id, url: "" })) ?? [];
-                    const availabilityStatus = await this.getAvailabilityStatusFromChat(ownerId, member.chatID ?? undefined);
+                    const characterTextures = member.characterTextureIds?.map((id) => ({ id, url: "" })) ?? [];
+                    const availabilityStatus = await this.getAvailabilityStatusFromChat(
+                        ownerId,
+                        member.chatID ?? undefined
+                    );
                     const entry = {
                         name: member.name,
                         userId: -1,
@@ -3975,7 +4017,6 @@ ${escapedMessage}
             }
             //});
         }
-
     }
 
     private createCurrentPlayer() {
@@ -4344,18 +4385,15 @@ ${escapedMessage}
             let screenX = pointer.x;
             let screenY = pointer.y;
             let shouldSetAnchor = true;
-            let clientX: number | undefined;
-            let clientY: number | undefined;
-            let isInsideCanvas: boolean | undefined;
 
             // Phaser's pointer x/y can be stale on wheel-only movement.
             // Prefer native wheel coordinates when available.
             const nativeEvent = pointer.event;
             if (canvas && nativeEvent && "clientX" in nativeEvent && "clientY" in nativeEvent) {
-                clientX = nativeEvent.clientX;
-                clientY = nativeEvent.clientY;
+                const clientX = nativeEvent.clientX;
+                const clientY = nativeEvent.clientY;
                 const rect = canvas.getBoundingClientRect();
-                isInsideCanvas =
+                const isInsideCanvas =
                     clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
 
                 if (isInsideCanvas) {
@@ -4371,18 +4409,6 @@ ${escapedMessage}
 
             if (shouldSetAnchor) {
                 const worldPoint = camera.getWorldPoint(screenX, screenY);
-                console.log("[ZoomDebug][wheel-anchor]", {
-                    deltaY,
-                    pointerX: pointer.x,
-                    pointerY: pointer.y,
-                    clientX,
-                    clientY,
-                    isInsideCanvas,
-                    screenX,
-                    screenY,
-                    worldX: worldPoint.x,
-                    worldY: worldPoint.y,
-                });
                 this.cameraManager.setZoomAnchor({
                     screenX,
                     screenY,
@@ -4390,14 +4416,6 @@ ${escapedMessage}
                     worldY: worldPoint.y,
                 });
             } else {
-                console.log("[ZoomDebug][wheel-anchor-skipped]", {
-                    deltaY,
-                    pointerX: pointer.x,
-                    pointerY: pointer.y,
-                    clientX,
-                    clientY,
-                    isInsideCanvas,
-                });
                 this.cameraManager.setZoomAnchor(undefined);
             }
         } else {

@@ -1,7 +1,6 @@
 import { coWebsiteManager } from "../../Stores/CoWebsiteStore";
 import { HtmlUtils } from "../../WebRtc/HtmlUtils";
 import type { Game } from "../Game/Game";
-import { ResizableScene } from "../Login/ResizableScene";
 import { HdpiManager } from "./HdpiManager";
 import ScaleManager = Phaser.Scale.ScaleManager;
 
@@ -44,36 +43,33 @@ export class WaScaleManager {
         return { devicePixelRatio, gameSize, realSize };
     }
 
-    private updateActualZoom(gameSize: { width: number; height: number }, realSize: { width: number; height: number }, devicePixelRatio: number): void {
+    private updateActualZoom(
+        gameSize: { width: number; height: number },
+        realSize: { width: number; height: number },
+        devicePixelRatio: number
+    ): void {
         if (realSize.width !== 0 && gameSize.width !== 0 && devicePixelRatio !== 0) {
             this.actualZoom = realSize.width / gameSize.width / devicePixelRatio;
         }
     }
 
     private applyCameraZoom(
-        gameSize: { width: number; height: number },
-        realSize: { width: number; height: number },
+        _gameSize: { width: number; height: number },
+        _realSize: { width: number; height: number },
         camera?: Phaser.Cameras.Scene2D.Camera
     ): void {
-        if (!camera) {
-            return;
-        }
+        if (!camera) return;
 
-        if (gameSize.width <= realSize.width && gameSize.height <= realSize.height) {
-            camera.setZoom(1);
-        } else {
-            const zoom =
-                this.hdpiManager.zoomModifier * this.hdpiManager.getOptimalZoomLevel(realSize.width * realSize.height);
-            camera.setZoom(zoom);
-        }
+        // Always keep camera zoom consistent with zoomModifier (no "camera.setZoom(1)" ever)
+        camera.setZoom(this.zoomModifierToCameraZoom(this.hdpiManager.zoomModifier));
     }
 
     private getCurrentOptimalZoomLevelForRuntime(): number {
-        if (this.scaleManager === undefined) {
-            return 1;
-        }
-        const width = this.scaleManager.displaySize.width || this.scaleManager.width;
-        const height = this.scaleManager.displaySize.height || this.scaleManager.height;
+        if (this.scaleManager === undefined) return 1;
+
+        const width = this.scaleManager.width;
+        const height = this.scaleManager.height;
+
         return this.hdpiManager.getOptimalZoomLevel(width * height) || 1;
     }
 
@@ -87,59 +83,47 @@ export class WaScaleManager {
     }
 
     public applyNewSize(camera?: Phaser.Cameras.Scene2D.Camera) {
-        if (this.scaleManager === undefined) {
-            return;
+        if (this.scaleManager === undefined) return;
+
+        const { width: cssWidthRaw, height: cssHeightRaw } = coWebsiteManager.getGameSize();
+        const dpr = window.devicePixelRatio ?? 1;
+
+        const cssWidth = Math.max(1, Math.round(cssWidthRaw));
+        const cssHeight = Math.max(1, Math.round(cssHeightRaw));
+
+        // Ask HdpiManager for the internal buffer size in *device pixels*
+        const { real: realSizeRaw } = this.hdpiManager.getOptimalGameSize({
+            width: cssWidth * dpr,
+            height: cssHeight * dpr,
+        });
+
+        const bufferW = Math.max(1, Math.round(realSizeRaw.width));
+        const bufferH = Math.max(1, Math.round(realSizeRaw.height));
+
+        // 1) Internal resolution (canvas buffer)
+        if (this.scaleManager.width !== bufferW || this.scaleManager.height !== bufferH) {
+            this.scaleManager.resize(bufferW, bufferH);
         }
-        const { devicePixelRatio, gameSize, realSize } = this.getCurrentOptimalSizes();
-        this.updateActualZoom(gameSize, realSize, devicePixelRatio);
 
-        // The performance shows us that resizing the game size outside its real size causes many lags and bad game performance.
-        //      So we apply this condition: if the game size is greater than the real size, we don't zoom through the canvas.
-        //      To zoom in and out, we use the camera. This is used in the Explorer mode. The zoom is calculated using the optimal zoom level.
-        if (gameSize.width <= realSize.width && gameSize.height <= realSize.height) {
-            this.scaleManager.resize(gameSize.width, gameSize.height);
-            this.scaleManager.setZoom(this.actualZoom);
-            this.applyCameraZoom(gameSize, realSize, camera);
-        } else {
-            if (this.scaleManager.width !== realSize.width || this.scaleManager.height !== realSize.height) {
-                this.scaleManager.resize(realSize.width, realSize.height);
-            }
+        // 2) Display scale (CSS) — MUST be done via ScaleManager so scene.scale.zoom is correct.
+        // We want displayed size = cssWidth/cssHeight.
+        const zoomX = cssWidth / bufferW;
+        const zoomY = cssHeight / bufferH;
+        const zoom = Math.min(zoomX, zoomY);
 
-            this.scaleManager.setZoom(this.actualZoom);
-            this.applyCameraZoom(gameSize, realSize, camera);
-        }
+        this.scaleManager.setZoom(zoom);
+        this.actualZoom = zoom;
 
-        // Override bug in canvas resizing in Phaser. Let's resize the canvas ourselves
-        const style = this.scaleManager.canvas.style;
-        style.width = Math.ceil(realSize.width !== 0 ? realSize.width / devicePixelRatio : 0) + "px";
-        style.height = Math.ceil(realSize.height !== 0 ? realSize.height / devicePixelRatio : 0) + "px";
+        // Keep camera zoom consistent with zoomModifier
+        this.applyCameraZoom({ width: bufferW, height: bufferH }, { width: bufferW, height: bufferH }, camera);
 
-        // Resize the game element at the same size at the canvas
+        // If you really need the #game container sized explicitly, do it here (optional):
         const gameStyle = HtmlUtils.getElementByIdOrFail<HTMLDivElement>("game").style;
-        gameStyle.width = style.width;
-        gameStyle.height = style.height;
+        gameStyle.width = `${cssWidth}px`;
+        gameStyle.height = `${cssHeight}px`;
 
-        // Resize the game element at the same size at the canvas
-        // By default, the scaleManager.resize() method will change the take the zoom into account in the displaySize.
-        // This is not what we want, we want the displaySize to be the real size of the game.
-        this.scaleManager.displaySize.width = realSize.width;
-        this.scaleManager.displaySize.height = realSize.height;
-        this.scaleManager.refresh(realSize.width, realSize.height);
-
-        // Resize the game element at the same size at the canvas
-        // By default, the scaleManager.resize() method will change the take the zoom into account in the displaySize.
-        // This is not what we want, we want the displaySize to be the real size of the game.
-        this.scaleManager.displaySize.width = realSize.width;
-        this.scaleManager.displaySize.height = realSize.height;
-        this.scaleManager.refresh(realSize.width, realSize.height);
-
-        // Note: onResize will be called twice (once here and once in Game.ts), but we have no better way.
-        for (const scene of this.game.scene.getScenes(true)) {
-            if (scene instanceof ResizableScene) {
-                // We are delaying the call to the "render" event because otherwise, the "camera" coordinates are not correctly updated.
-                scene.events.once(Phaser.Scenes.Events.RENDER, () => scene.onResize());
-            }
-        }
+        // IMPORTANT: do NOT manually set canvas.style.width/height
+        // IMPORTANT: do NOT manually set displaySize.* or call refresh(w,h)
 
         this.game.markDirty();
     }
@@ -158,6 +142,23 @@ export class WaScaleManager {
         // Canvas/DOM zoom is handled by resize flow (applyNewSize) to avoid runtime jumps.
         if (camera) {
             camera.setZoom(this.zoomModifierToCameraZoom(zoomModifier));
+        }
+        this.game.markDirty();
+    }
+
+    /**
+     * Runtime zoom path using camera-zoom as canonical value.
+     * Keeps Hdpi zoomModifier synchronized with the current optimal zoom level.
+     */
+    public setRuntimeCameraZoom(cameraZoom: number, camera?: Phaser.Cameras.Scene2D.Camera): void {
+        const safeCameraZoom = Math.max(cameraZoom, Number.EPSILON);
+        this.hdpiManager.zoomModifier = this.cameraZoomToZoomModifier(safeCameraZoom);
+        if (this.scaleManager === undefined) {
+            return;
+        }
+
+        if (camera) {
+            camera.setZoom(safeCameraZoom);
         }
         this.game.markDirty();
     }

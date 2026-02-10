@@ -25,6 +25,9 @@ export default defineConfig(({ mode }) => {
                 clientPort: 80,
             },
             watch: {
+                // Docker bind mounts on Windows can miss fs events; polling makes HMR reliable.
+                usePolling: true,
+                interval: 300,
                 ignored: ["./src/pusher"],
             },
         },

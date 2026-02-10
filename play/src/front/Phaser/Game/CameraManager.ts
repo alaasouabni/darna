@@ -2,11 +2,7 @@ import { mapEditorModeStore } from "../../Stores/MapEditorStore";
 import { Easing } from "../../types";
 import { HtmlUtils } from "../../WebRtc/HtmlUtils";
 import type { Box } from "../../WebRtc/LayoutManager";
-import {
-    ZOOM_DISCRETE_LEVEL_COUNT,
-    ZOOM_MAX_STEPS_PER_EVENT,
-    ZOOM_WHEEL_STEP,
-} from "../../Enum/EnvironmentVariable";
+import { ZOOM_DISCRETE_LEVEL_COUNT, ZOOM_MAX_STEPS_PER_EVENT, ZOOM_WHEEL_STEP } from "../../Enum/EnvironmentVariable";
 import type { Player } from "../Player/Player";
 import { hasMovedEventName } from "../Player/Player";
 import type { WaScaleManagerFocusTarget, WaScaleManager } from "../Services/WaScaleManager";
@@ -50,6 +46,12 @@ export interface CameraManagerEventCameraUpdateData {
     zoom: number;
 }
 
+export interface CameraZoomStateSnapshot {
+    cameraZoom: number;
+    normalizedDiscreteLevel: number;
+    effectiveCssZoom?: number; // NEW: camera.zoom * scene.scale.zoom
+}
+
 /**
  * The CameraManager is responsible for managing the camera in the game.
  * It allows to set the camera to follow the player, to focus on a specific point or to be in exploration mode.
@@ -71,9 +73,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private zoomLocked: boolean;
 
     private readonly EDITOR_MODE_SCROLL_SPEED: number = 5;
-    private readonly FOLLOW_MIN_ZOOM_MARGIN = 1.08;
+    private readonly FOLLOW_MIN_ZOOM_MARGIN = 1.05;
+    private readonly SAFE_MIN_ZOOM_OUT_FACTOR = 1.05;
+    private readonly DISCRETE_EDGE_SKIP_LEVELS = 1;
     private readonly DISCRETE_ZOOM_LEVEL_COUNT = Math.max(2, ZOOM_DISCRETE_LEVEL_COUNT);
-    private readonly NORMALIZED_WHEEL_STEP = Math.max(1, ZOOM_WHEEL_STEP);
+    private readonly NORMALIZED_WHEEL_STEP = Math.max(1, 30);
     private readonly MAX_WHEEL_STEPS_PER_EVENT = Math.max(1, ZOOM_MAX_STEPS_PER_EVENT);
 
     private unsubscribeMapEditorModeStore: () => void;
@@ -117,6 +121,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private focusTargetSpeed = 0.2;
     private explorationAllowOutsideMap = true;
     private wheelZoomAccumulator = 0;
+    private resizeInProgress = false;
 
     // The tween for the camera offset
     private cameraOffsetCurrentTween?: Phaser.Tweens.Tween;
@@ -322,6 +327,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             this.camera.startFollow(player, true);
             this.scene.markDirty();
             this.camera.setBounds(0, 0, this.mapSize.width, this.mapSize.height);
+            this.refreshZoomBounds();
+            this.snapCurrentZoomToDiscreteLevel();
             return;
         }
         this.setExplorationMode();
@@ -361,9 +368,12 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
             },
             onComplete: () => {
+                this.setCameraMode(CameraMode.Follow); 
                 this.camera.startFollow(player, true);
                 this.animationInProgress = false;
                 this.camera.setBounds(0, 0, this.mapSize.width, this.mapSize.height);
+                this.refreshZoomBounds();
+                this.snapCurrentZoomToDiscreteLevel();
                 this.startFollowTween = undefined;
             },
         });
@@ -413,8 +423,15 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const game = HtmlUtils.querySelectorOrFail<HTMLCanvasElement>("#game canvas");
 
         // Let's put this in Game coordinates by applying the zoom level:
-        const followOffsetX = (xCenter - game.offsetWidth / 2) / this.scene.scale.zoom;
-        const followOffsetY = (yCenter - game.offsetHeight / 2) / this.scene.scale.zoom;
+        let followOffsetX = (xCenter - game.offsetWidth / 2) / this.scene.scale.zoom;
+        let followOffsetY = (yCenter - game.offsetHeight / 2) / this.scene.scale.zoom;
+        const dpr = window.devicePixelRatio ?? 1;
+        const eff = (this.camera.zoom || 1) * (this.scene.scale.zoom || 1) * dpr;
+        if (eff <= 1.000001) {
+            const q = eff > 0 ? 1 / eff : 1;
+            followOffsetX = Math.round(followOffsetX / q) * q;
+            followOffsetY = Math.round(followOffsetY / q) * q;
+        }
 
         if (instant) {
             this.camera.setFollowOffset(followOffsetX, followOffsetY);
@@ -584,6 +601,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.clampExplorerFocus();
         // In exploration mode, keep sub-pixel camera movement for smooth drag/pan.
         this.camera.startFollow(this.explorerFocusOn, false);
+        this.refreshZoomBounds();
+        this.snapCurrentZoomToDiscreteLevel();
 
         // Center the camera on the player
         //this.scene.cameras.main.centerOn(this.scene.CurrentPlayer.x, this.scene.CurrentPlayer.y);
@@ -596,35 +615,159 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.waScaleManager.maxZoomOut = this.getFitZoomModifier();
     }
 
-    private getFitZoomModifier(): number {
-        return this.waScaleManager.getTargetZoomModifierFor(this.mapSize.width, this.mapSize.height);
+    public setResizeInProgress(isInProgress: boolean): void {
+        this.resizeInProgress = isInProgress;
+        if (isInProgress) {
+            this.wheelZoomAccumulator = 0;
+            this.cancelSmoothZoomAndAnchor();
+        }
     }
 
-    /**
-     * Runtime wheel/pinch zoom must never expose blank map borders.
-     * We derive the minimum modifier from the current camera zoom->modifier ratio.
-     */
-    private getMinimumZoomModifierForCurrentView(): number {
-        const minCameraZoom = Math.max(this.camera.width / this.mapSize.width, this.camera.height / this.mapSize.height);
-        const currentCameraZoom = Math.max(this.camera.zoom, Number.EPSILON);
-        const currentZoomModifier = Math.max(this.waScaleManager.zoomModifier, Number.EPSILON);
-        const baseMinimum = (minCameraZoom * currentZoomModifier) / currentCameraZoom;
-        const fitMinimum = this.getFitZoomModifier();
-        if (this.cameraMode === CameraMode.Exploration) {
-            // Exploration must be able to reach the exact map-fit zoom.
-            return Math.min(fitMinimum, this.getMaximumZoomModifierForCurrentView());
+    public getZoomModifier(): number {
+        return this.waScaleManager.zoomModifier;
+    }
+
+    public captureZoomStateSnapshot(): CameraZoomStateSnapshot {
+        const minCameraZoom = this.getMinimumCameraZoomForCurrentView();
+        const maxCameraZoom = this.getMaximumCameraZoomForCurrentView();
+        const levels = this.buildDiscreteCameraZoomLevels(minCameraZoom, maxCameraZoom);
+
+        const currentCameraZoom = Clamp(this.camera.zoom, minCameraZoom, maxCameraZoom);
+        const index = this.getClosestZoomLevelIndex(levels, currentCameraZoom);
+        const normalizedDiscreteLevel = levels.length <= 1 ? 0 : index / (levels.length - 1);
+
+        const scaleZoom = this.scene.scale.zoom || 1;
+
+        return {
+            cameraZoom: currentCameraZoom,
+            normalizedDiscreteLevel,
+            effectiveCssZoom: currentCameraZoom * scaleZoom,
+        };
+    }
+
+    public restoreZoomStateSnapshotAfterResize(snapshot: CameraZoomStateSnapshot): void {
+        if (!snapshot || !Number.isFinite(snapshot.cameraZoom)) {
+            this.snapCurrentZoomToDiscreteLevel();
+            return;
         }
-        let minimum = Math.max(baseMinimum, fitMinimum);
+
+        this.cancelSmoothZoomAndAnchor();
+
+        const minCameraZoom = this.getMinimumCameraZoomForCurrentView();
+        const maxCameraZoom = this.getMaximumCameraZoomForCurrentView();
+        const levels = this.buildDiscreteCameraZoomLevels(minCameraZoom, maxCameraZoom);
+
+        const scaleZoomNow = this.scene.scale.zoom || 1;
+
+        // NEW: preserve effective css zoom across resize
+        let targetCameraZoom = snapshot.effectiveCssZoom
+            ? snapshot.effectiveCssZoom / scaleZoomNow
+            : snapshot.cameraZoom;
+
+        targetCameraZoom = Clamp(targetCameraZoom, minCameraZoom, maxCameraZoom);
+
+        if (levels.length > 0) {
+            const idx = this.getClosestZoomLevelIndex(levels, targetCameraZoom);
+            targetCameraZoom = levels[idx] ?? targetCameraZoom;
+        }
+
+        if (Math.abs(this.camera.zoom - targetCameraZoom) > 0.000001) {
+            this.waScaleManager.setRuntimeCameraZoom(targetCameraZoom, this.camera);
+        }
+
+        if (this.cameraMode === CameraMode.Exploration) {
+            this.clampExplorerFocus();
+        }
+
+        this.scene.markDirty();
+        this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
+    }
+
+    public snapCurrentZoomToDiscreteLevel(): void {
+        const minCameraZoom = this.getMinimumCameraZoomForCurrentView();
+        const maxCameraZoom = this.getMaximumCameraZoomForCurrentView();
+        const levels = this.buildDiscreteCameraZoomLevels(minCameraZoom, maxCameraZoom);
+        const currentCameraZoom = Clamp(this.camera.zoom, minCameraZoom, maxCameraZoom);
+        const closestIndex = this.getClosestZoomLevelIndex(levels, currentCameraZoom);
+        const snappedCameraZoom = levels[closestIndex] ?? currentCameraZoom;
+
+        if (Math.abs(snappedCameraZoom - this.camera.zoom) <= 0.000001) {
+            return;
+        }
+
+        this.waScaleManager.setRuntimeCameraZoom(snappedCameraZoom, this.camera);
+        this.snapCameraToPixelGrid();
+        if (this.cameraMode === CameraMode.Exploration) {
+            this.clampExplorerFocus();
+        }
+        this.scene.markDirty();
+        this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
+    }
+
+    private getFitCameraZoom(): number {
+        const safeMapWidth = Math.max(this.mapSize.width, 1);
+        const safeMapHeight = Math.max(this.mapSize.height, 1);
+        return Math.max(Math.min(this.camera.width / safeMapWidth, this.camera.height / safeMapHeight), Number.EPSILON);
+    }
+
+    private getFitZoomModifier(): number {
+        return this.waScaleManager.cameraZoomToZoomModifier(this.getFitCameraZoom());
+    }
+
+    private quantizeMinZoomToTileGrid(minZoom: number): number {
+        const dpr = window.devicePixelRatio ?? 1;
+        const scaleZoom = this.scene.scale.zoom || 1; // ScaleManager zoom
+        const tileSize = 32; // <-- set to your actual tile size
+
+        // Convert camera zoom -> effective screen scale
+        const eff = minZoom * scaleZoom * dpr;
+
+        // Choose the smallest eff >= current that makes tileSize*eff integer
+        const k = Math.ceil(tileSize * eff);
+        const effQuant = k / tileSize;
+
+        // Convert back to camera zoom
+        return effQuant / (scaleZoom * dpr);
+    }
+
+    private getSafeFitCameraZoom(): number {
+        const fit = this.getFitCameraZoom();
+        console.log(
+            `Fit zoom: ${fit}, fit * safe factor: ${
+                fit * this.SAFE_MIN_ZOOM_OUT_FACTOR
+            }, max camera zoom: ${this.getMaximumCameraZoomForCurrentView()}`
+        );
+        const maxCameraZoom = this.getMaximumCameraZoomForCurrentView();
+
+        // you already keep it slightly zoomed-in vs fit (good)
+        const safe = Math.min(fit * this.SAFE_MIN_ZOOM_OUT_FACTOR, maxCameraZoom);
+
+        // NEW: quantize so pixel art minification doesn't get a cursed ratio
+        return Math.min(this.quantizeMinZoomToTileGrid(safe), maxCameraZoom);
+    }
+
+    private getMinimumCameraZoomForCurrentView(): number {
+        const fitMinimum = this.getSafeFitCameraZoom();
+        if (this.cameraMode === CameraMode.Exploration) {
+            return Math.min(fitMinimum, this.getMaximumCameraZoomForCurrentView());
+        }
+        let minimum = fitMinimum;
 
         if (this.cameraMode !== CameraMode.Follow) {
             return minimum;
         }
 
-        // Avoid exact "fit map" zoom while following the player.
-        // Reaching exact fit causes hard snapping to map center near bounds.
         const followMinimum = fitMinimum * this.FOLLOW_MIN_ZOOM_MARGIN;
         minimum = Math.max(minimum, followMinimum);
-        return Math.min(minimum, this.getMaximumZoomModifierForCurrentView());
+        return Math.min(minimum, this.getMaximumCameraZoomForCurrentView());
+    }
+
+    private getMaximumCameraZoomForCurrentView(): number {
+        return this.waScaleManager.zoomModifierToCameraZoom(this.getMaximumZoomModifierForCurrentView());
+    }
+
+    private getMinimumZoomModifierForCurrentView(): number {
+        return this.waScaleManager.cameraZoomToZoomModifier(this.getMinimumCameraZoomForCurrentView());
     }
 
     private getMaximumZoomModifierForCurrentView(): number {
@@ -658,6 +801,17 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         return levels;
     }
 
+    private buildDiscreteCameraZoomLevels(minCameraZoom: number, maxCameraZoom: number): number[] {
+        const levels = this.buildDiscreteZoomLevels(minCameraZoom, maxCameraZoom);
+        if (levels.length <= 4 || this.DISCRETE_EDGE_SKIP_LEVELS <= 0) {
+            return levels;
+        }
+
+        const skip = Clamp(this.DISCRETE_EDGE_SKIP_LEVELS, 0, levels.length - 1);
+        const sliced = levels.slice(skip);
+        return sliced.length > 0 ? sliced : [levels[levels.length - 1]];
+    }
+
     private getClosestZoomLevelIndex(levels: number[], zoomModifier: number): number {
         let closestIndex = 0;
         let closestDistance = Number.POSITIVE_INFINITY;
@@ -678,13 +832,12 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     public zoomByWheelDelta(deltaY: number, smooth: boolean): void {
-        if (this.isZoomLocked() || !Number.isFinite(deltaY) || deltaY === 0) {
+        if (this.resizeInProgress || this.isZoomLocked() || !Number.isFinite(deltaY) || deltaY === 0) {
             return;
         }
 
         const normalizedDelta = this.normalizeWheelDelta(deltaY);
         this.wheelZoomAccumulator += normalizedDelta;
-        const accumulatorAfterInput = this.wheelZoomAccumulator;
 
         let steps = 0;
         while (Math.abs(this.wheelZoomAccumulator) >= this.NORMALIZED_WHEEL_STEP) {
@@ -700,48 +853,24 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             return;
         }
 
-        const minZoomModifier = this.getMinimumZoomModifierForCurrentView();
-        const maxZoomModifier = this.getMaximumZoomModifierForCurrentView();
-        const levels = this.buildDiscreteZoomLevels(minZoomModifier, maxZoomModifier);
-        const currentZoomModifier = Clamp(this.waScaleManager.zoomModifier, minZoomModifier, maxZoomModifier);
-        const currentIndex = this.getClosestZoomLevelIndex(levels, currentZoomModifier);
+        const minCameraZoom = this.getMinimumCameraZoomForCurrentView();
+        const maxCameraZoom = this.getMaximumCameraZoomForCurrentView();
+        const levels = this.buildDiscreteCameraZoomLevels(minCameraZoom, maxCameraZoom);
+        const currentCameraZoom = Clamp(this.camera.zoom, minCameraZoom, maxCameraZoom);
+        const currentIndex = this.getClosestZoomLevelIndex(levels, currentCameraZoom);
 
         // Positive wheel delta means zoom-out in browser semantics.
         const nextIndex = Clamp(currentIndex - steps, 0, levels.length - 1);
         if (nextIndex === currentIndex) {
-            console.log("[ZoomDebug][wheel-step-noop]", {
-                mode: this.cameraMode,
-                deltaY,
-                normalizedDelta,
-                accumulatorAfterInput,
-                residualAccumulator: this.wheelZoomAccumulator,
-                steps,
-                currentIndex,
-                nextIndex,
-                currentZoomModifier,
-            });
             return;
         }
 
-        const nextZoomModifier = levels[nextIndex];
-        console.log("[ZoomDebug][wheel-step]", {
-            mode: this.cameraMode,
-            deltaY,
-            normalizedDelta,
-            accumulatorAfterInput,
-            residualAccumulator: this.wheelZoomAccumulator,
-            steps,
-            currentIndex,
-            nextIndex,
-            currentZoomModifier,
-            nextZoomModifier,
-            smooth,
-            hasAnchor: !!this.zoomAnchor,
-        });
+        const nextCameraZoom = levels[nextIndex];
         if (smooth) {
-            this.animateToZoomLevel(nextZoomModifier);
+            this.animateToZoomLevel(this.waScaleManager.cameraZoomToZoomModifier(nextCameraZoom));
         } else {
-            waScaleManager.setRuntimeZoomModifier(nextZoomModifier, this.camera);
+            this.waScaleManager.setRuntimeCameraZoom(nextCameraZoom, this.camera);
+            this.snapCameraToPixelGrid();
             // Camera matrices/worldView are not always fully coherent in the same tick as setZoom().
             // Defer anchor correction to the next update frame to keep cursor-anchored zoom reliable.
             this.startAnimation();
@@ -975,6 +1104,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         }
 
         this.applyZoomAnchor();
+        this.snapCameraToPixelGrid();
 
         if (
             this.cameraSpeed === undefined &&
@@ -987,6 +1117,35 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         }
 
         this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
+    }
+    private snapCameraToPixelGrid(): void {
+        const camZoom = this.camera.zoom || 1;
+        const scaleZoom = this.scene.scale.zoom || 1;
+        const dpr = window.devicePixelRatio ?? 1;
+
+        // Effective device pixels per world unit
+        const eff = camZoom * scaleZoom * dpr;
+        if (!Number.isFinite(eff) || eff <= 0) return;
+
+        // Only snap when we're minifying / at-or-below 1 device-pixel per world-unit
+        if (eff > 1.000001) return;
+
+        // 1 device pixel == 1/eff world units
+        const q = 1 / eff;
+        const snap = (v: number) => Math.round(v / q) * q;
+
+        if (this.cameraMode === CameraMode.Exploration) {
+            this.explorerFocusOn.x = snap(this.explorerFocusOn.x);
+            this.explorerFocusOn.y = snap(this.explorerFocusOn.y);
+        } else {
+            // In Follow mode scroll is driven by follow each frame; snapping offset is the important part.
+            // Still OK to snap scroll a bit, but followOffset snapping is the big win.
+            this.camera.scrollX = snap(this.camera.scrollX);
+            this.camera.scrollY = snap(this.camera.scrollY);
+        }
+
+        // Follow offset is a common fractional source
+        this.camera.setFollowOffset(snap(this.camera.followOffset.x), snap(this.camera.followOffset.y));
     }
 
     private resistZoomCallback: ((time: number, delta: number) => void) | undefined;
@@ -1159,10 +1318,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             (this.camera as unknown as { followTarget?: Phaser.GameObjects.GameObject }).followTarget
         );
         if (hasFollowTarget) {
-            this.camera.setFollowOffset(
-                this.camera.followOffset.x + deltaX,
-                this.camera.followOffset.y + deltaY
-            );
+            this.camera.setFollowOffset(this.camera.followOffset.x + deltaX, this.camera.followOffset.y + deltaY);
             this.scene.markDirty();
             return;
         }
@@ -1184,6 +1340,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         if (this.explorationAllowOutsideMap) {
             this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
             this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
+            this.snapCameraToPixelGrid();
+
             return;
         }
 
@@ -1205,7 +1363,6 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         } else {
             this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, minY, maxY);
         }
-
     }
 
     private applyZoomAnchor(): void {
@@ -1238,7 +1395,12 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private updateRoundPixelsForMode(): void {
-        // Exploration uses sub-pixel movement (smoother pan/zoom), other modes keep pixel snapping.
-        this.camera.roundPixels = this.cameraMode !== CameraMode.Exploration;
+        const camZoom = this.camera.zoom || 1;
+        const scaleZoom = this.scene.scale.zoom || 1;
+        const dpr = window.devicePixelRatio ?? 1;
+        const eff = camZoom * scaleZoom * dpr;
+
+        const zoomedOutVisually = eff <= 1.000001;
+        this.camera.roundPixels = this.cameraMode !== CameraMode.Exploration || zoomedOutVisually;
     }
 }
