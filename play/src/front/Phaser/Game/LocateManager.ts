@@ -18,6 +18,9 @@ export class LocateManager {
     private locatePositionClearProgressTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
     private wokaMenuStoreUnsubscriber?: () => void;
     private followingRemoteUserUuid: string | null = null;
+    // Internal handoff guard: locate flow briefly closes then reopens the same menu.
+    // We must not reset camera follow during that intermediate close.
+    private suppressNextFollowResetOnMenuClose = false;
 
     constructor(private scene: GameScene, private cameraManager: CameraManager, private connection: RoomConnection) {
         this.subscribeToLocatePositionMessages();
@@ -40,16 +43,17 @@ export class LocateManager {
     }
 
     private subscribeToWokaMenuStore(): void {
-        // Subscribe to woka menu store to stop following the remote player when the woka menu is closed
+        // Subscribe to woka menu store for locate flow handoff/follow behavior.
         this.wokaMenuStoreUnsubscriber = wokaMenuStore.subscribe((value) => {
             if (value === undefined) {
+                if (this.suppressNextFollowResetOnMenuClose) {
+                    this.suppressNextFollowResetOnMenuClose = false;
+                    return;
+                }
                 if (this.followingRemoteUserUuid) {
-                    const shouldSkipFollowReset = wokaMenuStore.consumeSkipFollowResetOnNextClear();
-                    if (!shouldSkipFollowReset) {
-                        this.cameraManager.stopFollowRemotePlayer();
-                    } else {
-                        this.cameraManager.setExplorationMode();
-                    }
+                    // Keep camera on the located user when card is closed.
+                    // We still consume the flag to avoid carrying it to future clears.
+                    wokaMenuStore.consumeSkipFollowResetOnNextClear();
                     this.followingRemoteUserUuid = null;
                 }
                 return;
@@ -177,7 +181,21 @@ export class LocateManager {
         // Delay activation to allow Phaser to update player state and avoid camera animation glitch
         // This ensures smooth camera transition when the player is created/updated/recreated
         setTimeout(() => {
-            remoteUser.activate();
+            // Locate flow opens an interim menu with source=locate.
+            // RemotePlayer.activate() toggles the menu; if same user is already open it closes it.
+            // Close+reopen intentionally to get full remote-player actions without snapping camera back.
+            const openedMenu = get(wokaMenuStore);
+            const isLocateInterimMenu =
+                openedMenu !== undefined &&
+                openedMenu.source === "locate" &&
+                openedMenu.userUuid === remoteUser.userUuid;
+
+            if (isLocateInterimMenu) {
+                this.suppressNextFollowResetOnMenuClose = true;
+                remoteUser.activate(); // closes interim locate menu
+            }
+
+            remoteUser.activate(); // opens regular remote-player menu with actions
             wokaMenuProgressStore.set(undefined);
         }, 300);
     }

@@ -211,6 +211,7 @@ import { EditorToolName, MapEditorModeManager } from "./MapEditor/MapEditorModeM
 import type { PlayerDetailsUpdate } from "./RemotePlayersRepository";
 import { RemotePlayersRepository } from "./RemotePlayersRepository";
 import { IframeEventDispatcher } from "./IframeEventDispatcher";
+import type { ActivatableInterface } from "./ActivatableInterface";
 import { PlayerVariablesManager } from "./PlayerVariablesManager";
 import type { SetPlayerVariableEvent } from "../../Api/Events/SetPlayerVariableEvent";
 import { SayManager } from "./Say/SayManager";
@@ -1777,8 +1778,9 @@ export class GameScene extends DirtyScene {
     }
 
     private isPointerOverScreenShare(pointer?: Phaser.Input.Pointer): boolean {
-        const clientX = pointer?.event?.clientX;
-        const clientY = pointer?.event?.clientY;
+        const clientPosition = this.getPointerClientPosition(pointer);
+        const clientX = clientPosition?.x;
+        const clientY = clientPosition?.y;
         if (clientX === undefined || clientY === undefined) {
             return false;
         }
@@ -1787,6 +1789,27 @@ export class GameScene extends DirtyScene {
             return false;
         }
         return !!element.closest(".screen-blocker");
+    }
+
+    private getPointerClientPosition(pointer?: Phaser.Input.Pointer): { x: number; y: number } | undefined {
+        const event = pointer?.event;
+        if (!event) {
+            return undefined;
+        }
+
+        if ("clientX" in event && "clientY" in event) {
+            return { x: event.clientX, y: event.clientY };
+        }
+
+        if ("touches" in event && event.touches.length > 0) {
+            return { x: event.touches[0].clientX, y: event.touches[0].clientY };
+        }
+
+        if ("changedTouches" in event && event.changedTouches.length > 0) {
+            return { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY };
+        }
+
+        return undefined;
     }
 
     public handlePersonalAreaHover(
@@ -3905,11 +3928,12 @@ ${escapedMessage}
         this.pushPlayerPosition(event);
         this.gameMapFrontWrapper.setPosition(event.x, event.y);
         this.ensureCameraFollowsCurrentPlayerWhenOutOfView(event);
-        this.activatablesManager.updateActivatableObjectsDistances([
-            ...Array.from(this.MapPlayersByKey.values()),
-            ...this.actionableItems.values(),
-            ...this.gameMapFrontWrapper.getActivatableEntities(),
-        ]);
+        const activatableObjects: ActivatableInterface[] = [
+            ...(Array.from(this.MapPlayersByKey.values()) as ActivatableInterface[]),
+            ...(Array.from(this.actionableItems.values()) as ActivatableInterface[]),
+            ...(this.gameMapFrontWrapper.getActivatableEntities() as ActivatableInterface[]),
+        ];
+        this.activatablesManager.updateActivatableObjectsDistances(activatableObjects);
         this.activatablesManager.deduceSelectedActivatableObjectByDistance();
 
         // Call movement ended callbacks if movement just ended
@@ -3921,6 +3945,24 @@ ${escapedMessage}
     }
 
     private ensureCameraFollowsCurrentPlayerWhenOutOfView(event: HasPlayerMovedInterface): void {
+        // Any local movement should exit exploration camera and restore follow mode.
+        if (
+            event.moving &&
+            this.cameraManager.isInExplorationMode() &&
+            !this.cameraManager.isFollowTransitionInProgress()
+        ) {
+            if (get(mapExplorationModeStore)) {
+                mapExplorationModeStore.set(false);
+            }
+            this.cameraManager.startFollowPlayer(this.CurrentPlayer, 240, undefined, {
+                preserveZoomOnComplete: true,
+                // Keep target "live" while player moves to avoid snap/jitter on transition end.
+                freezeTargetDuringTransition: false,
+                smoothCatchUpMs: 0,
+            });
+            return;
+        }
+
         // If the user explicitly enabled exploration mode, do not override camera behavior.
         if (get(mapExplorationModeStore)) {
             return;
@@ -3938,7 +3980,11 @@ ${escapedMessage}
         const isOutOfView = event.x < minX || event.x > maxX || event.y < minY || event.y > maxY;
 
         if (isOutOfView) {
-            this.cameraManager.startFollowPlayer(this.CurrentPlayer, 180);
+            this.cameraManager.startFollowPlayer(this.CurrentPlayer, 180, undefined, {
+                preserveZoomOnComplete: true,
+                freezeTargetDuringTransition: false,
+                smoothCatchUpMs: 0,
+            });
         }
     }
 

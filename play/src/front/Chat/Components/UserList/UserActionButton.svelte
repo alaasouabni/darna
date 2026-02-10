@@ -141,20 +141,7 @@
         analyticsClient.openWokaMenu();
 
         const currentScerne = gameManager.getCurrentGameScene();
-
-        // Il user is in view port and represented by remote player, use it to activate the woka menu
-        const remotePlayerData = currentScerne.getRemotePlayersRepository().getPlayerByUuid(userToLocate.uuid);
-        if (remotePlayerData != undefined) {
-            // Get the actual RemotePlayer sprite from MapPlayersByKey using userId
-            const remotePlayer = currentScerne.MapPlayersByKey.get(remotePlayerData.userId);
-            if (remotePlayer != undefined) {
-                remotePlayer.activate();
-                closeChatUserMenu();
-                return;
-            }
-        }
-
-        // If the user isn't in the view port, emit the ask position message to the server
+        // Always route through LOCATE flow so camera + woka menu behavior stays consistent.
         currentScerne.connection?.emitAskPosition(
             userToLocate.uuid ?? "",
             userToLocate.playUri ?? "",

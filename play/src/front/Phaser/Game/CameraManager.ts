@@ -52,6 +52,12 @@ export interface CameraZoomStateSnapshot {
     effectiveCssZoom?: number; // NEW: camera.zoom * scene.scale.zoom
 }
 
+export interface StartFollowPlayerOptions {
+    preserveZoomOnComplete?: boolean;
+    freezeTargetDuringTransition?: boolean;
+    smoothCatchUpMs?: number;
+}
+
 /**
  * The CameraManager is responsible for managing the camera in the game.
  * It allows to set the camera to follow the player, to focus on a specific point or to be in exploration mode.
@@ -67,6 +73,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     private restoreZoomTween?: Phaser.Tweens.Tween;
     private startFollowTween?: Phaser.Tweens.Tween;
+    private followTransitionInProgress = false;
 
     private playerToFollow?: Player | RemotePlayer;
     private cameraLocked: boolean;
@@ -77,7 +84,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private readonly SAFE_MIN_ZOOM_OUT_FACTOR = 1.05;
     private readonly DISCRETE_EDGE_SKIP_LEVELS = 1;
     private readonly DISCRETE_ZOOM_LEVEL_COUNT = Math.max(2, ZOOM_DISCRETE_LEVEL_COUNT);
-    private readonly NORMALIZED_WHEEL_STEP = Math.max(1, 30);
+    private readonly NORMALIZED_WHEEL_STEP = Math.max(1, ZOOM_WHEEL_STEP);
     private readonly MAX_WHEEL_STEPS_PER_EVENT = Math.max(1, ZOOM_MAX_STEPS_PER_EVENT);
 
     private unsubscribeMapEditorModeStore: () => void;
@@ -243,6 +250,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
         this.restoreZoomTween?.stop();
         this.startFollowTween?.stop();
+        this.followTransitionInProgress = false;
 
         //Set the camera to focus on the given point
         const focusPoint = {
@@ -319,26 +327,55 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     public startFollowPlayer(
         player: Player | RemotePlayer,
         duration = 0,
-        targetZoomLevel: number | undefined = undefined
+        targetZoomLevel: number | undefined = undefined,
+        options: StartFollowPlayerOptions = {}
     ): void {
+        const preserveZoomOnComplete = options.preserveZoomOnComplete ?? false;
+        const freezeTargetDuringTransition = options.freezeTargetDuringTransition ?? false;
+        const smoothCatchUpMs = options.smoothCatchUpMs ?? 0;
+
+        if (duration > 0 && this.followTransitionInProgress && this.playerToFollow === player) {
+            return;
+        }
+
+        if (this.startFollowTween) {
+            this.startFollowTween.stop();
+            this.startFollowTween.destroy();
+            this.startFollowTween = undefined;
+        }
+        this.followTransitionInProgress = false;
+
         this.playerToFollow = player;
-        this.setCameraMode(CameraMode.Follow);
         if (duration === 0) {
+            this.setCameraMode(CameraMode.Follow);
             this.camera.startFollow(player, true);
             this.scene.markDirty();
             this.camera.setBounds(0, 0, this.mapSize.width, this.mapSize.height);
             this.refreshZoomBounds();
-            this.snapCurrentZoomToDiscreteLevel();
+            if (!preserveZoomOnComplete) {
+                this.snapCurrentZoomToDiscreteLevel();
+            }
             return;
         }
-        this.setExplorationMode();
+
+        // Smooth transition to follow mode: if we are already in exploration mode, do not reinitialize it.
+        // Reinitializing exploration causes a visible camera reset before the tween starts.
+        const alreadyInExploration = this.cameraMode === CameraMode.Exploration && !!this.explorerFocusOn;
+        if (!alreadyInExploration) {
+            this.setExplorationMode();
+        }
         if (!this.explorerFocusOn) {
-            this.explorerFocusOn = { x: this.camera.centerX, y: this.camera.centerY };
-            this.camera.startFollow(this.explorerFocusOn, true);
+            this.explorerFocusOn = {
+                x: this.camera.scrollX + this.camera.width / 2,
+                y: this.camera.scrollY + this.camera.height / 2,
+            };
+            this.camera.startFollow(this.explorerFocusOn, false);
         }
 
         const oldPos = { ...this.explorerFocusOn };
+        const frozenTarget = freezeTargetDuringTransition ? { x: player.x, y: player.y } : undefined;
         const startZoomModifier = this.waScaleManager.zoomModifier;
+        this.followTransitionInProgress = true;
         this.animationInProgress = true;
         this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.animateCallback);
         this.targetReachInProgress = false;
@@ -353,9 +390,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 if (!this.playerToFollow) {
                     return;
                 }
+                const followTarget = frozenTarget ?? this.playerToFollow;
                 const progress = tween.getValue() ?? 0;
-                const shiftX = (this.playerToFollow.x - oldPos.x) * progress;
-                const shiftY = (this.playerToFollow.y - oldPos.y) * progress;
+                const shiftX = (followTarget.x - oldPos.x) * progress;
+                const shiftY = (followTarget.y - oldPos.y) * progress;
                 this.explorerFocusOn.x = oldPos.x + shiftX;
                 this.explorerFocusOn.y = oldPos.y + shiftY;
                 if (targetZoomLevel !== undefined) {
@@ -368,12 +406,25 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
             },
             onComplete: () => {
-                this.setCameraMode(CameraMode.Follow); 
-                this.camera.startFollow(player, true);
+                this.setCameraMode(CameraMode.Follow);
+                if (smoothCatchUpMs > 0) {
+                    this.camera.startFollow(player, true, 0.2, 0.2);
+                    this.scene.time.delayedCall(smoothCatchUpMs, () => {
+                        if (this.playerToFollow !== player || this.cameraMode !== CameraMode.Follow) {
+                            return;
+                        }
+                        this.camera.startFollow(player, true);
+                    });
+                } else {
+                    this.camera.startFollow(player, true);
+                }
                 this.animationInProgress = false;
                 this.camera.setBounds(0, 0, this.mapSize.width, this.mapSize.height);
                 this.refreshZoomBounds();
-                this.snapCurrentZoomToDiscreteLevel();
+                if (!preserveZoomOnComplete) {
+                    this.snapCurrentZoomToDiscreteLevel();
+                }
+                this.followTransitionInProgress = false;
                 this.startFollowTween = undefined;
             },
         });
@@ -513,6 +564,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     public isInExplorationMode(): boolean {
         return this.cameraMode === CameraMode.Exploration;
+    }
+
+    public isFollowTransitionInProgress(): boolean {
+        return this.followTransitionInProgress;
     }
 
     private restoreZoom(duration = 0): void {
@@ -882,6 +937,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
         this.startFollowTween?.stop();
         this.startFollowTween = undefined;
+        this.followTransitionInProgress = false;
         this.animationInProgress = false;
 
         this.centerCameraOn({ x: this.mapSize.width / 2, y: this.mapSize.height / 2 }, targetZoomModifier);
