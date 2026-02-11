@@ -83,47 +83,67 @@ export class WaScaleManager {
     }
 
     public applyNewSize(camera?: Phaser.Cameras.Scene2D.Camera) {
-        if (this.scaleManager === undefined) return;
+        if (!this.scaleManager) return;
 
-        const { width: cssWidthRaw, height: cssHeightRaw } = coWebsiteManager.getGameSize();
+        const { width: cssWraw, height: cssHraw } = coWebsiteManager.getGameSize();
+        const cssW = Math.max(1, Math.round(cssWraw));
+        const cssH = Math.max(1, Math.round(cssHraw));
         const dpr = window.devicePixelRatio ?? 1;
 
-        const cssWidth = Math.max(1, Math.round(cssWidthRaw));
-        const cssHeight = Math.max(1, Math.round(cssHeightRaw));
-
-        // Ask HdpiManager for the internal buffer size in *device pixels*
-        const { real: realSizeRaw } = this.hdpiManager.getOptimalGameSize({
-            width: cssWidth * dpr,
-            height: cssHeight * dpr,
+        // Ask HdpiManager for an internal pixel budget (device pixels)
+        const { real: budgetRaw } = this.hdpiManager.getOptimalGameSize({
+            width: cssW * dpr,
+            height: cssH * dpr,
         });
 
-        const bufferW = Math.max(1, Math.round(realSizeRaw.width));
-        const bufferH = Math.max(1, Math.round(realSizeRaw.height));
+        const budgetW = Math.max(1, Math.round(budgetRaw.width));
+        const budgetH = Math.max(1, Math.round(budgetRaw.height));
+        const budgetPixels = budgetW * budgetH;
 
-        // 1) Internal resolution (canvas buffer)
-        if (this.scaleManager.width !== bufferW || this.scaleManager.height !== bufferH) {
-            this.scaleManager.resize(bufferW, bufferH);
+        // "Clean" zoom candidates only (avoid 0.998xxx type ratios)
+        // 1 = internal == css
+        // 0.5 = internal = 2x css (downscale by 2)
+        // 2 = internal = css/2 (upscale by 2)  <-- only works cleanly if css dims divisible by 2
+        const candidates = [1, 0.5, 2, 0.25, 3];
+
+        let bestZoom = 1;
+        let bestW = cssW;
+        let bestH = cssH;
+        let bestPixels = bestW * bestH;
+
+        for (const zoom of candidates) {
+            // internal buffer derived from CSS and zoom
+            const w = Math.max(1, Math.round(cssW / zoom));
+            const h = Math.max(1, Math.round(cssH / zoom));
+
+            // Require exact mapping to CSS to avoid 1px rounding resample
+            if (Math.round(w * zoom) !== cssW) continue;
+            if (Math.round(h * zoom) !== cssH) continue;
+
+            const pixels = w * h;
+
+            // Must fit budget; choose the largest internal resolution that fits
+            if (pixels <= budgetPixels && pixels > bestPixels) {
+                bestZoom = zoom;
+                bestW = w;
+                bestH = h;
+                bestPixels = pixels;
+            }
         }
 
-        // 2) Display scale (CSS) — MUST be done via ScaleManager so scene.scale.zoom is correct.
-        // We want displayed size = cssWidth/cssHeight.
-        const zoomX = cssWidth / bufferW;
-        const zoomY = cssHeight / bufferH;
-        const zoom = Math.min(zoomX, zoomY);
+        if (this.scaleManager.width !== bestW || this.scaleManager.height !== bestH) {
+            this.scaleManager.resize(bestW, bestH);
+        }
 
-        this.scaleManager.setZoom(zoom);
-        this.actualZoom = zoom;
+        this.scaleManager.setZoom(bestZoom);
+        this.actualZoom = bestZoom;
 
-        // Keep camera zoom consistent with zoomModifier
-        this.applyCameraZoom({ width: bufferW, height: bufferH }, { width: bufferW, height: bufferH }, camera);
+        this.applyCameraZoom({ width: bestW, height: bestH }, { width: bestW, height: bestH }, camera);
 
-        // If you really need the #game container sized explicitly, do it here (optional):
+        // Optional: keep container sizing
         const gameStyle = HtmlUtils.getElementByIdOrFail<HTMLDivElement>("game").style;
-        gameStyle.width = `${cssWidth}px`;
-        gameStyle.height = `${cssHeight}px`;
-
-        // IMPORTANT: do NOT manually set canvas.style.width/height
-        // IMPORTANT: do NOT manually set displaySize.* or call refresh(w,h)
+        gameStyle.width = `${cssW}px`;
+        gameStyle.height = `${cssH}px`;
 
         this.game.markDirty();
     }
