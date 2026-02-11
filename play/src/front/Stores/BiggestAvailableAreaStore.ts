@@ -146,7 +146,9 @@ function createBiggestAvailableAreaStore() {
                 height: game.offsetHeight,
             };
 
-            const blockingElements = Array.from(document.getElementsByClassName("screen-blocker"));
+            // "screen-blocker" is broader (also used for pointer-hit guards, e.g. media tiles).
+            // Camera offset should only consider dedicated layout blockers.
+            const blockingElements = Array.from(document.getElementsByClassName("camera-offset-blocker"));
 
             const blockingBoxes = blockingElements.map((element) => {
                 const bounds = element.getBoundingClientRect();

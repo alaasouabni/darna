@@ -3945,6 +3945,24 @@ ${escapedMessage}
     }
 
     private ensureCameraFollowsCurrentPlayerWhenOutOfView(event: HasPlayerMovedInterface): void {
+        // If camera is following another player (locate mode) and local player starts moving,
+        // hand control back to local follow mode.
+        if (
+            event.moving &&
+            this.cameraManager.isFollowingAnotherPlayerThanCurrent() &&
+            !this.cameraManager.isFollowTransitionInProgress()
+        ) {
+            if (get(mapExplorationModeStore)) {
+                mapExplorationModeStore.set(false);
+            }
+            this.cameraManager.startFollowPlayer(this.CurrentPlayer, 240, undefined, {
+                preserveZoomOnComplete: true,
+                freezeTargetDuringTransition: false,
+                smoothCatchUpMs: 0,
+            });
+            return;
+        }
+
         // Any local movement should exit exploration camera and restore follow mode.
         if (
             event.moving &&

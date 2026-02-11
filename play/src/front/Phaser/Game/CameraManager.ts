@@ -570,6 +570,14 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         return this.followTransitionInProgress;
     }
 
+    public isFollowingAnotherPlayerThanCurrent(): boolean {
+        return (
+            this.cameraMode === CameraMode.Follow &&
+            this.playerToFollow !== undefined &&
+            this.playerToFollow !== this.scene.CurrentPlayer
+        );
+    }
+
     private restoreZoom(duration = 0): void {
         if (duration === 0) {
             this.waScaleManager.setRuntimeZoomModifier(this.waScaleManager.getSaveZoom(), this.camera);
