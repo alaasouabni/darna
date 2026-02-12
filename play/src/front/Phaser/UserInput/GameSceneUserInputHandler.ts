@@ -150,7 +150,7 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
             }
         }
         const camera = this.gameScene.getCameraManager().getCamera();
-        const worldPoint = pointer.positionToCamera(camera);
+        const worldPoint = pointer.positionToCamera(camera) as Phaser.Math.Vector2;
         this.gameScene
             .moveTo(
                 {

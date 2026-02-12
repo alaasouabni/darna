@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/node";
 import Debug from "debug";
-import type { BackToPusherSpaceMessage } from "@workadventure/messages";
+import type { BackToPusherSpaceMessage, PusherToBackSpaceMessage } from "@workadventure/messages";
 import { PusherToBackSpaceMessage as PusherToBackSpaceMessageCodec } from "@workadventure/messages";
 import type { SpaceManagerClient } from "@workadventure/messages/src/ts-proto-generated/services";
 import { GRPC_MAX_MESSAGE_SIZE } from "../enums/EnvironmentVariable";
@@ -223,7 +223,7 @@ export class SpaceConnection implements SpaceConnectionInterface {
                     filterType: space.filterType,
                     world: space.world,
                 });
-                const payload = {
+                const payload: PusherToBackSpaceMessage = {
                     message: {
                         $case: "joinSpaceMessage",
                         joinSpaceMessage: {

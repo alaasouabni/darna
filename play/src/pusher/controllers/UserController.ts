@@ -173,7 +173,7 @@ export class UserController extends BaseHttpController {
                             res.userIdentifier,
                                 res.accessToken,
                             body.roomUrl,
-                            req.ip,
+                            req.ip ?? "",
                             body.textures,
                             undefined
                         );
@@ -277,7 +277,7 @@ export class UserController extends BaseHttpController {
                             res.userIdentifier,
                                 res.accessToken,
                                 body.roomUrl,
-                                req.ip,
+                                req.ip ?? "",
                                 [],
                                 body.texture ?? undefined
                             );

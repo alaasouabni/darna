@@ -108,7 +108,7 @@ export class AdminUserProvider implements UserProviderInterface {
                     availabilityStatus: writable(AvailabilityStatus.UNCHANGED),
                     pictureStore: currentMember.uuid
                         ? this.getPictureStoreForUuid(currentMember.uuid)
-                        : readable(undefined),
+                        : readable<string | undefined>(undefined),
                     chatId: currentMember.chatId,
                     roomName: undefined,
                     playUri: undefined,

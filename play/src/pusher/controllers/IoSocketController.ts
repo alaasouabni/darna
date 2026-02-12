@@ -491,7 +491,7 @@ export class IoSocketController {
                                         characterTextureIds,
                                         companionTextureId,
                                         locale,
-                                        userData.tags,
+                                        tokenData?.tags ?? [],
                                         chatID
                                     );
                                 } catch (err) {
@@ -518,7 +518,7 @@ export class IoSocketController {
                                             characterTextureIds,
                                             companionTextureId,
                                             locale,
-                                            userData.tags,
+                                            tokenData?.tags ?? [],
                                             chatID
                                         );
                                     } else {
