@@ -150,11 +150,12 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
             }
         }
         const camera = this.gameScene.getCameraManager().getCamera();
+        const worldPoint = pointer.positionToCamera(camera);
         this.gameScene
             .moveTo(
                 {
-                    x: pointer.x + camera.scrollX,
-                    y: pointer.y + camera.scrollY,
+                    x: worldPoint.x,
+                    y: worldPoint.y,
                 },
                 true
             )

@@ -5,6 +5,7 @@
     import { inLivekitStore } from "../../../Stores/MediaStore";
     import { followStateStore } from "../../../Stores/FollowStore";
     import { requestedMegaphoneStore } from "../../../Stores/MegaphoneStore";
+    import { personalAreaSpaceNameStore } from "../../../Stores/GameStore";
     import LL from "../../../../i18n/i18n-svelte";
     import AppsMenuItem from "./AppsMenuItem.svelte";
     import FollowMenuItem from "./FollowMenuItem.svelte";
@@ -33,13 +34,14 @@
     <AppsMenuItem />
 {/if}
 
-{#if ($bottomActionBarVisibilityStore && !$inLivekitStore) || $followStateStore !== "off"}
+{#if (($bottomActionBarVisibilityStore && !$inLivekitStore) || $followStateStore !== "off") &&
+    $personalAreaSpaceNameStore === null}
     <!-- <ChangeLayoutMenuItem /> -->
 
     <FollowMenuItem />
 {/if}
 
-{#if $bottomActionBarVisibilityStore && !$inLivekitStore}
+{#if $bottomActionBarVisibilityStore && !$inLivekitStore && $personalAreaSpaceNameStore === null}
     <!-- <ChangeLayoutMenuItem /> -->
 
     <LockDiscussionMenuItem />
