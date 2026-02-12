@@ -20,10 +20,10 @@
 
     let buildOwnWoka = false;
     let error: string | null = null;
-    let wokaDataCache: WokaData | null = null;
+    let wokaDataCache: WokaData | undefined;
 
     async function getWokaData(): Promise<WokaData> {
-        if (wokaDataCache) {
+        if (wokaDataCache !== undefined) {
             return wokaDataCache;
         }
         const roomUrl = gameManager.currentStartedRoom.href;
@@ -36,8 +36,9 @@
         if (!response.ok) {
             throw new Error("Failed to load Woka data");
         }
-        wokaDataCache = await response.json();
-        return wokaDataCache;
+        const data = (await response.json()) as WokaData;
+        wokaDataCache = data;
+        return data;
     }
 
     function mapTextureIdsToDescriptors(wokaData: WokaData, texturesId: string[]): WokaTextureDescriptionInterface[] {

@@ -322,6 +322,7 @@
                     accessClaimMode: PersonalAreaAccessClaimMode.enum.dynamic,
                     allowedTags: [],
                     ownerId: null,
+                    locked: false,
                 };
             case "extensionModule":
                 if (subtype === undefined) {

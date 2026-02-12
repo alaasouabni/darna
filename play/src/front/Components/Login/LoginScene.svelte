@@ -84,6 +84,9 @@
                 if ($inGameProfileEditStore) {
                     await saveNameInGame(finalName);
                 } else {
+                    if (!loginScene) {
+                        throw new Error("Login scene is not available");
+                    }
                     await loginScene.login(finalName);
                 }
             } catch (err) {

@@ -23,7 +23,7 @@
     let remotePlayer: { chatID?: string } | undefined;
 
     let wokaMenuStoreUnsubscriber: Unsubscriber | null;
-    let wokaDataCache: WokaData | null = null;
+    let wokaDataCache: WokaData | undefined;
     let offlineSelectedTextures: Record<string, string> | null = null;
     let offlineWokaData: WokaData | null = null;
     const OFFLINE_COLOR = "#94a3b8";
@@ -51,6 +51,10 @@
 
     function closeActionsMenu(options?: { skipFollowReset?: boolean }) {
         wokaMenuStore.clear(options);
+    }
+
+    function closeActionsMenuFromClick(): void {
+        closeActionsMenu();
     }
 
     let buttonsLayout: "row" | "column" | "wrap" = "row";
@@ -85,7 +89,7 @@
     });
 
     async function getWokaData(): Promise<WokaData> {
-        if (wokaDataCache) {
+        if (wokaDataCache !== undefined) {
             return wokaDataCache;
         }
         const roomUrl = gameManager.currentStartedRoom.href;
@@ -98,8 +102,9 @@
         if (!response.ok) {
             throw new Error("Failed to load Woka data");
         }
-        wokaDataCache = await response.json();
-        return wokaDataCache;
+        const data = (await response.json()) as WokaData;
+        wokaDataCache = data;
+        return data;
     }
 
     function mapTexturesToSelected(wokaData: WokaData, textures: CharacterTextureMessage[]): Record<string, string> {
@@ -150,7 +155,7 @@
         <div>
             <div class="w-full bg-cover relative">
                 <div class="absolute top-2 right-2">
-                    <ButtonClose on:click={closeActionsMenu} />
+                    <ButtonClose on:click={closeActionsMenuFromClick} />
                 </div>
 
                 <div class="flex items-center justify-center p-2">
@@ -259,7 +264,7 @@
                     <button
                         type="button"
                         class="btn btn-light btn-ghost text-nowrap justify-center my-2 mx-1 w-fit"
-                        on:click|preventDefault|stopPropagation={closeActionsMenu}
+                        on:click|preventDefault|stopPropagation={closeActionsMenuFromClick}
                     >
                         {$LL.actionbar.close()}
                     </button>
