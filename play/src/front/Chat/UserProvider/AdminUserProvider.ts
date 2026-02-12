@@ -1,4 +1,4 @@
-import type { Writable } from "svelte/store";
+import type { Readable, Writable } from "svelte/store";
 import { readable, writable } from "svelte/store";
 import type { ChatMember } from "@workadventure/messages";
 import { AvailabilityStatus } from "@workadventure/messages";
@@ -47,7 +47,7 @@ const fetchWokaTexturesById = async (): Promise<Map<string, string>> => {
 export class AdminUserProvider implements UserProviderInterface {
     users: Writable<PartialChatUser[]>;
     private _setUsers: ((value: PartialChatUser[]) => void) | undefined;
-    private wokaPictureStoreCache = new Map<string, ReturnType<typeof readable>>();
+    private wokaPictureStoreCache = new Map<string, Readable<string | undefined>>();
 
     constructor(private connection: RoomConnection) {
         this.users = writable([] as PartialChatUser[], (set) => {
@@ -63,7 +63,7 @@ export class AdminUserProvider implements UserProviderInterface {
         });
     }
 
-    private getPictureStoreForUuid(userUuid: string) {
+    private getPictureStoreForUuid(userUuid: string): Readable<string | undefined> {
         const cached = this.wokaPictureStoreCache.get(userUuid);
         if (cached) {
             return cached;
