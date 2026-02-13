@@ -7,6 +7,7 @@ import type {
     EntityCoordinates,
     EntityDataProperties,
     EntityDimensions,
+    GameMapAreas,
     WAMEntityData,
 } from "@workadventure/map-editor";
 import {
@@ -14,7 +15,6 @@ import {
     CreateAreaCommand,
     CreateEntityCommand,
     EntityPermissions,
-    GameMapAreas,
     PersonalAreaAccessClaimMode,
     PersonalAreaPropertyData,
     UpdateWAMMetadataCommand,
