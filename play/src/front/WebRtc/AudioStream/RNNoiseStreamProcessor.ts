@@ -2,6 +2,23 @@ import { audioContextManager } from "../AudioContextManager";
 
 const RNNOISE_WORKLET_URL = "/rnnoise/rnnoise-worklet.js";
 
+type RnnoiseWorkletMessage = {
+    type?: string;
+    message?: string;
+    mode?: string;
+    vad?: number;
+    rawRms?: number;
+    speaking?: boolean;
+    activeSpeechNow?: boolean;
+    speechHold?: number;
+    mix?: number;
+    gate?: number;
+    makeup?: number;
+    effectiveMakeup?: number;
+    totalGain?: number;
+    impulse?: number;
+};
+
 export class RNNoiseStreamProcessor {
     private readonly audioContext: AudioContext;
     private workletNode: AudioWorkletNode | null = null;
@@ -53,8 +70,8 @@ export class RNNoiseStreamProcessor {
                 }, 5000);
 
                 // Keep handler alive: ready/error resolves init, dbg keeps printing
-                this.workletNode.port.onmessage = (event: MessageEvent) => {
-                    const data = event.data as any;
+                this.workletNode.port.onmessage = (event: MessageEvent<RnnoiseWorkletMessage>) => {
+                    const data = event.data;
                     if (!data || typeof data.type !== "string") return;
 
                     if (data.type === "ready") {
@@ -74,22 +91,8 @@ export class RNNoiseStreamProcessor {
                     }
 
                     if (data.type === "dbg") {
-                        const vad = Number(data.vad ?? 0);
                         const rawRms = Number(data.rawRms ?? 0);
                         const speaking = Boolean(data.speaking);
-                        const hold = Number(data.speechHold ?? 0);
-
-                        const makeup = Number(data.makeup ?? 1);
-                        const effMakeup = Number(data.effectiveMakeup ?? makeup);
-
-                        const gate = Number(data.gate ?? 1);
-                        const mix = Number(data.mix ?? 1);
-                        const totalGain = Number(data.totalGain ?? 1);
-
-                        // (Optional) classify mode in logs
-                        // Keep this threshold aligned with SILENCE_RMS in the worklet
-                        const SILENCE_RMS = 0.006;
-                        const mode = speaking ? "speech" : rawRms < SILENCE_RMS ? "silence" : "noise";
 
                         console.log(
                             `[RNNoise] mode=${data.mode} vad=${Number(data.vad).toFixed(6)} rms=${Number(

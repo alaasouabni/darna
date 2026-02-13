@@ -36,7 +36,6 @@
     import AvailabilityStatusList from "../AvailabilityStatus/AvailabilityStatusList.svelte";
     import type { RequestedStatus } from "../../../Rules/StatusRules/statusRules";
     import { loginSceneVisibleStore } from "../../../Stores/LoginSceneStore";
-    import { LoginScene, LoginSceneName } from "../../../Phaser/Login/LoginScene";
     import { selectCharacterSceneVisibleStore } from "../../../Stores/SelectCharacterStore";
     import { SelectCharacterScene, SelectCharacterSceneName } from "../../../Phaser/Login/SelectCharacterScene";
     import { selectCompanionSceneVisibleStore } from "../../../Stores/SelectCompanionStore";
@@ -47,11 +46,11 @@
     import ActionBarButton from "../ActionBarButton.svelte";
     import { localUserStore } from "../../../Connection/LocalUserStore";
     import { warningMessageStore } from "../../../Stores/ErrorStore";
+    import { currentPlayerNameStore } from "../../../Stores/CurrentPlayerProfileStore";
     import ContextualMenuItems from "./ContextualMenuItems.svelte";
     import HeaderMenuItem from "./HeaderMenuItem.svelte";
     import AdditionalMenuItems from "./AdditionalMenuItems.svelte";
     import { IconBug, IconLogout } from "@wa-icons";
-    import { currentPlayerNameStore } from "../../../Stores/CurrentPlayerProfileStore";
 
     // The ActionBarButton component is displayed differently in the profile menu.
     // We use the context to decide how to render it.
@@ -98,7 +97,7 @@
             if (property && property.ownerId === userUUID) {
                 hasPersonalDesk = true;
                 personalAreaData = area.areaData;
-                personalAreaProperty = property as PersonalAreaPropertyData;
+                personalAreaProperty = property;
                 isPersonalDeskLocked = property.locked ?? false;
 
                 // Check if the current player is inside the personal desk
@@ -299,7 +298,7 @@
                 return;
             }
             const nextLocked = !(personalAreaProperty.locked ?? false);
-            await mapEditorModeManager.setPersonalAreaLock(personalAreaData as AreaData, nextLocked);
+            await mapEditorModeManager.setPersonalAreaLock(personalAreaData, nextLocked);
             isPersonalDeskLocked = nextLocked;
             checkPersonalDesk();
         } catch (error) {

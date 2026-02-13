@@ -1,6 +1,5 @@
 import { derived, get, readable, writable } from "svelte/store";
-import type { PrivateSpaceEvent, SpaceEvent } from "@workadventure/messages";
-import type { CharacterTextureMessage } from "@workadventure/messages";
+import type { CharacterTextureMessage, PrivateSpaceEvent, SpaceEvent } from "@workadventure/messages";
 import { localUserStore } from "../Connection/LocalUserStore";
 import { gameManager } from "../Phaser/Game/GameManager";
 import { availabilityStatusStore } from "../Stores/MediaStore";
@@ -13,7 +12,8 @@ export const localSpaceUser = (name?: string): SpaceUserExtended => {
     const characterTexturesStore = derived(currentPlayerCharacterTexturesStore, (ids): CharacterTextureMessage[] =>
         ids.map((id) => ({ id, url: id.startsWith("http") || id.startsWith("/") ? id : "" }))
     );
-    const initialName = name ?? get(nameStore) ?? get(LL).camera.my.nameTag();
+    const fallbackName = name ?? get(LL).camera.my.nameTag();
+    const initialName = get(nameStore) ?? fallbackName;
     const initialTextures = get(characterTexturesStore);
 
     const spaceUser: SpaceUserExtended = {
@@ -75,11 +75,25 @@ export const localSpaceUser = (name?: string): SpaceUserExtended => {
         },
     };
 
-    nameStore.subscribe((value) => {
-        spaceUser.name = value;
+    let nameOverride: string | undefined;
+    let characterTexturesOverride: CharacterTextureMessage[] | undefined;
+
+    Object.defineProperty(spaceUser, "name", {
+        get: () => nameOverride ?? get(nameStore) ?? fallbackName,
+        set: (value: string) => {
+            nameOverride = value;
+        },
+        enumerable: true,
+        configurable: true,
     });
-    characterTexturesStore.subscribe((value) => {
-        spaceUser.characterTextures = value;
+
+    Object.defineProperty(spaceUser, "characterTextures", {
+        get: () => characterTexturesOverride ?? get(characterTexturesStore),
+        set: (value: CharacterTextureMessage[]) => {
+            characterTexturesOverride = value;
+        },
+        enumerable: true,
+        configurable: true,
     });
 
     return spaceUser;

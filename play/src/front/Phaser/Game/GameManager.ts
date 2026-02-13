@@ -28,14 +28,14 @@ import { MatrixChatConnection } from "../../Chat/Connection/Matrix/MatrixChatCon
 import { VoidChatConnection } from "../../Chat/Connection/VoidChatConnection";
 import { loginTokenErrorStore, isMatrixChatEnabledStore } from "../../Stores/ChatStore";
 import { initializeChatVisibilitySubscription } from "../../Chat/Stores/ChatStore";
-import { urlManager } from "../../Url/UrlManager";
-import { GameScene } from "./GameScene";
 import {
     currentPlayerProfileStore,
     setCurrentPlayerCharacterTextures,
     setCurrentPlayerCompanionTextureId,
     setCurrentPlayerName,
 } from "../../Stores/CurrentPlayerProfileStore";
+import { urlManager } from "../../Url/UrlManager";
+import { GameScene } from "./GameScene";
 /**
  * This class should be responsible for any scene starting/stopping
  */
@@ -53,6 +53,7 @@ export class GameManager {
     private matrixClientWrapper: MatrixClientWrapper | undefined;
     private _chatConnection: ChatConnectionInterface | undefined;
     private chatVisibilitySubscription: Unsubscriber | undefined;
+    private currentPlayerProfileSubscription: Unsubscriber;
 
     constructor() {
         const profile = get(currentPlayerProfileStore);
@@ -60,7 +61,7 @@ export class GameManager {
         this.characterTextureIds = profile.characterTextureIds.length ? profile.characterTextureIds : null;
         this.companionTextureId = profile.companionTextureId;
         this.chatVisibilitySubscription = initializeChatVisibilitySubscription();
-        currentPlayerProfileStore.subscribe((next) => {
+        this.currentPlayerProfileSubscription = currentPlayerProfileStore.subscribe((next) => {
             this.playerName = next.name || null;
             this.characterTextureIds = next.characterTextureIds.length ? next.characterTextureIds : null;
             this.companionTextureId = next.companionTextureId;
@@ -329,6 +330,11 @@ export class GameManager {
      * Currently, this logs out from the Matrix client.
      */
     public async logout(): Promise<void> {
+        // Keep profile store subscription alive across logout in case flow does not hard reload.
+        const hasProfileSubscription = Boolean(this.currentPlayerProfileSubscription);
+        if (!hasProfileSubscription) {
+            console.warn("Current player profile subscription is missing");
+        }
         if (this._chatConnection) {
             try {
                 this._chatConnection.clearListener();

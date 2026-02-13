@@ -1,3 +1,4 @@
+import { get } from "svelte/store";
 import { loginSceneVisibleIframeStore, loginSceneVisibleStore } from "../../Stores/LoginSceneStore";
 import { localUserStore } from "../../Connection/LocalUserStore";
 import { setCurrentPlayerName } from "../../Stores/CurrentPlayerProfileStore";
@@ -7,10 +8,9 @@ import { analyticsClient } from "../../Administration/AnalyticsClient";
 import { isUserNameTooLong, isUserNameValid } from "../../Connection/LocalUserUtils";
 import { NameNotValidError, NameTooLongError } from "../../Exception/NameError";
 import { hasCapability } from "../../Connection/Capabilities";
+import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
 import { ResizableScene } from "./ResizableScene";
 import { SelectCharacterSceneName } from "./SelectCharacterScene";
-import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
-import { get } from "svelte/store";
 
 export const LoginSceneName = "LoginScene";
 

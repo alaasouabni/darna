@@ -47,7 +47,6 @@ import { axiosToPusher, axiosWithRetry } from "./AxiosUtils";
 import { Room } from "./Room";
 import { LocalUser } from "./LocalUser";
 import { localUserStore } from "./LocalUserStore";
-import { setCurrentPlayerName } from "../Stores/CurrentPlayerProfileStore";
 import type { OnConnectInterface, PositionInterface, ViewportInterface } from "./ConnexionModels";
 import { RoomConnection } from "./RoomConnection";
 import { HtmlUtils } from "./../WebRtc/HtmlUtils";

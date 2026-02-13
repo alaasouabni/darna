@@ -111,7 +111,7 @@
         }
 
         analyticsClient.validationName();
-        const didSaveName = await connectionManager.saveName(finalName);
+        await connectionManager.saveName(finalName);
         gameManager.setPlayerName(finalName);
         try {
             const scene = gameManager.getCurrentGameScene();

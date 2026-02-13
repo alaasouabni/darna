@@ -1,7 +1,8 @@
 import Jwt from "jsonwebtoken";
 import Debug from "debug";
-import type {
+import {
     AddSpaceFilterMessage,
+    AvailabilityStatus,
     AdminMessage,
     AdminPusherToBackMessage,
     AdminRoomMessage,
@@ -9,12 +10,16 @@ import type {
     BanPlayerMessage,
     ChatMembersAnswer,
     ChatMembersQuery,
+    CharacterTextureMessage,
+    CompanionTextureMessage,
     EmoteEventMessage,
     ErrorApiData,
     ErrorMessage,
     ErrorScreenMessage,
+    FilterType,
     GetMemberAnswer,
     GetMemberQuery,
+    IceServersAnswer,
     JoinRoomMessage,
     MemberData,
     NonUndefinedFields,
@@ -33,22 +38,16 @@ import type {
     SearchTagsAnswer,
     SearchTagsQuery,
     ServerToAdminClientMessage,
+    ServerToClientMessage,
     SetPlayerDetailsMessage as SetPlayerDetailsMessageType,
-    IceServersAnswer,
+    SetPlayerDetailsMessage,
+    SetPlayerVariableMessage_Scope,
+    noUndefined,
+    PusherToBackMessage as PusherToBackMessageCodec,
     UpdateSpaceUserMessage,
     UserMovesMessage,
     ViewportMessage,
-    CharacterTextureMessage,
-    CompanionTextureMessage,
 } from "@workadventure/messages";
-import {
-    AvailabilityStatus,
-    FilterType,
-    SetPlayerDetailsMessage,
-    SetPlayerVariableMessage_Scope,
-} from "@workadventure/messages";
-import { PusherToBackMessage as PusherToBackMessageCodec } from "@workadventure/messages";
-import { noUndefined, ServerToClientMessage } from "@workadventure/messages";
 import * as Sentry from "@sentry/node";
 import type { AxiosResponse } from "axios";
 import axios, { isAxiosError } from "axios";
@@ -61,6 +60,11 @@ import { ProtobufUtils } from "../models/Websocket/ProtobufUtils";
 import type { GroupDescriptor, UserDescriptor, ZoneEventListener } from "../models/Zone";
 import type { AdminConnection, AdminSocketData } from "../models/Websocket/AdminSocketData";
 import { EMBEDDED_DOMAINS_WHITELIST, GRPC_MAX_MESSAGE_SIZE, SECRET_KEY } from "../enums/EnvironmentVariable";
+import {
+    PROFILE_COMPANION_VARIABLE,
+    PROFILE_NAME_VARIABLE,
+    PROFILE_TEXTURES_VARIABLE,
+} from "../enums/ProfileVariables";
 import type { SpaceInterface } from "../models/Space";
 import { Space } from "../models/Space";
 import { SpaceConnection } from "../models/SpaceConnection";
@@ -71,11 +75,6 @@ import { clientEventsEmitter } from "./ClientEventsEmitter";
 import { gaugeManager } from "./GaugeManager";
 import { apiClientRepository } from "./ApiClientRepository";
 import { adminService } from "./AdminService";
-import {
-    PROFILE_COMPANION_VARIABLE,
-    PROFILE_NAME_VARIABLE,
-    PROFILE_TEXTURES_VARIABLE,
-} from "../enums/ProfileVariables";
 import type { FetchMemberDataByUuidSuccessResponse } from "./AdminApi";
 import type { ShortMapDescription } from "./ShortMapDescription";
 import { matrixProvider } from "./MatrixProvider";

@@ -19,12 +19,12 @@
         });
     } else {
         const gameScene = gameManager.getCurrentGameScene();
-        const companionWokaPictureStore: PictureStore | undefined = gameScene.MapPlayersByKey.getNestedStore(
+        const companionWokaPicture: PictureStore | undefined = gameScene.MapPlayersByKey.getNestedStore(
             userId,
             (item) => item.companion?.pictureStore
         );
-        if (companionWokaPictureStore) {
-            unsubscribe = companionWokaPictureStore.subscribe((source) => {
+        if (companionWokaPicture) {
+            unsubscribe = companionWokaPicture.subscribe((source) => {
                 src = source ?? placeholderSrc;
             });
         }

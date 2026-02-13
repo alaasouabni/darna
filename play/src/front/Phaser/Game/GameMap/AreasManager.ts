@@ -51,7 +51,7 @@ export class AreasManager {
         this.scene.input.on(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
         this.scene.input.on(Phaser.Input.Events.GAME_OUT, this.onGameOut);
         window.addEventListener("pointermove", this.onWindowPointerMove, { passive: true });
-        this.scene.events.once(Phaser.Scenes.Events.SHUTDOWN, this.destroy, this);
+        this.scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.destroy());
     }
 
     public addArea(areaData: AreaData): void {
@@ -164,8 +164,8 @@ export class AreasManager {
         }
 
         const property = area.properties.find(
-            (prop) => prop.type === "personalAreaPropertyData"
-        ) as PersonalAreaPropertyData | undefined;
+            (prop): prop is PersonalAreaPropertyData => prop.type === "personalAreaPropertyData"
+        );
 
         if (!property?.locked) {
             return false;
@@ -178,8 +178,8 @@ export class AreasManager {
 
     private configurePersonalAreaHover(area: Area) {
         const property = area.areaData.properties.find(
-            (prop) => prop.type === "personalAreaPropertyData"
-        ) as PersonalAreaPropertyData | undefined;
+            (prop): prop is PersonalAreaPropertyData => prop.type === "personalAreaPropertyData"
+        );
 
         if (!property?.ownerId) {
             this.clearPersonalAreaHover(area);

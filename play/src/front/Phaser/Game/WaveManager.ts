@@ -6,8 +6,8 @@ import type { RoomConnection } from "../../Connection/RoomConnection";
 import { localUserStore } from "../../Connection/LocalUserStore";
 import { notificationPlayingStore } from "../../Stores/NotificationStore";
 import type { ReceiveEventEvent } from "../../Api/Events/ReceiveEventEvent";
-import type { RemotePlayersRepository } from "./RemotePlayersRepository";
 import { CharacterLayerManager } from "../Entity/CharacterLayerManager";
+import type { RemotePlayersRepository } from "./RemotePlayersRepository";
 
 export const WAVE_EVENT_NAME = "wa.wave.v1";
 
@@ -253,8 +253,13 @@ export class WaveManager {
         const toNotify = pending.slice(0, WAVE_HIDDEN_FLUSH_MAX_TOASTS);
         const overflowCount = pending.length - toNotify.length;
 
-        for (const wave of toNotify) {
-            const icon = wave.icon ?? (await this.resolveWaveIconForUserId(wave.senderUserId));
+        const icons = await Promise.all(
+            toNotify.map((wave) => wave.icon ?? this.resolveWaveIconForUserId(wave.senderUserId))
+        );
+
+        for (let i = 0; i < toNotify.length; i++) {
+            const wave = toNotify[i];
+            const icon = icons[i];
             const message =
                 wave.count > 1 ? `${wave.senderName} waved at you (x${wave.count}).` : `${wave.senderName} waved at you.`;
             notificationPlayingStore.playNotification(message, icon);

@@ -110,6 +110,10 @@ import {
 import { requestedScreenSharingState } from "../Stores/ScreenSharingStore";
 import { selectCompanionSceneVisibleStore } from "../Stores/SelectCompanionStore";
 import { selectCharacterSceneVisibleStore } from "../Stores/SelectCharacterStore";
+import {
+    setCurrentPlayerCharacterTextures,
+    setCurrentPlayerCompanionTextureId,
+} from "../Stores/CurrentPlayerProfileStore";
 import { adminMessagesService } from "./AdminMessagesService";
 import { connectionManager } from "./ConnectionManager";
 import type {
@@ -122,10 +126,6 @@ import type {
     ViewportInterface,
 } from "./ConnexionModels";
 import { localUserStore } from "./LocalUserStore";
-import {
-    setCurrentPlayerCharacterTextures,
-    setCurrentPlayerCompanionTextureId,
-} from "../Stores/CurrentPlayerProfileStore";
 import { ConnectionClosedError } from "./ConnectionClosedError";
 
 // This must be greater than RoomManager's PING_INTERVAL

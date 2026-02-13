@@ -3,10 +3,10 @@ import type { Request, Response } from "express";
 import Debug from "debug";
 import { adminService } from "../services/AdminService";
 import { validatePostQuery } from "../services/QueryValidator";
+import { socketManager } from "../services/SocketManager";
 import type { ResponseWithUserIdentifier } from "../middlewares/Authenticated";
 import { authenticated } from "../middlewares/Authenticated";
 import { BaseHttpController } from "./BaseHttpController";
-import { socketManager } from "../services/SocketManager";
 
 const debug = Debug("pusher:requests");
 

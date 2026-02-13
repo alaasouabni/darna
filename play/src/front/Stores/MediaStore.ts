@@ -15,6 +15,7 @@ import {
     type BackgroundTransformer,
     type BackgroundConfig,
 } from "../WebRtc/BackgroundProcessor/createBackgroundTransformer";
+import { RNNoiseStreamProcessor } from "../WebRtc/AudioStream/RNNoiseStreamProcessor";
 import { LL } from "../../i18n/i18n-svelte";
 import { MediaStreamConstraintsError } from "./Errors/MediaStreamConstraintsError";
 import { BrowserTooOldError } from "./Errors/BrowserTooOldError";
@@ -29,7 +30,6 @@ import { hideHelpCameraSettings } from "./HelpSettingsStore";
 import { isLiveStreamingStore } from "./IsStreamingStore";
 
 import { backgroundConfigStore, backgroundProcessingEnabledStore } from "./BackgroundTransformStore";
-import { RNNoiseStreamProcessor } from "../WebRtc/AudioStream/RNNoiseStreamProcessor";
 
 /**
  * A store that contains the camera state requested by the user (on or off).

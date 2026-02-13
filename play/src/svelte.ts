@@ -44,7 +44,7 @@ async function ensureFreshClient(): Promise<boolean> {
 
 let app: App | undefined;
 
-(async () => {
+void (async () => {
     const reloaded = await ensureFreshClient();
     if (reloaded) {
         return;

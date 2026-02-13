@@ -1,6 +1,8 @@
 <script lang="ts">
     import type { Unsubscriber } from "svelte/store";
     import { onDestroy } from "svelte";
+    import { AvailabilityStatus } from "@workadventure/messages";
+    import type { CharacterTextureMessage } from "@workadventure/messages";
     import { wokaMenuStore, wokaMenuProgressStore } from "../../Stores/WokaMenuStore";
     import ButtonClose from "../Input/ButtonClose.svelte";
     import VisitCard from "../VisitCard/VisitCard.svelte";
@@ -11,9 +13,8 @@
     import { gameManager } from "../../Phaser/Game/GameManager";
     import { ABSOLUTE_PUSHER_URL } from "../../Enum/ComputedConst";
     import { localUserStore } from "../../Connection/LocalUserStore";
+    import { currentPlayerNameStore } from "../../Stores/CurrentPlayerProfileStore";
     import type { WokaData } from "../Woka/WokaTypes";
-    import { AvailabilityStatus } from "@workadventure/messages";
-    import type { CharacterTextureMessage } from "@workadventure/messages";
     import { getColorHexOfStatus, getStatusLabel } from "../../Utils/AvailabilityStatus";
 
     import type { WokaMenuAction, WokaMenuData } from "../../Stores/WokaMenuStore";
@@ -24,12 +25,18 @@
 
     let wokaMenuStoreUnsubscriber: Unsubscriber | null;
     let wokaDataCache: WokaData | undefined;
+    let wokaDataPromise: Promise<WokaData> | undefined;
     let offlineSelectedTextures: Record<string, string> | null = null;
     let offlineWokaData: WokaData | null = null;
+    let offlineWokaRequestId = 0;
     const OFFLINE_COLOR = "#94a3b8";
+    const localUserUuid = localUserStore.getLocalUser()?.uuid;
 
     $: statusToDisplay = wokaMenuData?.availabilityStatus;
     $: isOfflineStatus = statusToDisplay === AvailabilityStatus.UNCHANGED;
+    $: isLocalHoveredUser = !!(wokaMenuData?.userUuid && localUserUuid && wokaMenuData.userUuid === localUserUuid);
+    $: displayedWokaName =
+        isLocalHoveredUser && $currentPlayerNameStore ? $currentPlayerNameStore : (wokaMenuData?.wokaName ?? "");
     $: statusLabel =
         statusToDisplay !== undefined
             ? isOfflineStatus
@@ -57,10 +64,40 @@
         closeActionsMenu();
     }
 
+    function resetOfflineWokaPreview(): void {
+        offlineSelectedTextures = null;
+        offlineWokaData = null;
+    }
+
+    function updateOfflineWokaPreview(menuData: WokaMenuData | undefined): void {
+        const hasOfflineTextures = menuData?.userId === -1 && (menuData?.characterTextures?.length ?? 0) > 0;
+        if (!hasOfflineTextures) {
+            offlineWokaRequestId += 1;
+            resetOfflineWokaPreview();
+            return;
+        }
+
+        const requestId = ++offlineWokaRequestId;
+        const textures = menuData?.characterTextures ?? [];
+        resetOfflineWokaPreview();
+        void getWokaData()
+            .then((data) => {
+                if (requestId !== offlineWokaRequestId) {
+                    return;
+                }
+                offlineWokaData = data;
+                offlineSelectedTextures = mapTexturesToSelected(data, textures);
+            })
+            .catch((err) => {
+                console.warn("Could not load Woka data for hover card", err);
+            });
+    }
+
     let buttonsLayout: "row" | "column" | "wrap" = "row";
 
     wokaMenuStoreUnsubscriber = wokaMenuStore.subscribe((value) => {
         wokaMenuData = value;
+        updateOfflineWokaPreview(value);
         if (wokaMenuData) {
             remotePlayer = gameManager
                 .getCurrentGameScene()
@@ -88,23 +125,35 @@
         }
     });
 
-    async function getWokaData(): Promise<WokaData> {
+    function getWokaData(): Promise<WokaData> {
         if (wokaDataCache !== undefined) {
-            return wokaDataCache;
+            return Promise.resolve(wokaDataCache);
+        }
+        if (wokaDataPromise) {
+            return wokaDataPromise;
         }
         const roomUrl = gameManager.currentStartedRoom.href;
-        const response = await fetch(`${ABSOLUTE_PUSHER_URL}woka/list?roomUrl=${encodeURIComponent(roomUrl)}`, {
+        wokaDataPromise = fetch(`${ABSOLUTE_PUSHER_URL}woka/list?roomUrl=${encodeURIComponent(roomUrl)}`, {
             headers: {
                 Authorization: localUserStore.getAuthToken() || "",
             },
             credentials: "include",
-        });
-        if (!response.ok) {
-            throw new Error("Failed to load Woka data");
-        }
-        const data = (await response.json()) as WokaData;
-        wokaDataCache = data;
-        return data;
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error("Failed to load Woka data");
+                }
+                return response.json() as Promise<WokaData>;
+            })
+            .then((data) => {
+                wokaDataCache = data;
+                return data;
+            })
+            .finally(() => {
+                wokaDataPromise = undefined;
+            });
+
+        return wokaDataPromise;
     }
 
     function mapTexturesToSelected(wokaData: WokaData, textures: CharacterTextureMessage[]): Record<string, string> {
@@ -122,23 +171,8 @@
         return selected;
     }
 
-    $: if (wokaMenuData?.characterTextures && wokaMenuData.userId === -1) {
-        offlineSelectedTextures = null;
-        offlineWokaData = null;
-        getWokaData()
-            .then((data) => {
-                offlineWokaData = data;
-                offlineSelectedTextures = mapTexturesToSelected(data, wokaMenuData?.characterTextures ?? []);
-            })
-            .catch((err) => {
-                console.warn("Could not load Woka data for hover card", err);
-            });
-    } else {
-        offlineSelectedTextures = null;
-        offlineWokaData = null;
-    }
-
     onDestroy(() => {
+        offlineWokaRequestId += 1;
         if (wokaMenuStoreUnsubscriber) {
             wokaMenuStoreUnsubscriber();
         }
@@ -160,7 +194,18 @@
 
                 <div class="flex items-center justify-center p-2">
                         <div class="text-white flex flex-col justify-center items-center font-bold text-xl">
-                        {#if wokaMenuData.userId != undefined && wokaMenuData.userId != -1}
+                        {#if isLocalHoveredUser}
+                            <div
+                                id="woka"
+                                class=" bt-3 overflow-hidden mt-9 border w-fit h-fit pt-3 rounded-lg cursor-not-allowed bg-[rgb(103,185,133)]"
+                            >
+                                <WokaFromUserId
+                                    userId={-1}
+                                    placeholderSrc="/assets/placeholder-woka.png"
+                                    customWidth="4rem"
+                                />
+                            </div>
+                        {:else if wokaMenuData.userId != undefined && wokaMenuData.userId != -1}
                             <div
                                 id="woka"
                                 class=" bt-3 overflow-hidden mt-9 border w-fit h-fit pt-3 rounded-lg cursor-not-allowed bg-[rgb(103,185,133)]"
@@ -187,7 +232,7 @@
                             </div>
                         {/if}
                         <div class="mt-[24px] flex flex-col items-center gap-2">
-                            <h3 class="text-center">{wokaMenuData.wokaName}</h3>
+                            <h3 class="text-center">{displayedWokaName}</h3>
                             {#if statusToDisplay !== undefined}
                                 <div class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white/80">
                                     <span

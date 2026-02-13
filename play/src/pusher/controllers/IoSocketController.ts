@@ -1,12 +1,20 @@
 import { z } from "zod";
-import type { AnswerMessage, CompanionDetail, ErrorApiData, SubMessage, WokaDetail } from "@workadventure/messages";
 import {
+    type AnswerMessage,
+    type CompanionDetail,
+    type ErrorApiData,
+    type SubMessage,
+    type WokaDetail,
     apiVersionHash,
     ClientToServerMessage,
+    isMapDetailsData,
+    isRoomRedirect,
     noUndefined,
     ServerToClientMessage as ServerToClientMessageTsProto,
     ServerToClientMessage,
 } from "@workadventure/messages";
+import { mapFetcher } from "@workadventure/map-editor/src/MapFetcher";
+import { ITiledMap } from "@workadventure/tiled-map-type-guard";
 import { JsonWebTokenError } from "jsonwebtoken";
 import * as Sentry from "@sentry/node";
 import type { TemplatedApp, WebSocket } from "uWebSockets.js";
@@ -24,9 +32,6 @@ import type { AdminSocketData } from "../models/Websocket/AdminSocketData";
 import type { AdminMessageInterface } from "../models/Websocket/Admin/AdminMessages";
 import { isAdminMessageInterface } from "../models/Websocket/Admin/AdminMessages";
 import { adminService } from "../services/AdminService";
-import { mapFetcher } from "@workadventure/map-editor/src/MapFetcher";
-import { ITiledMap } from "@workadventure/tiled-map-type-guard";
-import { isMapDetailsData, isRoomRedirect } from "@workadventure/messages";
 import { openIDClient } from "../services/OpenIDClient";
 import { validateWebsocketQuery } from "../services/QueryValidator";
 import type { SocketData, SpaceName } from "../models/Websocket/SocketData";

@@ -1,6 +1,6 @@
 import { AvailabilityStatus } from "@workadventure/messages";
 import type { Readable } from "svelte/store";
-import { derived, writable } from "svelte/store";
+import { derived, get, writable } from "svelte/store";
 import type { UserProviderInterface } from "../UserProvider/UserProviderInterface";
 import type { AnyKindOfUser, ChatId, ChatUser, PartialAnyKindOfUser, UserUuid } from "../Connection/ChatConnection";
 
@@ -46,7 +46,12 @@ export class UserProviderMerger {
                 const mergedUsers = new Map<ChatId | UserUuid, AnyKindOfUser>();
                 for (const chatUserList of usersByChatId.values()) {
                     const mergedUser = chatUserList.reduce((acc, user) => {
-                        const shouldPreferIncoming = Boolean(user.playUri || user.spaceUserId);
+                        const incomingAvailability = user.availabilityStatus
+                            ? get(user.availabilityStatus)
+                            : AvailabilityStatus.UNCHANGED;
+                        const shouldPreferIncoming =
+                            Boolean(user.playUri || user.spaceUserId) &&
+                            incomingAvailability !== AvailabilityStatus.UNCHANGED;
                         return {
                             chatId: user.chatId || acc.chatId,
                             uuid: user.uuid || acc.uuid,

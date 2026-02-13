@@ -2,10 +2,10 @@ import type { Subscription } from "rxjs";
 import Debug from "debug";
 import * as Sentry from "@sentry/svelte";
 import { AbortError } from "@workadventure/shared-utils/src/Abort/AbortError";
+import { get } from "svelte/store";
 import type { RoomConnection } from "../Connection/RoomConnection";
 import type { ProximityChatRoom } from "../Chat/Connection/Proximity/ProximityChatRoom";
 import { personalAreaSpaceNameStore } from "../Stores/GameStore";
-import { get } from "svelte/store";
 
 const debug = Debug("ProximitySpaceManager");
 

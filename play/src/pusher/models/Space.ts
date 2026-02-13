@@ -5,10 +5,15 @@ import type {
     SetPlayerDetailsMessage,
     CharacterTextureMessage,
 } from "@workadventure/messages";
-import { SpaceUser, AvailabilityStatus } from "@workadventure/messages";
+import { type SpaceUser, AvailabilityStatus } from "@workadventure/messages";
 import Debug from "debug";
 import { merge } from "lodash";
 import { applyFieldMask } from "protobuf-fieldmask";
+import {
+    PROFILE_NAME_VARIABLE,
+    PROFILE_TEXTURES_VARIABLE,
+    PROFILE_COMPANION_VARIABLE,
+} from "../enums/ProfileVariables";
 import type { Socket } from "../services/SocketManager";
 import type { BackSpaceConnection } from "./Websocket/SocketData";
 import type { EventProcessor } from "./EventProcessor";
@@ -18,11 +23,6 @@ import type { SpaceToFrontDispatcherInterface } from "./SpaceToFrontDispatcher";
 import { SpaceToFrontDispatcher } from "./SpaceToFrontDispatcher";
 import { Query } from "./SpaceQuery";
 import type { SpaceConnectionInterface } from "./SpaceConnection";
-import {
-    PROFILE_NAME_VARIABLE,
-    PROFILE_TEXTURES_VARIABLE,
-    PROFILE_COMPANION_VARIABLE,
-} from "../enums/ProfileVariables";
 
 export type SpaceUserExtended = {
     lowercaseName: string;

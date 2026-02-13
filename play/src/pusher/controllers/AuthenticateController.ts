@@ -212,9 +212,10 @@ export class AuthenticateController extends BaseHttpController {
                     if (!refreshToken) {
                         throw new JsonWebTokenError("Invalid token");
                     }
+                    const currentRefreshToken = refreshToken;
                     let refreshed;
                     try {
-                        refreshed = await openIDClient.refreshAccessToken(refreshToken);
+                        refreshed = await openIDClient.refreshAccessToken(currentRefreshToken);
                     } catch (err) {
                         if (isInvalidGrant(err)) {
                             throw new JsonWebTokenError("Invalid token");
@@ -225,7 +226,7 @@ export class AuthenticateController extends BaseHttpController {
                         throw new JsonWebTokenError("Invalid token");
                     }
                     accessToken = refreshed.access_token;
-                    refreshToken = refreshed.refresh_token ?? refreshToken;
+                    refreshToken = refreshed.refresh_token ?? currentRefreshToken;
                     refreshedAuthToken = jwtTokenManager.createAuthToken(
                         authTokenData.identifier,
                         accessToken,

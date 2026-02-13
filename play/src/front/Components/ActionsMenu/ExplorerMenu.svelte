@@ -40,8 +40,9 @@
 
         for (const area of personalAreas) {
             const property = area.areaData.properties.find(
-                (areaProperty) => areaProperty.type === "personalAreaPropertyData"
-            ) as PersonalAreaPropertyData | undefined;
+                (areaProperty): areaProperty is PersonalAreaPropertyData =>
+                    areaProperty.type === "personalAreaPropertyData"
+            );
 
             if (property && property.ownerId === userUUID) {
                 const currentPlayer = gameScene.CurrentPlayer;

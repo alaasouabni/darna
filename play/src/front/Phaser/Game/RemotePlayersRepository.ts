@@ -11,6 +11,7 @@ import {
     PROFILE_TEXTURES_VARIABLE,
 } from "../../Connection/ProfileVariables";
 import { debugAddPlayer, debugRemovePlayer } from "../../Utils/Debuggers";
+import type { SetSharedPlayerVariableEvent } from "../../Api/Events/SetSharedPlayerVariableEvent";
 
 export interface RemotePlayerData extends MessageUserJoined {
     showVoiceIndicator: boolean;
@@ -45,6 +46,11 @@ export class RemotePlayersRepository {
 
     private remotePlayersData = new Map<number, RemotePlayerData>();
     private getPlayerDeferred = new Map<number, Deferred<RemotePlayerData>>();
+    private readonly dispatchSharedPlayerVariable: (event: SetSharedPlayerVariableEvent) => void;
+
+    constructor(dispatchSharedPlayerVariable?: (event: SetSharedPlayerVariableEvent) => void) {
+        this.dispatchSharedPlayerVariable = dispatchSharedPlayerVariable ?? ((event) => iframeListener.setSharedPlayerVariable(event));
+    }
 
     public addPlayer(userJoinedMessage: MessageUserJoined): void {
         debugAddPlayer("Player will be added to repo", userJoinedMessage.userId);
@@ -188,7 +194,7 @@ export class RemotePlayersRepository {
             // TODO: is it the responsibility of RemotePlayersRepository to send messages to the iframe?
             // TODO: is it the responsibility of RemotePlayersRepository to send messages to the iframe?
             // If yes, we might as well move ALL iframe listeners related to remote players here!
-            iframeListener.setSharedPlayerVariable({
+            this.dispatchSharedPlayerVariable({
                 key: details.setVariable.name,
                 value: value,
                 playerId: player.userId,

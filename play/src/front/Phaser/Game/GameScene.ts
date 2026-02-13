@@ -190,6 +190,7 @@ import { selectedRoomStore } from "../../Chat/Stores/SelectRoomStore";
 import { raceTimeout } from "../../Utils/PromiseUtils";
 import { ConversationBubble } from "../Entity/ConversationBubble";
 import { DarkenOutsideAreaEffect } from "../Components/DarkenOutsideArea/DarkenOutsideAreaEffect";
+import type { SetPlayerVariableEvent } from "../../Api/Events/SetPlayerVariableEvent";
 import { GameMapFrontWrapper } from "./GameMap/GameMapFrontWrapper";
 import { gameManager } from "./GameManager";
 import { EmoteManager } from "./EmoteManager";
@@ -213,7 +214,6 @@ import { RemotePlayersRepository } from "./RemotePlayersRepository";
 import { IframeEventDispatcher } from "./IframeEventDispatcher";
 import type { ActivatableInterface } from "./ActivatableInterface";
 import { PlayerVariablesManager } from "./PlayerVariablesManager";
-import type { SetPlayerVariableEvent } from "../../Api/Events/SetPlayerVariableEvent";
 import { SayManager } from "./Say/SayManager";
 import { EntitiesCollectionsManager } from "./MapEditor/EntitiesCollectionsManager";
 import { DEPTH_BUBBLE_CHAT_SPRITE, DEPTH_WHITE_MASK } from "./DepthIndexes";
@@ -252,6 +252,7 @@ interface GroupUsersUpdatedEventInterface {
 }
 
 const WORLD_SPACE_NAME = "allWorldUser";
+const PERSONAL_AREA_OWNER_CACHE_TTL_MS = 15_000;
 const debug = Debug("GameScene");
 
 export class GameScene extends DirtyScene {
@@ -350,6 +351,7 @@ export class GameScene extends DirtyScene {
             characterTextures?: CharacterTextureMessage[];
             userId?: number;
             chatId?: string;
+            updatedAt: number;
         }
     >();
 
@@ -369,7 +371,12 @@ export class GameScene extends DirtyScene {
     private cleanupDone = false;
     private playersEventDispatcher = new IframeEventDispatcher();
     private playersMovementEventDispatcher = new IframeEventDispatcher();
-    private remotePlayersRepository = new RemotePlayersRepository();
+    private remotePlayersRepository = new RemotePlayersRepository((event) => {
+        this.playersEventDispatcher.postMessage({
+            type: "setSharedPlayerVariable",
+            data: event,
+        });
+    });
     private throttledSendViewportToServer!: throttle<() => void>;
     private throttledSaveLastPosition!: throttle<(position: PositionInterface) => void>;
     private resizeTransactionRaf1: number | undefined;
@@ -1719,6 +1726,21 @@ export class GameScene extends DirtyScene {
         characterTextures?: CharacterTextureMessage[];
         availabilityStatus?: AvailabilityStatus;
     } | null> {
+        const localUserUuid = localUserStore.getLocalUser()?.uuid;
+        if (localUserUuid === ownerId) {
+            const localName = gameManager.getPlayerName() ?? localUserStore.getName() ?? "Unknown";
+            const localCharacterTextureIds = gameManager.getCharacterTextureIds() ?? localUserStore.getCharacterTextures() ?? [];
+            const localCharacterTextures = localCharacterTextureIds.map((id) => ({ id, url: "" }));
+            return {
+                name: localName,
+                userId: -1,
+                userUuid: ownerId,
+                visitCardUrl: gameManager.myVisitCardUrl ?? undefined,
+                characterTextures: localCharacterTextures.length ? localCharacterTextures : undefined,
+                availabilityStatus: get(availabilityStatusStore),
+            };
+        }
+
         const remote = this.getRemotePlayersRepository().getPlayerByUuid(ownerId);
         if (remote) {
             const entry = {
@@ -1728,6 +1750,7 @@ export class GameScene extends DirtyScene {
                 visitCardUrl: remote.visitCardUrl ?? undefined,
                 characterTextures: remote.characterTextures as unknown as CharacterTextureMessage[],
                 availabilityStatus: remote.availabilityStatus,
+                updatedAt: Date.now(),
             };
             this.personalAreaOwnerCache.set(ownerId, entry);
             return entry;
@@ -1735,7 +1758,8 @@ export class GameScene extends DirtyScene {
 
         const cached = this.personalAreaOwnerCache.get(ownerId);
         if (cached) {
-            if (cached.chatId || !this.connection || !ADMIN_URL) {
+            const isFresh = Date.now() - cached.updatedAt < PERSONAL_AREA_OWNER_CACHE_TTL_MS;
+            if (isFresh && (cached.chatId || !this.connection || !ADMIN_URL)) {
                 const availabilityStatus = await this.getAvailabilityStatusFromChat(ownerId, cached.chatId);
                 return {
                     name: cached.name,
@@ -1765,6 +1789,7 @@ export class GameScene extends DirtyScene {
                         characterTextures: characterTextures.length ? characterTextures : undefined,
                         availabilityStatus,
                         chatId: member.chatID ?? undefined,
+                        updatedAt: Date.now(),
                     };
                     this.personalAreaOwnerCache.set(ownerId, entry);
                     return entry;

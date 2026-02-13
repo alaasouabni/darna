@@ -6,10 +6,10 @@
     import { SelectCompanionSceneName } from "../../Phaser/Login/SelectCompanionScene";
     import { collectionsSizeStore, selectedCollection } from "../../Stores/SelectCharacterSceneStore";
     import { analyticsClient } from "../../Administration/AnalyticsClient";
-    import { IconChevronLeft, IconChevronRight } from "@wa-icons";
     import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
     import { selectCompanionPreviewFrameStore, selectCompanionReadyStore } from "../../Stores/SelectCompanionStore";
     import XIcon from "../Icons/XIcon.svelte";
+    import { IconChevronLeft, IconChevronRight } from "@wa-icons";
 
     export let game: Game;
 

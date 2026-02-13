@@ -12,10 +12,10 @@
     import { toTags } from "../../Input/InputTagOption";
     import { gameManager } from "../../../Phaser/Game/GameManager";
     import { mapEditorSelectedAreaPreviewStore } from "../../../Stores/MapEditorStore";
+    import { localUserStore } from "../../../Connection/LocalUserStore";
     import ActionPopupOnPersonalAreaWithEntities from "../ActionPopupOnPersonalAreaWithEntities.svelte";
     import ButtonClose from "../../Input/ButtonClose.svelte";
     import PropertyEditorBase from "./PropertyEditorBase.svelte";
-    import { localUserStore } from "../../../Connection/LocalUserStore";
     import { IconInfoCircle, IconUser, IconDesk } from "@wa-icons";
 
     export let personalAreaPropertyData: PersonalAreaPropertyData;

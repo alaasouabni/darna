@@ -39,6 +39,7 @@
     import InputSwitch from "../Input/InputSwitch.svelte";
     import RangeSlider from "../Input/RangeSlider.svelte";
     import Select from "../Input/Select.svelte";
+    import { isAndroid, isIOS } from "../../WebRtc/DeviceUtils";
     import {
         IconAntennaBarsLow,
         IconAntennaBarsMid,
@@ -50,7 +51,6 @@
         IconCameraUp,
         IconMicrophone,
     } from "@wa-icons";
-    import { isAndroid, isIOS } from "../../WebRtc/DeviceUtils";
 
     let fullscreen: boolean = localUserStore.getFullscreen();
     let notification: boolean = localUserStore.getNotification();
@@ -231,6 +231,7 @@
 
     async function startMicTest() {
         if (micTestActive) return;
+        micTestActive = true;
         micTestPreviousMicState = localUserStore.getRequestedMicrophoneState();
         micTestPreviousVolume = get(volumeProximityDiscussionStore);
 
@@ -266,13 +267,12 @@
             micTestLoopbackGain = micTestLoopbackContext.createGain();
             micTestLoopbackGain.gain.value = 1;
             micTestLoopbackSource.connect(micTestLoopbackGain).connect(micTestLoopbackContext.destination);
-            micTestActive = true;
             micTestInterval = window.setInterval(() => {
                 if (micTestMeter) {
                     micTestVolume = micTestMeter.getVolume();
                 }
             }, 150);
-        } catch (e) {
+        } catch {
             warningMessageStore.addWarningMessage("Unable to access your microphone for the test.", { closable: true });
             stopMicTest();
         }

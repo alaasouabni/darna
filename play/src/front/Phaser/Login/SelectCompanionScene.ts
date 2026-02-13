@@ -1,4 +1,5 @@
 import type { CompanionTextureCollection } from "@workadventure/messages";
+import { get, type Unsubscriber } from "svelte/store";
 import { Loader } from "../Components/Loader";
 import { gameManager } from "../Game/GameManager";
 import { localUserStore } from "../../Connection/LocalUserStore";
@@ -11,7 +12,6 @@ import {
     selectCompanionSceneVisibleStore,
 } from "../../Stores/SelectCompanionStore";
 import { inGameProfileEditStore } from "../../Stores/ProfileEditStore";
-import { get, type Unsubscriber } from "svelte/store";
 import { waScaleManager } from "../Services/WaScaleManager";
 import { isMediaBreakpointUp } from "../../Utils/BreakpointsUtils";
 import { SuperLoaderPlugin } from "../Services/SuperLoaderPlugin";
@@ -24,10 +24,10 @@ import type { CompanionTextureDescriptionInterface } from "../Companion/Companio
 import { CompanionTextures } from "../Companion/CompanionTextures";
 import { collectionsSizeStore, selectedCollection } from "../../Stores/SelectCharacterSceneStore";
 import { connectionManager } from "../../Connection/ConnectionManager";
-import { EnableCameraSceneName } from "./EnableCameraScene";
-import { ResizableScene } from "./ResizableScene";
 import { loaderVisibleStore } from "../../Stores/LoaderStore";
 import { PROFILE_COMPANION_VARIABLE } from "../../Connection/ProfileVariables";
+import { EnableCameraSceneName } from "./EnableCameraScene";
+import { ResizableScene } from "./ResizableScene";
 
 // Event listeners are valid for the lifetime of the Phaser scene and will be garbage collected when the object is destroyed
 /* eslint-disable listeners/no-missing-remove-event-listener, listeners/no-inline-function-event-listener */
@@ -162,9 +162,11 @@ export class SelectCompanionScene extends ResizableScene {
         gameManager.setCompanionTextureId(null);
 
         this.tryInitializeCompanions();
-        this.texturesReadyPromise?.then(() => {
-            this.tryInitializeCompanions();
-        });
+        void this.texturesReadyPromise
+            ?.then(() => {
+                this.tryInitializeCompanions();
+            })
+            .catch(console.error);
         this.initRetryEvent?.remove(false);
         this.initRetryEvent = this.time.addEvent({
             delay: 100,
@@ -404,7 +406,7 @@ export class SelectCompanionScene extends ResizableScene {
         }
         try {
             this.debugEnabled = localStorage.getItem("debugCompanion") === "1";
-        } catch (e) {
+        } catch {
             this.debugEnabled = false;
         }
         return this.debugEnabled;

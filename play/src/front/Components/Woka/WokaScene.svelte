@@ -11,34 +11,47 @@
     import { lazyLoadPlayerCharacterTextures } from "../../Phaser/Entity/PlayerTexturesLoadingManager";
     import { ABSOLUTE_PUSHER_URL } from "../../Enum/ComputedConst";
     import { localUserStore } from "../../Connection/LocalUserStore";
-    import type { WokaData } from "./WokaTypes";
     import type { WokaTextureDescriptionInterface } from "../../Phaser/Entity/PlayerTextures";
     import { PROFILE_TEXTURES_VARIABLE } from "../../Connection/ProfileVariables";
     import XIcon from "../Icons/XIcon.svelte";
+    import type { WokaData } from "./WokaTypes";
     import WokaSelectScene from "./WokaSelectScene.svelte";
     import WokaCustomizeScene from "./WokaCustomizeScene.svelte";
 
     let buildOwnWoka = false;
     let error: string | null = null;
     let wokaDataCache: WokaData | undefined;
+    let wokaDataPromise: Promise<WokaData> | undefined;
 
-    async function getWokaData(): Promise<WokaData> {
+    function getWokaData(): Promise<WokaData> {
         if (wokaDataCache !== undefined) {
-            return wokaDataCache;
+            return Promise.resolve(wokaDataCache);
+        }
+        if (wokaDataPromise) {
+            return wokaDataPromise;
         }
         const roomUrl = gameManager.currentStartedRoom.href;
-        const response = await fetch(`${ABSOLUTE_PUSHER_URL}woka/list?roomUrl=${encodeURIComponent(roomUrl)}`, {
+        wokaDataPromise = fetch(`${ABSOLUTE_PUSHER_URL}woka/list?roomUrl=${encodeURIComponent(roomUrl)}`, {
             headers: {
                 Authorization: localUserStore.getAuthToken() || "",
             },
             credentials: "include",
-        });
-        if (!response.ok) {
-            throw new Error("Failed to load Woka data");
-        }
-        const data = (await response.json()) as WokaData;
-        wokaDataCache = data;
-        return data;
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error("Failed to load Woka data");
+                }
+                return response.json() as Promise<WokaData>;
+            })
+            .then((data) => {
+                wokaDataCache = data;
+                return data;
+            })
+            .finally(() => {
+                wokaDataPromise = undefined;
+            });
+
+        return wokaDataPromise;
     }
 
     function mapTextureIdsToDescriptors(wokaData: WokaData, texturesId: string[]): WokaTextureDescriptionInterface[] {
