@@ -59,7 +59,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
         public readonly activatedInviteUser?: boolean,
         public readonly applications?: ApplicationMessage[],
         public chatID?: string,
-        private sayMessage?: SayMessage,
+        private sayMessage?: SayMessage
     ) {
         this.listenedZones = new Set<Zone>();
 
@@ -89,7 +89,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
         activatedInviteUser?: boolean,
         applications?: ApplicationMessage[],
         chatID?: string,
-        sayMessage?: SayMessage,
+        sayMessage?: SayMessage
     ): Promise<User> {
         const playersVariablesRepository = await getPlayersVariablesRepository();
         const variables = new PlayerVariables(uuid, roomUrl, roomGroup, playersVariablesRepository, isLogged);
@@ -117,7 +117,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
             activatedInviteUser,
             applications,
             chatID,
-            sayMessage,
+            sayMessage
         );
     }
 
@@ -256,7 +256,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
                         setVariable.value,
                         setVariable.public,
                         setVariable.ttl,
-                        setVariable.persist,
+                        setVariable.persist
                     )
                     .catch((e) => {
                         console.error("An error occurred while saving world variable: ", e);
@@ -271,7 +271,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
                         setVariable.value,
                         setVariable.public,
                         setVariable.ttl,
-                        setVariable.persist,
+                        setVariable.persist
                     )
                     .catch((e) => {
                         console.error("An error occurred while saving room variable: ", e);
@@ -317,7 +317,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
 
     private updateDataUserSameUUID(
         setVariable: SetPlayerVariableMessage,
-        details: SetPlayerDetailsMessage | undefined,
+        details: SetPlayerDetailsMessage | undefined
     ) {
         // Very special case: if we are updating a player variable AND if if the variable is persisted, we must also
         // update the variable of all other users with the same UUID!
@@ -333,7 +333,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
                         setVariable.public,
                         setVariable.ttl,
                         // We don't need to persist this for every player as this will write in the same place in DB.
-                        false,
+                        false
                     )
                     .catch((e) => {
                         console.error("An error occurred while saving room variable for a user with same UUID: ", e);
@@ -378,7 +378,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
                 {
                     message: chunk,
                 },
-                cb,
+                cb
             );
         }
 
@@ -389,7 +389,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
                 {
                     message: chunk,
                 },
-                cb,
+                cb
             );
 
             this.pendingMessages.forEach((message) => {
@@ -397,7 +397,7 @@ export class User implements Movable, CustomJsonReplacerInterface {
                     {
                         message,
                     },
-                    cb,
+                    cb
                 );
             });
 
