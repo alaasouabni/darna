@@ -208,11 +208,13 @@ export class AuthenticateController extends BaseHttpController {
                     );
                 };
 
-                const refreshAccessToken = async () => {
-                    if (!refreshToken) {
-                        throw new JsonWebTokenError("Invalid token");
-                    }
-                    const currentRefreshToken = refreshToken;
+                const refreshAccessToken = async (
+                    currentRefreshToken: string
+                ): Promise<{
+                    nextAccessToken: string;
+                    nextRefreshToken: string;
+                    nextAuthToken: string;
+                }> => {
                     let refreshed;
                     try {
                         refreshed = await openIDClient.refreshAccessToken(currentRefreshToken);
@@ -225,17 +227,22 @@ export class AuthenticateController extends BaseHttpController {
                     if (!refreshed.access_token) {
                         throw new JsonWebTokenError("Invalid token");
                     }
-                    accessToken = refreshed.access_token;
-                    refreshToken = refreshed.refresh_token ?? currentRefreshToken;
-                    refreshedAuthToken = jwtTokenManager.createAuthToken(
+                    const nextAccessToken = refreshed.access_token;
+                    const nextRefreshToken = refreshed.refresh_token ?? currentRefreshToken;
+                    const nextAuthToken = jwtTokenManager.createAuthToken(
                         authTokenData.identifier,
-                        accessToken,
+                        nextAccessToken,
                         authTokenData.username,
                         authTokenData.locale,
                         authTokenData.tags,
                         authTokenData.matrixUserId,
-                        refreshToken
+                        nextRefreshToken
                     );
+                    return {
+                        nextAccessToken,
+                        nextRefreshToken,
+                        nextAuthToken,
+                    };
                 };
 
                 //Get user data from Admin Back Office
@@ -255,7 +262,10 @@ export class AuthenticateController extends BaseHttpController {
                     );
                 } catch (err) {
                     if (err instanceof JsonWebTokenError && refreshToken) {
-                        await refreshAccessToken();
+                        const refreshedTokens = await refreshAccessToken(refreshToken);
+                        accessToken = refreshedTokens.nextAccessToken;
+                        refreshToken = refreshedTokens.nextRefreshToken;
+                        refreshedAuthToken = refreshedTokens.nextAuthToken;
                         resUserData = await adminService.fetchMemberDataByUuid(
                             authTokenData.identifier,
                             accessToken,
@@ -276,7 +286,6 @@ export class AuthenticateController extends BaseHttpController {
                     res.json(resUserData);
                     return;
                 }
-
 
                 const adminUsername =
                     typeof resUserData.username === "string" ? resUserData.username.trim() : undefined;
@@ -316,7 +325,10 @@ export class AuthenticateController extends BaseHttpController {
                         resCheckTokenAuth = await openIDClient.checkTokenAuth(accessToken);
                     } catch (err) {
                         if (refreshToken) {
-                            await refreshAccessToken();
+                            const refreshedTokens = await refreshAccessToken(refreshToken);
+                            accessToken = refreshedTokens.nextAccessToken;
+                            refreshToken = refreshedTokens.nextRefreshToken;
+                            refreshedAuthToken = refreshedTokens.nextAuthToken;
                             resCheckTokenAuth = await openIDClient.checkTokenAuth(accessToken);
                         } else {
                             throw err;

@@ -1,8 +1,6 @@
 import type { Readable, Writable } from "svelte/store";
 import { readable, writable } from "svelte/store";
-import type { ChatMember } from "@workadventure/messages";
-import type { CharacterTextureMessage } from "@workadventure/messages";
-import { AvailabilityStatus } from "@workadventure/messages";
+import { AvailabilityStatus, type ChatMember, type CharacterTextureMessage } from "@workadventure/messages";
 import type { PartialChatUser } from "../Connection/ChatConnection";
 import { RoomConnection } from "../../Connection/RoomConnection";
 import { CharacterLayerManager } from "../../Phaser/Entity/CharacterLayerManager";
@@ -153,10 +151,7 @@ export class AdminUserProvider implements UserProviderInterface {
                                 ) {
                                     return {
                                         id: value.id,
-                                        url:
-                                            "url" in value && typeof value.url === "string"
-                                                ? value.url
-                                                : "",
+                                        url: "url" in value && typeof value.url === "string" ? value.url : "",
                                     };
                                 }
                                 return undefined;
@@ -216,8 +211,7 @@ export class AdminUserProvider implements UserProviderInterface {
                 }
                 const liveProfile = this.liveProfileByUuid.get(member.uuid);
                 const hasFreshLiveName =
-                    liveProfile?.name &&
-                    Date.now() - liveProfile.updatedAt < ADMIN_LIVE_PROFILE_FRESHNESS_MS;
+                    liveProfile?.name && Date.now() - liveProfile.updatedAt < ADMIN_LIVE_PROFILE_FRESHNESS_MS;
                 if (hasFreshLiveName) {
                     return {
                         ...member,
@@ -273,16 +267,19 @@ export class AdminUserProvider implements UserProviderInterface {
                     !!liveProfile.characterTextures &&
                     liveProfile.characterTextures.length > 0 &&
                     Date.now() - liveProfile.updatedAt < ADMIN_LIVE_PROFILE_FRESHNESS_MS;
-                const ids = hasFreshLiveTextures ? liveProfile?.characterTextures?.map((texture) => texture.id) ?? [] : [];
+                const ids = hasFreshLiveTextures
+                    ? liveProfile?.characterTextures?.map((texture) => texture.id) ?? []
+                    : [];
                 let texturesFromLiveProfile: CharacterTextureMessage[] = [];
                 if (ids.length > 0) {
                     const texturesById = await fetchWokaTexturesById();
-                    texturesFromLiveProfile = liveProfile?.characterTextures
-                        ?.map((texture) => ({
-                            id: texture.id,
-                            url: texture.url || texturesById.get(texture.id) || "",
-                        }))
-                        .filter((texture) => texture.url.length > 0) ?? [];
+                    texturesFromLiveProfile =
+                        liveProfile?.characterTextures
+                            ?.map((texture) => ({
+                                id: texture.id,
+                                url: texture.url || texturesById.get(texture.id) || "",
+                            }))
+                            .filter((texture) => texture.url.length > 0) ?? [];
                 }
                 if (texturesFromLiveProfile.length > 0) {
                     const wokaBase64 = await CharacterLayerManager.wokaBase64(texturesFromLiveProfile);

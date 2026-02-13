@@ -1729,7 +1729,8 @@ export class GameScene extends DirtyScene {
         const localUserUuid = localUserStore.getLocalUser()?.uuid;
         if (localUserUuid === ownerId) {
             const localName = gameManager.getPlayerName() ?? localUserStore.getName() ?? "Unknown";
-            const localCharacterTextureIds = gameManager.getCharacterTextureIds() ?? localUserStore.getCharacterTextures() ?? [];
+            const localCharacterTextureIds =
+                gameManager.getCharacterTextureIds() ?? localUserStore.getCharacterTextures() ?? [];
             const localCharacterTextures = localCharacterTextureIds.map((id) => ({ id, url: "" }));
             return {
                 name: localName,

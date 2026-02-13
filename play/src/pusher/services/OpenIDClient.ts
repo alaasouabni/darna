@@ -178,9 +178,7 @@ class OpenIDClient {
         });
     }
 
-    public refreshAccessToken(
-        refreshToken: string
-    ): Promise<{
+    public refreshAccessToken(refreshToken: string): Promise<{
         access_token: string;
         refresh_token: string | undefined;
     }> {

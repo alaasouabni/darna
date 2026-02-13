@@ -5,4 +5,3 @@ import { writable } from "svelte/store";
  * We should NOT leave the room or switch to the camera/enable flow.
  */
 export const inGameProfileEditStore = writable<boolean>(false);
-

@@ -171,7 +171,7 @@ export class UserController extends BaseHttpController {
                     try {
                         const profileData = await adminService.fetchMemberDataByUuid(
                             res.userIdentifier,
-                                res.accessToken,
+                            res.accessToken,
                             body.roomUrl,
                             req.ip ?? "",
                             body.textures,
@@ -237,21 +237,21 @@ export class UserController extends BaseHttpController {
             [authenticated],
             async (req: Request, res: ResponseWithUserIdentifier) => {
                 debug(`UserController => [${req.method}] ${req.originalUrl} — IP: ${req.ip} — Time: ${Date.now()}`);
-            const body = validatePostQuery(
-                req,
-                res,
-                z.object({
-                    texture: z.string().nullable(),
-                    textureDescriptor: z
-                        .object({
-                            id: z.string(),
-                            url: z.string(),
-                        })
-                        .nullable()
-                        .optional(),
-                    roomUrl: z.string(),
-                })
-            );
+                const body = validatePostQuery(
+                    req,
+                    res,
+                    z.object({
+                        texture: z.string().nullable(),
+                        textureDescriptor: z
+                            .object({
+                                id: z.string(),
+                                url: z.string(),
+                            })
+                            .nullable()
+                            .optional(),
+                        roomUrl: z.string(),
+                    })
+                );
 
                 if (body === undefined) {
                     return;
@@ -262,19 +262,19 @@ export class UserController extends BaseHttpController {
                     return;
                 }
 
-            // Not logged? Nothing to save!
-            if (res.isLogged) {
-                await adminService.saveCompanionTexture(res.userIdentifier, body.texture, body.roomUrl);
-                if (body.textureDescriptor !== undefined) {
-                    await socketManager.updateUserProfileCompanion(
-                        res.userIdentifier,
-                        body.textureDescriptor ?? null
-                    );
-                }
-                if (res.accessToken) {
-                    try {
-                        const profileData = await adminService.fetchMemberDataByUuid(
+                // Not logged? Nothing to save!
+                if (res.isLogged) {
+                    await adminService.saveCompanionTexture(res.userIdentifier, body.texture, body.roomUrl);
+                    if (body.textureDescriptor !== undefined) {
+                        await socketManager.updateUserProfileCompanion(
                             res.userIdentifier,
+                            body.textureDescriptor ?? null
+                        );
+                    }
+                    if (res.accessToken) {
+                        try {
+                            const profileData = await adminService.fetchMemberDataByUuid(
+                                res.userIdentifier,
                                 res.accessToken,
                                 body.roomUrl,
                                 req.ip ?? "",

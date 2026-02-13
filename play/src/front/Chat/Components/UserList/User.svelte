@@ -93,7 +93,11 @@
 
     function waveUser() {
         if (!waveTargetUser) return;
-        currentScene.sendWaveToUser(waveTargetUser.userId, waveTargetUser.userUuid, waveTargetUser.name ?? username ?? "User");
+        currentScene.sendWaveToUser(
+            waveTargetUser.userId,
+            waveTargetUser.userUuid,
+            waveTargetUser.name ?? username ?? "User"
+        );
     }
 </script>
 

@@ -443,10 +443,7 @@ availabilityStatusStore.subscribe((newStatus: AvailabilityStatus) => {
         console.error("Error while changing status", e);
         Sentry.captureException(e);
     }
-    if (
-        newStatus === AvailabilityStatus.DO_NOT_DISTURB ||
-        newStatus === AvailabilityStatus.BACK_IN_A_MOMENT
-    ) {
+    if (newStatus === AvailabilityStatus.DO_NOT_DISTURB || newStatus === AvailabilityStatus.BACK_IN_A_MOMENT) {
         showDndModeModal(newStatus);
     } else {
         hideDndModeModal();

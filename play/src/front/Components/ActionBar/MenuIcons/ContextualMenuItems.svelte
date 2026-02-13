@@ -34,8 +34,7 @@
     <AppsMenuItem />
 {/if}
 
-{#if (($bottomActionBarVisibilityStore && !$inLivekitStore) || $followStateStore !== "off") &&
-    $personalAreaSpaceNameStore === null}
+{#if (($bottomActionBarVisibilityStore && !$inLivekitStore) || $followStateStore !== "off") && $personalAreaSpaceNameStore === null}
     <!-- <ChangeLayoutMenuItem /> -->
 
     <FollowMenuItem />

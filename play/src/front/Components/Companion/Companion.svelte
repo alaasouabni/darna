@@ -23,11 +23,9 @@
             userId,
             (item) => item.companion?.pictureStore
         );
-        if (companionWokaPicture) {
-            unsubscribe = companionWokaPicture.subscribe((source) => {
-                src = source ?? placeholderSrc;
-            });
-        }
+        unsubscribe = companionWokaPicture?.subscribe((source) => {
+            src = source ?? placeholderSrc;
+        });
     }
 
     onDestroy(() => {

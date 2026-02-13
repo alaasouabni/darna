@@ -450,11 +450,9 @@
                     </ActionBarButton>
                     {#if isInsidePersonalDesk}
                         <ActionBarButton
-                            label={
-                                isPersonalDeskLocked
-                                    ? $LL.actionbar.personalDesk.unlock()
-                                    : $LL.actionbar.personalDesk.lock()
-                            }
+                            label={isPersonalDeskLocked
+                                ? $LL.actionbar.personalDesk.unlock()
+                                : $LL.actionbar.personalDesk.lock()}
                             on:click={togglePersonalDeskLock}
                             classList="group/btn-personal-desk"
                         >

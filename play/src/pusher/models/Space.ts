@@ -1,11 +1,12 @@
 import * as Sentry from "@sentry/node";
-import type {
-    FilterType,
-    UpdateSpaceUserMessage,
-    SetPlayerDetailsMessage,
-    CharacterTextureMessage,
+import {
+    AvailabilityStatus,
+    type CharacterTextureMessage,
+    type FilterType,
+    type SetPlayerDetailsMessage,
+    type SpaceUser,
+    type UpdateSpaceUserMessage,
 } from "@workadventure/messages";
-import { type SpaceUser, AvailabilityStatus } from "@workadventure/messages";
 import Debug from "debug";
 import { merge } from "lodash";
 import { applyFieldMask } from "protobuf-fieldmask";

@@ -91,9 +91,6 @@ export class RNNoiseStreamProcessor {
                     }
 
                     if (data.type === "dbg") {
-                        const rawRms = Number(data.rawRms ?? 0);
-                        const speaking = Boolean(data.speaking);
-
                         console.log(
                             `[RNNoise] mode=${data.mode} vad=${Number(data.vad).toFixed(6)} rms=${Number(
                                 data.rawRms

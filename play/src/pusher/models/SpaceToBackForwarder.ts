@@ -248,8 +248,7 @@ export class SpaceToBackForwarder implements SpaceToBackForwarderInterface {
     addUserToNotify(user: SpaceUser): void {
         const safeUser: SpaceUser = {
             ...user,
-            availabilityStatus:
-                user.availabilityStatus ?? AvailabilityStatus.ONLINE,
+            availabilityStatus: user.availabilityStatus ?? AvailabilityStatus.ONLINE,
         };
         this.forwardMessageToSpaceBack({
             $case: "addSpaceUserToNotifyMessage",
@@ -263,8 +262,7 @@ export class SpaceToBackForwarder implements SpaceToBackForwarderInterface {
     deleteUserFromNotify(user: SpaceUser): void {
         const safeUser: SpaceUser = {
             ...user,
-            availabilityStatus:
-                user.availabilityStatus ?? AvailabilityStatus.ONLINE,
+            availabilityStatus: user.availabilityStatus ?? AvailabilityStatus.ONLINE,
         };
         this.forwardMessageToSpaceBack({
             $case: "deleteSpaceUserToNotifyMessage",

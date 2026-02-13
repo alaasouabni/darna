@@ -92,69 +92,76 @@
             <div class="mask-block mask-right" />
             <div class="mask-block mask-bottom" />
         </div>
-        <div
-            class="modal-shell relative z-10 w-[min(760px,90vw)] border border-slate-500/30 rounded-xl shadow-2xl"
-        >
+        <div class="modal-shell relative z-10 w-[min(760px,90vw)] border border-slate-500/30 rounded-xl shadow-2xl">
             <div class="relative z-10 p-6">
-            <button
-                type="button"
-                aria-label="Close"
-                class="absolute right-3 top-3 h-9 w-9 rounded-full hover:bg-white/10 flex items-center justify-center"
-                on:click|preventDefault={() => selectCompanionScene.closeScene()}
-            >
-                <XIcon classList="h-4 w-4" />
-            </button>
-            <section class="text-center mb-4">
-                <span class="text-white text-lg bold">
-                    {$LL.companion.select.title()}
-                </span>
-            </section>
-            <section class="flex justify-center mb-4">
-                <div
-                    class="w-[min(72vw,400px)] rounded-xl border border-slate-400/30 bg-transparent p-3 shadow-[0_12px_24px_rgba(0,0,0,0.35)]"
+                <button
+                    type="button"
+                    aria-label="Close"
+                    class="absolute right-3 top-3 h-9 w-9 rounded-full hover:bg-white/10 flex items-center justify-center"
+                    on:click|preventDefault={() => selectCompanionScene.closeScene()}
                 >
-                    <div
-                        bind:this={previewFrameEl}
-                        class="relative w-full aspect-[4/3] rounded-lg border border-white/15 bg-transparent shadow-none"
-                    >
-                        {#if !$selectCompanionReadyStore}
-                            <div class="absolute inset-0 flex items-center justify-center text-sm text-slate-200/80">
-                                Loading companions…
-                            </div>
-                        {/if}
-                    </div>
-                </div>
-            </section>
-            <section class="category flex flex-row justify-center mb-6">
-                {#if $collectionsSizeStore > 1 && $selectedCollection}
-                    <button class="light mr-2 selectCharacterButton" on:click|preventDefault={selectLeftCollection}>
-                        <IconChevronLeft />
-                    </button>
-                    <strong class="category-text">{$selectedCollection}</strong>
-                    <button class="outline ml-2 selectCharacterButton" on:click|preventDefault={selectRightCollection}>
-                        <IconChevronRight />
-                    </button>
-                {/if}
-            </section>
-            <div class="action-panel">
-                <section class="action flex flex-col-reverse md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4 justify-between">
-                    <button
-                        class="btn btn-light btn-lg btn-ghost w-full md:w-1/2 block selectCompanionSceneFormBack"
-                        on:click|preventDefault={noCompanion}>{$LL.companion.select.any()}</button
-                    >
-                    <button
-                        type="submit"
-                        class="btn btn-secondary btn-lg w-full md:w-1/2 block selectCompanionSceneFormSubmit"
-                        on:click|preventDefault={() => analyticsClient.selectCompanion()}
-                        on:click|preventDefault={selectCompanion}>{$LL.companion.select.continue()}</button
-                    >
+                    <XIcon classList="h-4 w-4" />
+                </button>
+                <section class="text-center mb-4">
+                    <span class="text-white text-lg bold">
+                        {$LL.companion.select.title()}
+                    </span>
                 </section>
-            </div>
+                <section class="flex justify-center mb-4">
+                    <div
+                        class="w-[min(72vw,400px)] rounded-xl border border-slate-400/30 bg-transparent p-3 shadow-[0_12px_24px_rgba(0,0,0,0.35)]"
+                    >
+                        <div
+                            bind:this={previewFrameEl}
+                            class="relative w-full aspect-[4/3] rounded-lg border border-white/15 bg-transparent shadow-none"
+                        >
+                            {#if !$selectCompanionReadyStore}
+                                <div
+                                    class="absolute inset-0 flex items-center justify-center text-sm text-slate-200/80"
+                                >
+                                    Loading companions…
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                </section>
+                <section class="category flex flex-row justify-center mb-6">
+                    {#if $collectionsSizeStore > 1 && $selectedCollection}
+                        <button class="light mr-2 selectCharacterButton" on:click|preventDefault={selectLeftCollection}>
+                            <IconChevronLeft />
+                        </button>
+                        <strong class="category-text">{$selectedCollection}</strong>
+                        <button
+                            class="outline ml-2 selectCharacterButton"
+                            on:click|preventDefault={selectRightCollection}
+                        >
+                            <IconChevronRight />
+                        </button>
+                    {/if}
+                </section>
+                <div class="action-panel">
+                    <section
+                        class="action flex flex-col-reverse md:flex-row items-center space-y-2 md:space-y-0 md:space-x-4 justify-between"
+                    >
+                        <button
+                            class="btn btn-light btn-lg btn-ghost w-full md:w-1/2 block selectCompanionSceneFormBack"
+                            on:click|preventDefault={noCompanion}>{$LL.companion.select.any()}</button
+                        >
+                        <button
+                            type="submit"
+                            class="btn btn-secondary btn-lg w-full md:w-1/2 block selectCompanionSceneFormSubmit"
+                            on:click|preventDefault={() => analyticsClient.selectCompanion()}
+                            on:click|preventDefault={selectCompanion}>{$LL.companion.select.continue()}</button
+                        >
+                    </section>
+                </div>
             </div>
         </div>
     </div>
 {:else}
-    <section class="text-center absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-[calc(50%+20vh)] h-16">
+    <section
+        class="text-center absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-[calc(50%+20vh)] h-16"
+    >
         <span class="text-white text-lg bold">
             {$LL.companion.select.title()}
         </span>

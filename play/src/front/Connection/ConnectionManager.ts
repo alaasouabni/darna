@@ -716,7 +716,11 @@ class ConnectionManager {
                     if (username != undefined) {
                         gameManager.setPlayerName(username);
                     }
-                } else if (opidWokaNamePolicy === "allow_override_opid" && localName == undefined && username != undefined) {
+                } else if (
+                    opidWokaNamePolicy === "allow_override_opid" &&
+                    localName == undefined &&
+                    username != undefined
+                ) {
                     gameManager.setPlayerName(username);
                 }
             }
@@ -769,10 +773,7 @@ class ConnectionManager {
         }
     }
 
-    async saveTextures(
-        textures: string[],
-        textureDescriptors?: { id: string; url: string }[]
-    ): Promise<boolean> {
+    async saveTextures(textures: string[], textureDescriptors?: { id: string; url: string }[]): Promise<boolean> {
         if (
             hasCapability("api/save-textures") &&
             this.authToken !== undefined &&

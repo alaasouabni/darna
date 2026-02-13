@@ -55,7 +55,9 @@ export class UserProviderMerger {
                         return {
                             chatId: user.chatId || acc.chatId,
                             uuid: user.uuid || acc.uuid,
-                            username: shouldPreferIncoming ? user.username || acc.username : acc.username || user.username,
+                            username: shouldPreferIncoming
+                                ? user.username || acc.username
+                                : acc.username || user.username,
                             availabilityStatus: shouldPreferIncoming
                                 ? user.availabilityStatus || acc.availabilityStatus
                                 : acc.availabilityStatus || user.availabilityStatus,

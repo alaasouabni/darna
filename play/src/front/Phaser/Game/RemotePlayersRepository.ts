@@ -49,7 +49,8 @@ export class RemotePlayersRepository {
     private readonly dispatchSharedPlayerVariable: (event: SetSharedPlayerVariableEvent) => void;
 
     constructor(dispatchSharedPlayerVariable?: (event: SetSharedPlayerVariableEvent) => void) {
-        this.dispatchSharedPlayerVariable = dispatchSharedPlayerVariable ?? ((event) => iframeListener.setSharedPlayerVariable(event));
+        this.dispatchSharedPlayerVariable =
+            dispatchSharedPlayerVariable ?? ((event) => iframeListener.setSharedPlayerVariable(event));
     }
 
     public addPlayer(userJoinedMessage: MessageUserJoined): void {

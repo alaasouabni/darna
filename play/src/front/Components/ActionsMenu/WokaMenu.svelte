@@ -36,7 +36,7 @@
     $: isOfflineStatus = statusToDisplay === AvailabilityStatus.UNCHANGED;
     $: isLocalHoveredUser = !!(wokaMenuData?.userUuid && localUserUuid && wokaMenuData.userUuid === localUserUuid);
     $: displayedWokaName =
-        isLocalHoveredUser && $currentPlayerNameStore ? $currentPlayerNameStore : (wokaMenuData?.wokaName ?? "");
+        isLocalHoveredUser && $currentPlayerNameStore ? $currentPlayerNameStore : wokaMenuData?.wokaName ?? "";
     $: statusLabel =
         statusToDisplay !== undefined
             ? isOfflineStatus
@@ -44,11 +44,7 @@
                 : getStatusLabel(statusToDisplay)
             : "";
     $: statusColor =
-        statusToDisplay !== undefined
-            ? isOfflineStatus
-                ? OFFLINE_COLOR
-                : getColorHexOfStatus(statusToDisplay)
-            : "";
+        statusToDisplay !== undefined ? (isOfflineStatus ? OFFLINE_COLOR : getColorHexOfStatus(statusToDisplay)) : "";
 
     function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Escape") {
@@ -193,7 +189,7 @@
                 </div>
 
                 <div class="flex items-center justify-center p-2">
-                        <div class="text-white flex flex-col justify-center items-center font-bold text-xl">
+                    <div class="text-white flex flex-col justify-center items-center font-bold text-xl">
                         {#if isLocalHoveredUser}
                             <div
                                 id="woka"
@@ -221,7 +217,11 @@
                                 id="woka"
                                 class=" bt-3 overflow-hidden mt-9 border w-fit h-fit pt-3 rounded-lg cursor-not-allowed bg-[rgb(103,185,133)]"
                             >
-                                <WokaImage selectedTextures={offlineSelectedTextures} wokaData={offlineWokaData} canvasSize={64} />
+                                <WokaImage
+                                    selectedTextures={offlineSelectedTextures}
+                                    wokaData={offlineWokaData}
+                                    canvasSize={64}
+                                />
                             </div>
                         {:else}
                             <div
@@ -234,7 +234,9 @@
                         <div class="mt-[24px] flex flex-col items-center gap-2">
                             <h3 class="text-center">{displayedWokaName}</h3>
                             {#if statusToDisplay !== undefined}
-                                <div class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white/80">
+                                <div
+                                    class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white/80"
+                                >
                                     <span
                                         class="inline-block h-2.5 w-2.5 rounded-full ring-2 ring-white/10"
                                         style="background-color: {statusColor}"

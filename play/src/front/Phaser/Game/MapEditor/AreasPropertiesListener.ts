@@ -1308,8 +1308,7 @@ export class AreasPropertiesListener {
         if (this.personalAreaSpaceName === spaceName) return;
 
         const proximityRoom = this.scene.proximityChatRoom;
-        const displayName =
-            areaData.name && areaData.name.trim().length > 0 ? areaData.name : get(LL).chat.proximity();
+        const displayName = areaData.name && areaData.name.trim().length > 0 ? areaData.name : get(LL).chat.proximity();
 
         this.personalAreaSpaceName = spaceName;
         personalAreaSpaceNameStore.set(spaceName);

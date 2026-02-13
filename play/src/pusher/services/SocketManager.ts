@@ -1,53 +1,53 @@
 import Jwt from "jsonwebtoken";
 import Debug from "debug";
 import {
-    AddSpaceFilterMessage,
     AvailabilityStatus,
-    AdminMessage,
-    AdminPusherToBackMessage,
-    AdminRoomMessage,
-    BanMessage,
-    BanPlayerMessage,
-    ChatMembersAnswer,
-    ChatMembersQuery,
-    CharacterTextureMessage,
-    CompanionTextureMessage,
-    EmoteEventMessage,
-    ErrorApiData,
-    ErrorMessage,
-    ErrorScreenMessage,
     FilterType,
-    GetMemberAnswer,
-    GetMemberQuery,
-    IceServersAnswer,
-    JoinRoomMessage,
-    MemberData,
-    OauthRefreshTokenAnswer,
-    OauthRefreshTokenQuery,
-    PlayerDetailsUpdatedMessage,
-    PlayGlobalMessage,
-    PrivateEventFrontToPusher,
-    PublicEventFrontToPusher,
-    PusherToBackMessage as PusherToBackMessageType,
-    QueryMessage,
-    RemoveSpaceFilterMessage,
-    ReportPlayerMessage,
-    SearchMemberAnswer,
-    SearchMemberQuery,
-    SearchTagsAnswer,
-    SearchTagsQuery,
-    ServerToAdminClientMessage,
+    PusherToBackMessage as PusherToBackMessageCodec,
     ServerToClientMessage,
-    SetPlayerDetailsMessage as SetPlayerDetailsMessageType,
     SetPlayerDetailsMessage,
     SetPlayerVariableMessage_Scope,
     noUndefined,
-    PusherToBackMessage as PusherToBackMessageCodec,
-    UpdateSpaceUserMessage,
-    UserMovesMessage,
-    ViewportMessage,
+    type AddSpaceFilterMessage,
+    type AdminMessage,
+    type AdminPusherToBackMessage,
+    type AdminRoomMessage,
+    type BanMessage,
+    type BanPlayerMessage,
+    type ChatMembersAnswer,
+    type ChatMembersQuery,
+    type CharacterTextureMessage,
+    type CompanionTextureMessage,
+    type EmoteEventMessage,
+    type ErrorApiData,
+    type ErrorMessage,
+    type ErrorScreenMessage,
+    type GetMemberAnswer,
+    type GetMemberQuery,
+    type IceServersAnswer,
+    type JoinRoomMessage,
+    type MemberData,
+    type NonUndefinedFields,
+    type OauthRefreshTokenAnswer,
+    type OauthRefreshTokenQuery,
+    type PlayerDetailsUpdatedMessage,
+    type PlayGlobalMessage,
+    type PrivateEventFrontToPusher,
+    type PublicEventFrontToPusher,
+    type PusherToBackMessage as PusherToBackMessageType,
+    type QueryMessage,
+    type RemoveSpaceFilterMessage,
+    type ReportPlayerMessage,
+    type SearchMemberAnswer,
+    type SearchMemberQuery,
+    type SearchTagsAnswer,
+    type SearchTagsQuery,
+    type ServerToAdminClientMessage,
+    type SetPlayerDetailsMessage as SetPlayerDetailsMessageType,
+    type UpdateSpaceUserMessage,
+    type UserMovesMessage,
+    type ViewportMessage,
 } from "@workadventure/messages";
-import type { NonUndefinedFields } from "@workadventure/messages";
 import * as Sentry from "@sentry/node";
 import type { AxiosResponse } from "axios";
 import axios, { isAxiosError } from "axios";
@@ -430,10 +430,7 @@ export class SocketManager implements ZoneEventListener {
         );
     }
 
-    public async updateUserProfileTextures(
-        userUuid: string,
-        textures: CharacterTextureMessage[]
-    ): Promise<void> {
+    public async updateUserProfileTextures(userUuid: string, textures: CharacterTextureMessage[]): Promise<void> {
         const sockets = this.getSocketsByUserUuid(userUuid);
         if (sockets.length === 0) {
             return;
@@ -488,11 +485,7 @@ export class SocketManager implements ZoneEventListener {
                 await this.emitProfileVariable(socket, PROFILE_TEXTURES_VARIABLE, data.characterTextures ?? []);
 
                 socketData.companionTexture = data.companionTexture ?? undefined;
-                await this.emitProfileVariable(
-                    socket,
-                    PROFILE_COMPANION_VARIABLE,
-                    data.companionTexture ?? null
-                );
+                await this.emitProfileVariable(socket, PROFILE_COMPANION_VARIABLE, data.companionTexture ?? null);
             })
         );
     }

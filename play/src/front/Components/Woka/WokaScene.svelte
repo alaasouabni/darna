@@ -186,12 +186,10 @@
                 </div>
             </div>
         </div>
+    {:else if buildOwnWoka}
+        <WokaCustomizeScene back={() => (buildOwnWoka = false)} {saveAndContinue} />
     {:else}
-        {#if buildOwnWoka}
-            <WokaCustomizeScene back={() => (buildOwnWoka = false)} {saveAndContinue} />
-        {:else}
-            <WokaSelectScene customize={() => (buildOwnWoka = true)} {saveAndContinue} />
-        {/if}
+        <WokaSelectScene customize={() => (buildOwnWoka = true)} {saveAndContinue} />
     {/if}
 {/if}
 

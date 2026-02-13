@@ -101,10 +101,7 @@ export class WaveManager {
             this.targetCooldowns.set(targetUserId, now + WAVE_PER_TARGET_COOLDOWN_MS);
             this.globalWaveTimestamps.push(now);
             const icon = await this.resolveWaveIconForUserId(targetUserId);
-            notificationPlayingStore.playNotification(
-                `Wave sent to ${targetUserName}.`,
-                icon
-            );
+            notificationPlayingStore.playNotification(`Wave sent to ${targetUserName}.`, icon);
         } catch (error) {
             console.warn("Could not send wave event", {
                 error,
@@ -254,14 +251,16 @@ export class WaveManager {
         const overflowCount = pending.length - toNotify.length;
 
         const icons = await Promise.all(
-            toNotify.map((wave) => wave.icon ?? this.resolveWaveIconForUserId(wave.senderUserId))
+            toNotify.map(async (wave) => wave.icon ?? (await this.resolveWaveIconForUserId(wave.senderUserId)))
         );
 
         for (let i = 0; i < toNotify.length; i++) {
             const wave = toNotify[i];
             const icon = icons[i];
             const message =
-                wave.count > 1 ? `${wave.senderName} waved at you (x${wave.count}).` : `${wave.senderName} waved at you.`;
+                wave.count > 1
+                    ? `${wave.senderName} waved at you (x${wave.count}).`
+                    : `${wave.senderName} waved at you.`;
             notificationPlayingStore.playNotification(message, icon);
         }
 
