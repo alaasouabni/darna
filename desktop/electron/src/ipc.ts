@@ -1,7 +1,6 @@
 import { ipcMain, app, desktopCapturer } from "electron";
 import electronIsDev from "electron-is-dev";
 import { createAndShowNotification } from "./notification";
-import { Server } from "./preload-local-app/types";
 import settings, { SettingsData } from "./settings";
 import { loadShortcuts, setShortcutsEnabled } from "./shortcuts";
 import { getAppView, hideAppView, showAppView } from "./window";
@@ -63,34 +62,12 @@ export default () => {
         return true;
     });
 
-    ipcMain.handle("local-app:addServer", (event, server: Omit<Server, "_id">) => {
-        const servers = settings.get("servers") || [];
-
-        // TODO: add proper test to see if server url is valid and points to a real WA server
-        // try {
-        //
-        //     await fetch(`${server.url}/iframe_api.js`);
-        // } catch (e) {
-        //     console.error(e);
-        //     return new Error("Invalid server url");
-        // }
-
-        const newServer = {
-            ...server,
-            _id: `${Date.now()}-${servers.length + 1}`,
-        };
-        servers.push(newServer);
-        settings.set("servers", servers);
-        return newServer;
+    ipcMain.handle("local-app:addServer", () => {
+        throw new Error("Adding servers is disabled in this desktop build.");
     });
 
-    ipcMain.handle("local-app:removeServer", (event, server: Server) => {
-        const servers = settings.get("servers") || [];
-        settings.set(
-            "servers",
-            servers.filter((s) => s._id !== server._id)
-        );
-        return true;
+    ipcMain.handle("local-app:removeServer", () => {
+        throw new Error("Removing servers is disabled in this desktop build.");
     });
 
     ipcMain.handle("local-app:reloadShortcuts", (event) => loadShortcuts());

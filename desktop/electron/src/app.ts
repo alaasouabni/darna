@@ -41,7 +41,7 @@ async function init() {
 
         setLogLevel(settings.get("log_level") || "info");
 
-        await autoUpdater.init();
+        // await autoUpdater.init();
 
         // enable auto launch
         await updateAutoLaunch();

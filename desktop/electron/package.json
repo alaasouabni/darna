@@ -1,8 +1,9 @@
 {
-    "name": "workadventure-desktop",
-    "version": "managedbyci",
+    "name": "darna-desktop",
+    "version": "1.0.0",
+    "productName": "Darna Desktop",
     "description": "Desktop application for WorkAdventure",
-    "author": "thecodingmachine",
+    "author": "thecodingmachine_darnateam",
     "main": "dist/main.js",
     "license": "SEE LICENSE IN LICENSE.txt",
     "scripts": {

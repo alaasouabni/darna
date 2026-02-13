@@ -1,4 +1,4 @@
-appId: re.workadventu.desktop
+appId: io.lightency.darna.desktop
 
 files:
     - "dist/**/*"

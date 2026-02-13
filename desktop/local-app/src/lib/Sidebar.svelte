@@ -48,11 +48,6 @@
             </Link>
         {/each}
     </div>
-    <Link
-        to="/server/add"
-        class="flex justify-center items-center text-4xl no-underline text-gray-200 cursor-pointer hover:text-gray-500"
-        >+</Link
-    >
     <Link to="/settings" class="flex mt-auto mb-4 justify-center items-center text-4xl no-underline cursor-pointer">
         <CogIcon width="30" height="30" class="fill-gray-200 hover:fill-gray-500" />
     </Link>

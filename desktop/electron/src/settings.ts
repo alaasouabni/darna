@@ -17,8 +17,8 @@ const defaultSettings: SettingsData = {
     servers: [
         {
             _id: `${Date.now()}-1`,
-            name: "WA Demo",
-            url: "https://play.staging.workadventu.re/@/tcm/workadventure/wa-village",
+            name: "Darna",
+            url: "https://darna.lightency.io",
         },
     ],
     shortcuts: {
