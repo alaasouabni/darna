@@ -859,6 +859,10 @@
                             "string",
                             "null"
                           ]
+                        },
+                        "locked": {
+                          "type": "boolean",
+                          "default": false
                         }
                       },
                       "required": [
