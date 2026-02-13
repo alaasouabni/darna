@@ -22,7 +22,6 @@ import {
     IceServersAnswer,
     JoinRoomMessage,
     MemberData,
-    NonUndefinedFields,
     OauthRefreshTokenAnswer,
     OauthRefreshTokenQuery,
     PlayerDetailsUpdatedMessage,
@@ -48,6 +47,7 @@ import {
     UserMovesMessage,
     ViewportMessage,
 } from "@workadventure/messages";
+import type { NonUndefinedFields } from "@workadventure/messages";
 import * as Sentry from "@sentry/node";
 import type { AxiosResponse } from "axios";
 import axios, { isAxiosError } from "axios";
