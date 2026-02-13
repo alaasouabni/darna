@@ -151,8 +151,9 @@ describe("SpaceFilter", () => {
                 }
             );
             const spaceUserId = "foo_0";
-            const user: Pick<SpaceUserExtended, "spaceUserId"> = {
+            const user: Pick<SpaceUserExtended, "spaceUserId" | "characterTextures"> = {
                 spaceUserId,
+                characterTextures: [],
             };
 
             space.addUser(user as SpaceUserExtended);
@@ -175,10 +176,12 @@ describe("SpaceFilter", () => {
             space.addUser({
                 spaceUserId,
                 name: "user-name",
+                characterTextures: [],
             } as unknown as SpaceUserExtended);
             space.addUser({
                 spaceUserId,
                 name: "user-name-overloaded",
+                characterTextures: [],
             } as unknown as SpaceUserExtended);
 
             const userInStore = get(space.usersStore).get(spaceUserId);
@@ -201,9 +204,10 @@ describe("SpaceFilter", () => {
             );
             const spaceUserId = "";
 
-            const user: Pick<SpaceUserExtended, "spaceUserId" | "name"> = {
+            const user: Pick<SpaceUserExtended, "spaceUserId" | "name" | "characterTextures"> = {
                 spaceUserId,
                 name: "user-1",
+                characterTextures: [],
             };
 
             const newData: SpaceUserExtended = {
@@ -233,9 +237,10 @@ describe("SpaceFilter", () => {
             );
             const spaceUserId = "";
 
-            const user: Pick<SpaceUserExtended, "spaceUserId" | "name"> = {
+            const user: Pick<SpaceUserExtended, "spaceUserId" | "name" | "characterTextures"> = {
                 spaceUserId,
                 name: "user-1",
+                characterTextures: [],
             };
 
             const newData: SpaceUserExtended = {
@@ -270,9 +275,10 @@ describe("SpaceFilter", () => {
             );
             const spaceUserId = "";
 
-            const user: Pick<SpaceUserExtended, "spaceUserId" | "name"> = {
+            const user: Pick<SpaceUserExtended, "spaceUserId" | "name" | "characterTextures"> = {
                 spaceUserId,
                 name: "user-1",
+                characterTextures: [],
             };
 
             const newData: SpaceUser = {

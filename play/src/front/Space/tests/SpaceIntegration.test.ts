@@ -153,7 +153,7 @@ vi.mock("../../WebRtc/MediaManager", () => {
 
 vi.mock("../../Phaser/Entity/CharacterLayerManager", () => ({
     CharacterLayerManager: {
-        wokaBase64: vi.fn().mockReturnValue("data:image/png;base64,mockBase64String"),
+        wokaBase64: vi.fn().mockResolvedValue("data:image/png;base64,mockBase64String"),
         prototype: {
             getTexturesKeysForDefaultLayers: vi.fn().mockReturnValue([]),
             getTexturesKeys: vi.fn().mockReturnValue([]),
@@ -184,7 +184,7 @@ vi.mock("../../WebRtc/SimplePeer", () => ({
 
 vi.mock("../../Phaser/Entity/CharacterLayerManager", () => ({
     CharacterLayerManager: {
-        wokaBase64: vi.fn().mockReturnValue("data:image/png;base64,mockBase64String"),
+        wokaBase64: vi.fn().mockResolvedValue("data:image/png;base64,mockBase64String"),
         prototype: {
             getTexturesKeysForDefaultLayers: vi.fn().mockReturnValue([]),
             getTexturesKeys: vi.fn().mockReturnValue([]),
