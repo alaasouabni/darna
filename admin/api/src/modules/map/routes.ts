@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { OpidWokaNamePolicy, isMapDetailsData } from "@workadventure/messages";
 import { WAMMetadata } from "@workadventure/map-editor";
-import { errorData } from "../../lib/error-response";
+import { errorData, unauthorizedData } from "../../lib/error-response";
 import { requireAdminAuth } from "../../plugins/auth";
 import { normalizeRoomPath } from "../../lib/room-url";
 import { resolveMapFromPlayUri } from "../../lib/map-utils";
@@ -44,10 +44,12 @@ function parseMapOverrides(settings: unknown) {
 
 export async function mapRoutes(app: FastifyInstance) {
     app.get("/map", { preHandler: requireAdminAuth }, async (request, reply) => {
-        // Debug: confirm handler execution in container logs.
-        // TODO: remove after issue is resolved.
-        // eslint-disable-next-line no-console
-        console.log("[map] handler-enter", request.url);
+        // /map reflects runtime room activation and default-room routing; do not cache responses.
+        reply.header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        reply.header("Pragma", "no-cache");
+        reply.header("Expires", "0");
+        reply.header("Vary", "Authorization, Accept-Language");
+
         const startedAt = Date.now();
         const logStep = (step: string, extra?: Record<string, unknown>) => {
             request.log.info({ step, ms: Date.now() - startedAt, ...extra }, "map request");
@@ -61,25 +63,25 @@ export async function mapRoutes(app: FastifyInstance) {
 
         if (roomPath === "/") {
             const baseUrl = new URL(query.playUri);
-            let redirectPath = config.START_ROOM_URL ? normalizeRoomPath(config.START_ROOM_URL) : null;
+            let redirectPath: string | null = null;
 
-            if (!redirectPath) {
-                const world = await app.db.world.findFirst({
-                    where: { domain: baseUrl.hostname },
-                    include: { defaultRoom: true },
+            const world = await app.db.world.findFirst({
+                where: { domain: baseUrl.hostname },
+                include: { defaultRoom: true },
+            });
+            logStep("world-lookup", { domain: baseUrl.hostname, worldId: world?.id ?? null });
+
+            if (world?.defaultRoom?.isActive) {
+                redirectPath = world.defaultRoom.roomUrl;
+            }
+
+            if (!redirectPath && world) {
+                const fallbackRoom = await app.db.room.findFirst({
+                    where: { worldId: world.id, isActive: true },
+                    orderBy: { createdAt: "asc" },
                 });
-                logStep("world-lookup", { domain: baseUrl.hostname, worldId: world?.id ?? null });
-
-                redirectPath = world?.defaultRoom?.roomUrl ?? null;
-
-                if (!redirectPath && world) {
-                    const fallbackRoom = await app.db.room.findFirst({
-                        where: { worldId: world.id },
-                        orderBy: { createdAt: "asc" },
-                    });
-                    logStep("fallback-room", { roomId: fallbackRoom?.id ?? null });
-                    redirectPath = fallbackRoom?.roomUrl ?? null;
-                }
+                logStep("fallback-room", { roomId: fallbackRoom?.id ?? null });
+                redirectPath = fallbackRoom?.roomUrl ?? null;
             }
 
             if (redirectPath) {
@@ -95,6 +97,11 @@ export async function mapRoutes(app: FastifyInstance) {
             include: { world: true },
         });
         logStep("room-lookup", { roomId: room?.id ?? null });
+
+        if (room && !room.isActive) {
+            reply.code(403).send(unauthorizedData("This room is currently inactive."));
+            return;
+        }
 
         const resolution = resolveMapFromPlayUri(query.playUri, room);
         logStep("map-resolution", {

@@ -53,7 +53,14 @@ export class MapController extends BaseHttpController {
          *
          */
         this.app.get("/map", async (req: Request, res: Response) => {
-            debug(`MapController => [${req.method}] ${req.originalUrl} — IP: ${req.ip} — Time: ${Date.now()}`);
+            debug(`MapController => [${req.method}] ${req.originalUrl} - IP: ${req.ip} - Time: ${Date.now()}`);
+
+            // Room active/inactive state can change at runtime: never serve stale /map responses.
+            res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+            res.setHeader("Pragma", "no-cache");
+            res.setHeader("Expires", "0");
+            res.setHeader("Vary", "Accept-Language");
+
             const query = validateQuery(
                 req,
                 res,

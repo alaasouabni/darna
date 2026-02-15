@@ -13,6 +13,7 @@
   --accent-1: #d97706;
   --accent-2: #0c4a6e;
   --card: #ffffffcc;
+  --modal-card-bg: rgba(255, 255, 255, 0.96);
   --shadow: 0 18px 60px rgba(26, 22, 18, 0.08);
 }
 
@@ -28,6 +29,7 @@
   --accent-1: #f59e0b;
   --accent-2: #38bdf8;
   --card: rgba(12, 17, 16, 0.86);
+  --modal-card-bg: rgba(10, 14, 13, 0.97);
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
 }
 
@@ -78,6 +80,20 @@
 :root[data-theme="dark"] .button.ghost {
   background: rgba(255, 255, 255, 0.08);
   color: var(--ink-0);
+}
+
+:root[data-theme="dark"] .toggle-switch.off {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.38);
+}
+
+:root[data-theme="dark"] .toggle-switch.on {
+  background: rgba(47, 182, 166, 0.34);
+  border-color: rgba(47, 182, 166, 0.72);
+}
+
+:root[data-theme="dark"] .toggle-switch-handle {
+  background: #f3f6f5;
 }
 
 :root[data-theme="dark"] .input {

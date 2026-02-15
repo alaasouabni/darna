@@ -394,6 +394,48 @@ a {
   gap: 8px;
 }
 
+.toggle-switch {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  border: 1px solid rgba(26, 22, 18, 0.28);
+  border-radius: 999px;
+  background: rgba(26, 22, 18, 0.16);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-switch.on {
+  background: rgba(15, 118, 110, 0.18);
+  border-color: rgba(15, 118, 110, 0.5);
+}
+
+.toggle-switch.off {
+  background: rgba(90, 78, 67, 0.22);
+}
+
+.toggle-switch-handle {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgba(26, 22, 18, 0.12);
+  box-shadow: 0 1px 4px rgba(17, 15, 12, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.toggle-switch.on .toggle-switch-handle {
+  transform: translateX(20px);
+}
+
+.toggle-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .icon-button {
   width: 36px;
   height: 36px;
@@ -447,7 +489,8 @@ a {
 
 .modal-card {
   width: min(520px, 100%);
-  background: var(--card);
+  background: var(--modal-card-bg, var(--card));
+  backdrop-filter: blur(8px);
   border-radius: 20px;
   padding: 20px;
   box-shadow: var(--shadow);

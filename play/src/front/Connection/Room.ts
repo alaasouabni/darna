@@ -133,10 +133,16 @@ export class Room {
 
     private async getMapDetail(): Promise<MapDetail | RoomRedirect> {
         try {
+            // Prevent stale /map responses when room activation state changes during a session.
             const result = await axiosWithRetry.get<unknown>("map", {
                 params: {
                     playUri: this.roomUrl.toString(),
                     authToken: localUserStore.getAuthToken(),
+                    cacheBust: Date.now(),
+                },
+                headers: {
+                    "Cache-Control": "no-cache",
+                    Pragma: "no-cache",
                 },
             });
 

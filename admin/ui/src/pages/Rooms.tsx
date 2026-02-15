@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
@@ -7,14 +7,19 @@ import { PageHeader } from "../components/PageHeader";
 import { inferWorldDomain, inferWorldSlug } from "../config";
 
 type RoomSummary = {
+  id: string;
   name?: string;
   roomUrl: string;
   wamUrl?: string;
+  tags?: string[];
+  isActive: boolean;
+  isDefault: boolean;
 };
+
+type RoomTagFilter = "all" | "active" | "inactive";
 
 export function RoomsPage() {
   const { context, updateContext } = useAdminContext();
-  const [selectedRoomUrl, setSelectedRoomUrl] = useState("");
   const [createRoomUrl, setCreateRoomUrl] = useState("");
   const [createWamUrl, setCreateWamUrl] = useState("");
   const [createRoomName, setCreateRoomName] = useState("");
@@ -25,6 +30,14 @@ export function RoomsPage() {
   const [createIsActive, setCreateIsActive] = useState(true);
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [roomFilter, setRoomFilter] = useState<RoomTagFilter>("all");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionInfo, setActionInfo] = useState<string | null>(null);
+  const [isApplyingAction, setIsApplyingAction] = useState(false);
+  const [deactivationDraft, setDeactivationDraft] = useState<RoomSummary | null>(null);
+  const [replacementDefaultRoomId, setReplacementDefaultRoomId] = useState("");
+
+  const worldSlug = context.worldSlug || inferWorldSlug(context.roomUrl);
 
   const roomsQuery = useQuery({
     queryKey: ["rooms", context.roomUrl],
@@ -34,6 +47,7 @@ export function RoomsPage() {
         buildQuery("/room/sameWorld", {
           roomUrl: context.roomUrl,
           bypassTagFilter: 1,
+          includeInactive: 1,
         })
       ),
   });
@@ -49,11 +63,19 @@ export function RoomsPage() {
       ),
   });
 
-  useEffect(() => {
-    if (!selectedRoomUrl && roomsQuery.data?.length) {
-      setSelectedRoomUrl(roomsQuery.data[0].roomUrl);
+  const rooms = roomsQuery.data ?? [];
+
+  const activeRooms = useMemo(() => rooms.filter((room) => room.isActive), [rooms]);
+
+  const filteredRooms = useMemo(() => {
+    if (roomFilter === "active") {
+      return rooms.filter((room) => room.isActive);
     }
-  }, [roomsQuery.data, selectedRoomUrl]);
+    if (roomFilter === "inactive") {
+      return rooms.filter((room) => !room.isActive);
+    }
+    return rooms;
+  }, [roomFilter, rooms]);
 
   useEffect(() => {
     if (!createRoomUrl && context.roomUrl) {
@@ -79,20 +101,26 @@ export function RoomsPage() {
     }
   }, [context.playUri, createWorldDomain]);
 
-  const roomTagsQuery = useQuery({
-    queryKey: ["room-tags", selectedRoomUrl],
-    enabled: Boolean(selectedRoomUrl),
-    queryFn: () =>
-      apiRequest<string[]>(
-        buildQuery("/room/tags", {
-          roomUrl: selectedRoomUrl,
-        })
-      ),
-  });
+  useEffect(() => {
+    if (!deactivationDraft || !deactivationDraft.isDefault) {
+      setReplacementDefaultRoomId("");
+      return;
+    }
 
-  const rooms = roomsQuery.data ?? [];
+    const firstCandidate = activeRooms.find((room) => room.id !== deactivationDraft.id);
+    setReplacementDefaultRoomId(firstCandidate?.id ?? "");
+  }, [activeRooms, deactivationDraft]);
+
   const worldTags = worldTagsQuery.data ?? [];
-  const roomTags = roomTagsQuery.data ?? [];
+
+  const clearActionMessages = () => {
+    setActionError(null);
+    setActionInfo(null);
+  };
+
+  const refetchRoomsData = async () => {
+    await roomsQuery.refetch();
+  };
 
   const handleNewRoom = () => {
     if (!context.playUri) {
@@ -107,8 +135,10 @@ export function RoomsPage() {
       setCreateError("Room URL is required.");
       return;
     }
+
     setCreateError(null);
     setIsCreating(true);
+
     const tags = createTags
       .split(",")
       .map((tag) => tag.trim())
@@ -130,7 +160,6 @@ export function RoomsPage() {
         }),
       });
       await roomsQuery.refetch();
-      setSelectedRoomUrl(createRoomUrl);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Unable to create the room.");
     } finally {
@@ -138,11 +167,96 @@ export function RoomsPage() {
     }
   };
 
+  const handleSetDefault = async (room: RoomSummary) => {
+    clearActionMessages();
+
+    if (!room.isActive) {
+      setActionError("Only active rooms can be set as default.");
+      return;
+    }
+
+    if (!worldSlug) {
+      setActionError("World slug is missing. Set a room URL or world slug in context first.");
+      return;
+    }
+
+    setIsApplyingAction(true);
+    try {
+      await apiRequest<{ status: string }>(`/world/${encodeURIComponent(worldSlug)}/default-room`, {
+        method: "PUT",
+        body: JSON.stringify({ roomId: room.id }),
+      });
+      await refetchRoomsData();
+      setActionInfo(`Default room updated to ${room.roomUrl}.`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to update default room.");
+    } finally {
+      setIsApplyingAction(false);
+    }
+  };
+
+  const applyRoomState = async (
+    room: RoomSummary,
+    nextIsActive: boolean,
+    replacementDefaultRoomIdInput?: string
+  ) => {
+    clearActionMessages();
+    setIsApplyingAction(true);
+
+    try {
+      await apiRequest<{ status: string }>(`/room/${room.id}/state`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          isActive: nextIsActive,
+          replacementDefaultRoomId: replacementDefaultRoomIdInput || undefined,
+        }),
+      });
+      await refetchRoomsData();
+      setActionInfo(
+        nextIsActive
+          ? `Room ${room.roomUrl} reactivated.`
+          : `Room ${room.roomUrl} deactivated.`
+      );
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to update room state.");
+    } finally {
+      setIsApplyingAction(false);
+    }
+  };
+
+  const handleDeactivate = (room: RoomSummary) => {
+    setDeactivationDraft(room);
+  };
+
+  const handleConfirmDeactivation = async () => {
+    if (!deactivationDraft) {
+      return;
+    }
+
+    if (deactivationDraft.isDefault && !replacementDefaultRoomId) {
+      setActionError("Select a replacement default room before deactivating this room.");
+      return;
+    }
+
+    await applyRoomState(
+      deactivationDraft,
+      false,
+      deactivationDraft.isDefault ? replacementDefaultRoomId : undefined
+    );
+    setDeactivationDraft(null);
+    setReplacementDefaultRoomId("");
+  };
+
+  const handleCancelDeactivation = () => {
+    setDeactivationDraft(null);
+    setReplacementDefaultRoomId("");
+  };
+
   return (
     <section className="page">
       <PageHeader
         title="Rooms & maps"
-        subtitle="Manage access, tags, and map sources across worlds."
+        subtitle="Manage default routing and room lifecycle per world."
         actions={
           <button className="button solid" type="button" onClick={handleNewRoom}>
             New room
@@ -176,17 +290,14 @@ export function RoomsPage() {
               ? "Loading rooms..."
               : `Found ${rooms.length} rooms in the current world.`}
           </p>
-          {roomsQuery.isError && (
-            <p className="muted">Unable to load rooms. Check the room URL.</p>
-          )}
+          {roomsQuery.isError && <p className="muted">Unable to load rooms. Check the room URL.</p>}
+          {worldSlug && <p className="muted">Resolved world: {worldSlug}</p>}
         </div>
 
         <div className="card">
           <h2 className="section-title">World tags</h2>
           <p className="muted">
-            {worldTagsQuery.isLoading
-              ? "Loading tags..."
-              : `${worldTags.length} tags available.`}
+            {worldTagsQuery.isLoading ? "Loading tags..." : `${worldTags.length} tags available.`}
           </p>
           <div className="button-stack">
             {worldTags.map((tag) => (
@@ -208,7 +319,7 @@ export function RoomsPage() {
             <span>Room URL</span>
             <input
               className="input"
-              placeholder="/~/darna/conference"
+              placeholder="/@/darna/conference"
               value={createRoomUrl}
               onChange={(event) => setCreateRoomUrl(event.target.value)}
             />
@@ -285,46 +396,149 @@ export function RoomsPage() {
       </div>
 
       <div className="card">
-        <h2 className="section-title">Rooms in world</h2>
-        <table className="table">
+        <div className="card-header">
+          <h2 className="section-title">Rooms in world</h2>
+          <div className="button-stack">
+            <button
+              className={`button ${roomFilter === "all" ? "solid" : "ghost"}`}
+              type="button"
+              onClick={() => setRoomFilter("all")}
+            >
+              All
+            </button>
+            <button
+              className={`button ${roomFilter === "active" ? "solid" : "ghost"}`}
+              type="button"
+              onClick={() => setRoomFilter("active")}
+            >
+              Active
+            </button>
+            <button
+              className={`button ${roomFilter === "inactive" ? "solid" : "ghost"}`}
+              type="button"
+              onClick={() => setRoomFilter("inactive")}
+            >
+              Inactive
+            </button>
+          </div>
+        </div>
+
+        {actionError && <p className="muted">{actionError}</p>}
+        {actionInfo && <p className="muted">{actionInfo}</p>}
+
+        <table className="table table-wrap">
           <thead>
             <tr>
               <th>Room</th>
               <th>Room URL</th>
               <th>Map</th>
+              <th>Active</th>
+              <th>Default</th>
               <th>Tags</th>
             </tr>
           </thead>
           <tbody>
-            {rooms.map((room) => (
-              <tr
-                key={room.roomUrl}
-                onClick={() => setSelectedRoomUrl(room.roomUrl)}
-                style={{ cursor: "pointer" }}
-              >
-                <td>{room.name ?? "—"}</td>
+            {filteredRooms.map((room) => (
+              <tr key={room.id}>
+                <td>{room.name ?? "--"}</td>
                 <td>{room.roomUrl}</td>
-                <td>{room.wamUrl ? "WAM" : "—"}</td>
+                <td>{room.wamUrl ? "WAM" : "--"}</td>
                 <td>
-                  {selectedRoomUrl === room.roomUrl
-                    ? roomTags.join(", ") || "—"
-                    : "Click to load"}
+                  <button
+                    className={`toggle-switch ${room.isActive ? "on" : "off"}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={room.isActive}
+                    aria-label={`${room.roomUrl} active state`}
+                    disabled={isApplyingAction}
+                    onClick={() => {
+                      if (room.isActive) {
+                        void handleDeactivate(room);
+                        return;
+                      }
+                      void applyRoomState(room, true);
+                    }}
+                  >
+                    <span className="toggle-switch-handle" />
+                  </button>
                 </td>
+                <td>
+                  <button
+                    className={`toggle-switch ${room.isDefault ? "on" : "off"}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={room.isDefault}
+                    aria-label={`${room.roomUrl} default room`}
+                    disabled={isApplyingAction || room.isDefault || !room.isActive}
+                    onClick={() => {
+                      void handleSetDefault(room);
+                    }}
+                  >
+                    <span className="toggle-switch-handle" />
+                  </button>
+                </td>
+                <td>{room.tags?.length ? room.tags.join(", ") : "--"}</td>
               </tr>
             ))}
-            {!rooms.length && !roomsQuery.isLoading && (
+            {!filteredRooms.length && !roomsQuery.isLoading && (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={6} className="muted">
                   No rooms found.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
-        {roomTagsQuery.isError && (
-          <p className="muted">Unable to load tags for the selected room.</p>
-        )}
       </div>
+
+      {deactivationDraft && (
+        <div className="modal-backdrop" onClick={handleCancelDeactivation}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <h3 className="modal-title">
+              {deactivationDraft.isDefault ? "Deactivate default room" : "Deactivate room"}
+            </h3>
+            <p className="muted">
+              {deactivationDraft.isDefault
+                ? `${deactivationDraft.roomUrl} is the current default room. Select an active replacement before deactivation.`
+                : `Deactivate ${deactivationDraft.roomUrl}? Users will lose access immediately.`}
+            </p>
+            {deactivationDraft.isDefault && (
+              <label className="field">
+                <span>Replacement default room</span>
+                <select
+                  className="input"
+                  value={replacementDefaultRoomId}
+                  onChange={(event) => setReplacementDefaultRoomId(event.target.value)}
+                >
+                  <option value="">Select a replacement</option>
+                  {activeRooms
+                    .filter((room) => room.id !== deactivationDraft.id)
+                    .map((room) => (
+                      <option key={room.id} value={room.id}>
+                        {room.roomUrl}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+            <div className="modal-actions">
+              <button className="button ghost" type="button" onClick={handleCancelDeactivation}>
+                Cancel
+              </button>
+              <button
+                className="button solid"
+                type="button"
+                disabled={isApplyingAction || (deactivationDraft.isDefault && !replacementDefaultRoomId)}
+                onClick={() => {
+                  void handleConfirmDeactivation();
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
