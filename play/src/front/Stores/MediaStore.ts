@@ -603,6 +603,7 @@ let backgroundTransformer: BackgroundTransformer | undefined = undefined;
 // Track the last background config to detect if we need to recreate or just update
 let lastBackgroundConfig: BackgroundConfig | undefined = undefined;
 let rnnoiseProcessor: RNNoiseStreamProcessor | undefined;
+let localStreamTransformSequence = 0;
 
 function isRnnoiseSupported(): boolean {
     return !isIOS() && !isAndroid() && typeof AudioWorkletNode !== "undefined";
@@ -905,6 +906,7 @@ export const localStreamStore = derived<
 >(
     [rawLocalStreamStore, backgroundProcessingEnabledStore, requestedRnnoiseStore],
     ([$rawLocalStreamStore, $backgroundProcessingEnabled, $rnnoiseEnabled], set) => {
+        const transformSequence = ++localStreamTransformSequence;
         const rnnoiseActive = $rnnoiseEnabled && isRnnoiseSupported();
 
         if (!rnnoiseActive && rnnoiseProcessor) {
@@ -948,19 +950,28 @@ export const localStreamStore = derived<
         (async () => {
             let baseStream = await getBaseStream();
 
-            if (rnnoiseActive && baseStream.getAudioTracks().length > 0) {
-                try {
-                    if (!rnnoiseProcessor) {
-                        rnnoiseProcessor = new RNNoiseStreamProcessor();
+            if (rnnoiseActive) {
+                if (baseStream.getAudioTracks().length > 0) {
+                    try {
+                        if (!rnnoiseProcessor) {
+                            rnnoiseProcessor = new RNNoiseStreamProcessor();
+                        }
+                        baseStream = await rnnoiseProcessor.processStream(baseStream);
+                    } catch (error) {
+                        console.warn("[MediaStore] RNNoise failed, falling back to raw audio.", error);
+                        warningMessageStore.addWarningMessage(
+                            "RNNoise failed to initialize. Falling back to standard noise suppression.",
+                            { closable: true }
+                        );
                     }
-                    baseStream = await rnnoiseProcessor.processStream(baseStream);
-                } catch (error) {
-                    console.warn("[MediaStore] RNNoise failed, falling back to raw audio.", error);
-                    warningMessageStore.addWarningMessage(
-                        "RNNoise failed to initialize. Falling back to standard noise suppression.",
-                        { closable: true }
-                    );
+                } else if (rnnoiseProcessor) {
+                    // Ensure RNNoise source is detached when mic is disabled.
+                    rnnoiseProcessor.stop();
                 }
+            }
+
+            if (transformSequence !== localStreamTransformSequence) {
+                return;
             }
 
             set({
@@ -968,6 +979,9 @@ export const localStreamStore = derived<
                 stream: baseStream,
             });
         })().catch((error) => {
+            if (transformSequence !== localStreamTransformSequence) {
+                return;
+            }
             console.warn("[MediaStore] Failed to transform stream:", error);
             Sentry.captureException(error);
             warningMessageStore.addWarningMessage(get(LL).warning.backgroundProcessing.failedToApply());

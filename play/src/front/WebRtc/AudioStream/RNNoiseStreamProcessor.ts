@@ -25,6 +25,7 @@ export class RNNoiseStreamProcessor {
     private destination: MediaStreamAudioDestinationNode | null = null;
     private sourceNode: MediaStreamAudioSourceNode | null = null;
     private currentSourceStream: MediaStream | null = null;
+    private currentSourceTrackId: string | null = null;
     private initPromise: Promise<void> | null = null;
     private initError: Error | null = null;
 
@@ -129,6 +130,7 @@ export class RNNoiseStreamProcessor {
             // ignore
         }
         this.sourceNode = null;
+        this.currentSourceTrackId = null;
     }
 
     public async processStream(inputStream: MediaStream): Promise<MediaStream> {
@@ -141,11 +143,28 @@ export class RNNoiseStreamProcessor {
             throw new Error("RNNoise worklet not initialized.");
         }
 
-        if (this.currentSourceStream !== inputStream) {
+        const inputAudioTrack = inputStream.getAudioTracks()[0];
+        if (!inputAudioTrack || inputAudioTrack.readyState !== "live") {
+            // Mic can be toggled off/on while keeping the same MediaStream instance.
+            // Drop the old source so the next live track rebinds cleanly.
+            this.disconnectSource();
+            this.currentSourceStream = null;
+            const passthroughStream = new MediaStream();
+            inputStream.getVideoTracks().forEach((track) => passthroughStream.addTrack(track));
+            return passthroughStream;
+        }
+
+        const mustRebindSource =
+            this.currentSourceStream !== inputStream ||
+            this.currentSourceTrackId !== inputAudioTrack.id ||
+            !this.sourceNode;
+
+        if (mustRebindSource) {
             this.disconnectSource();
             this.sourceNode = this.audioContext.createMediaStreamSource(inputStream);
             this.sourceNode.connect(this.workletNode);
             this.currentSourceStream = inputStream;
+            this.currentSourceTrackId = inputAudioTrack.id;
         }
 
         const processedStream = new MediaStream();
@@ -160,5 +179,6 @@ export class RNNoiseStreamProcessor {
     public stop(): void {
         this.disconnectSource();
         this.currentSourceStream = null;
+        this.currentSourceTrackId = null;
     }
 }

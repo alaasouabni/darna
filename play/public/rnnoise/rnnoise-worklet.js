@@ -76,7 +76,7 @@ const RNNOISE_SCALE = 32768;
 const LIMIT = 0.98;
 
 // Debug
-const ENABLE_DEBUG = true;
+const ENABLE_DEBUG = false;
 const DEBUG_EVERY_FRAMES = 100;
 
 function clamp(v, lo, hi) {
