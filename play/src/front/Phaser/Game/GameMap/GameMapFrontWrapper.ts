@@ -154,13 +154,27 @@ export class GameMapFrontWrapper {
                     (layer.y || 0) * 32
                 );
                 if (phaserLayer) {
+                    phaserLayer.skipCull = true;
+                    console.log("[SeamDebug][LayerInit]", {
+                        layer: layer.name,
+                        width: layer.width,
+                        height: layer.height,
+                        parallaxX: layer.parallaxx ?? 1,
+                        parallaxY: layer.parallaxy ?? 1,
+                        alpha: layer.opacity,
+                        visible: layer.visible,
+                        skipCull: true,
+                        cullPaddingX: 4,
+                        cullPaddingY: 4,
+                    });
                     this.phaserLayers.push(
                         phaserLayer
                             .setDepth(depth)
                             .setScrollFactor(layer.parallaxx ?? 1, layer.parallaxy ?? 1)
                             .setAlpha(layer.opacity)
                             .setVisible(layer.visible)
-                            .setSize(layer.width, layer.height)
+                            // Render a small safety margin around camera edges to avoid one-frame cull seams.
+                            .setCullPadding(4, 4)
                     );
                 }
             }

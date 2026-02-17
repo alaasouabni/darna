@@ -638,6 +638,13 @@ export class GameScene extends DirtyScene {
         return new URL(mapStoragePath, this.wamUrlFile).toString();
     }
 
+    private forceNearestFilterOnTexture(textureKey: string): void {
+        if (!this.textures.exists(textureKey)) {
+            return;
+        }
+        this.textures.get(textureKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    }
+
     //hook initialisation
     init(initData: GameSceneInitInterface) {
         if (initData.initPosition !== undefined) {
@@ -700,13 +707,14 @@ export class GameScene extends DirtyScene {
             const tilesetImage = this.Map.addTilesetImage(
                 tileset.name,
                 `${mapDirUrl}/${tileset.image}`,
-                tileset.tilewidth,
+                tileset.tilewidth,  
                 tileset.tileheight,
                 tileset.margin,
                 tileset.spacing /*, tileset.firstgid*/
             );
             if (tilesetImage) {
                 this.Terrains.push(tilesetImage);
+                this.forceNearestFilterOnTexture(`${mapDirUrl}/${tileset.image}`);
             } else {
                 console.warn(`Failed to add TilesetImage ${tileset.name}: ${`${mapDirUrl}/${tileset.image}`}`);
             }
@@ -3524,6 +3532,7 @@ ${escapedMessage}
                             );
                             if (tilesetImage) {
                                 this.Terrains.push(tilesetImage);
+                                this.forceNearestFilterOnTexture(imageUrl);
                             } else {
                                 console.warn(`Failed to add TilesetImage ${jsonTileset.name}: ${imageUrl}`);
                             }
