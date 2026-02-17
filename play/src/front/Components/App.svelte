@@ -149,8 +149,8 @@
             },
             disableContextMenu: true,
             render: {
-                pixelArt: true,
-                roundPixels: true,
+                pixelArt: false,
+                roundPixels: false,
                 antialias: false,
                 antialiasGL: false,
             },

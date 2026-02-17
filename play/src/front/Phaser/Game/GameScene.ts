@@ -4523,9 +4523,9 @@ ${escapedMessage}
         }
 
         debugZoom("DeltaY: ", deltaY);
-        // In exploration mode, immediate discrete steps are visually more stable than continuous tweening.
-        // In follow mode, keep smoothing.
-        this.cameraManager.zoomByWheelDelta(deltaY, !this.cameraManager.isInExplorationMode());
+        // Wheel zoom runs in discrete, non-tweened steps in all modes.
+        // This avoids per-frame zoom interpolation jitter while following the player.
+        this.cameraManager.zoomByWheelDelta(deltaY, false);
     }
 
     zoomByFactor(zoomFactor: number, smooth: boolean) {

@@ -88,7 +88,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private readonly MAX_WHEEL_STEPS_PER_EVENT = Math.max(1, ZOOM_MAX_STEPS_PER_EVENT);
     private readonly BOUNDARY_INSET_PX = 1;
     private readonly CAMERA_BOUNDARY_SLACK_WORLD = 0.5;
-    private readonly CAMERA_SEAM_DEBUG = true;
+    private readonly CAMERA_SEAM_DEBUG = false;
 
     private unsubscribeMapEditorModeStore: () => void;
 
@@ -145,8 +145,9 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.animateCallback = this.animate.bind(this);
 
         this.camera = scene.cameras.main;
-        // Disable Phaser internal floor(scroll) in Camera.preRender; we handle alignment ourselves.
-        this.camera.roundPixels = false;
+        // Default to rounded camera pixels for stable follow/focus rendering.
+        // Exploration mode overrides this to keep seam mitigation behavior.
+        this.camera.roundPixels = true;
         this.cameraLocked = false;
         this.zoomLocked = false;
 
@@ -800,6 +801,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private preRenderSnap = () => {
+        // Pixel-phase snapping is only needed in exploration to fight edge seams.
+        // In follow mode it introduces visible micro-jitter while zooming.
+        if (this.cameraMode !== CameraMode.Exploration) {
+            return;
+        }
         // last chance before rendering
         this.logSeamDebug("pre_render:start");
         this.snapCameraToPixelGrid("pre_render");
@@ -1804,13 +1810,6 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private updateRoundPixelsForMode(): void {
-        this.camera.roundPixels = false;
-        // const camZoom = this.camera.zoom || 1;
-        // const scaleZoom = this.scene.scale.zoom || 1;
-        // const dpr = window.devicePixelRatio ?? 1;
-        // const eff = camZoom * scaleZoom * dpr;
-
-        // const zoomedOutVisually = eff <= 1.000001;
-        // this.camera.roundPixels = this.cameraMode !== CameraMode.Exploration || zoomedOutVisually;
+        this.camera.roundPixels = this.cameraMode !== CameraMode.Exploration;
     }
 }
