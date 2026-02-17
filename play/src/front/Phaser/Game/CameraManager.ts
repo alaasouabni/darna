@@ -1160,7 +1160,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     private animateToZoomLevel(targetZoomModifier: number): void {
         this.targetZoomModifier = targetZoomModifier;
-        this.targetDirection = this.targetZoomModifier > this.waScaleManager.zoomModifier ? "zoom_in" : "zoom_out";
+        const currentZoomModifier = this.waScaleManager.cameraZoomToZoomModifier(this.camera.zoom || 1);
+        this.targetDirection = this.targetZoomModifier > currentZoomModifier ? "zoom_in" : "zoom_out";
         this.startAnimation();
     }
 
@@ -1178,18 +1179,16 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const minZoomModifier = this.getMinimumZoomModifierForCurrentView();
         const maxZoomModifier = this.getMaximumZoomModifierForCurrentView();
         if (this.targetZoomModifier !== undefined) {
-            let targetZoomModifier;
-            if (this.targetDirection === "zoom_in") {
-                targetZoomModifier = this.targetZoomModifier * 1.01;
-            } else {
-                targetZoomModifier = this.targetZoomModifier / 1.01;
-            }
+            const targetZoomModifier = this.targetZoomModifier;
+            const currentZoomModifier = this.waScaleManager.cameraZoomToZoomModifier(this.camera.zoom || 1);
 
             let newZoom =
-                this.waScaleManager.zoomModifier +
-                (((targetZoomModifier - this.waScaleManager.zoomModifier) * delta) / 100) * this.cameraZoomSpeed;
+                currentZoomModifier + (((targetZoomModifier - currentZoomModifier) * delta) / 100) * this.cameraZoomSpeed;
 
-            if (this.targetDirection === "zoom_in" && newZoom > this.targetZoomModifier) {
+            if (Math.abs(targetZoomModifier - newZoom) <= 0.0001) {
+                newZoom = targetZoomModifier;
+                this.targetZoomModifier = undefined;
+            } else if (this.targetDirection === "zoom_in" && newZoom >= this.targetZoomModifier) {
                 newZoom = this.targetZoomModifier;
                 this.targetZoomModifier = undefined;
             } else if (this.targetDirection === "zoom_out" && newZoom <= this.targetZoomModifier) {
