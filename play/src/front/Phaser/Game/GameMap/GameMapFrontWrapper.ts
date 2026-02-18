@@ -61,7 +61,7 @@ export type PropertyChangeCallback = (
 export class GameMapFrontWrapper {
     private scene: GameScene;
     private gameMap: GameMap;
-    private readonly SEAM_PHASE_SHIM_DEBUG = true;
+    private readonly SEAM_PHASE_SHIM_DEBUG_DEFAULT = false;
     private readonly seamPhaseLayerBasePositions = new Map<TilemapLayer, { x: number; y: number }>();
     private seamPhaseShimApplied = false;
 
@@ -158,18 +158,20 @@ export class GameMapFrontWrapper {
                 );
                 if (phaserLayer) {
                     phaserLayer.skipCull = true;
-                    console.log("[SeamDebug][LayerInit]", {
-                        layer: layer.name,
-                        width: layer.width,
-                        height: layer.height,
-                        parallaxX: layer.parallaxx ?? 1,
-                        parallaxY: layer.parallaxy ?? 1,
-                        alpha: layer.opacity,
-                        visible: layer.visible,
-                        skipCull: true,
-                        cullPaddingX: 4,
-                        cullPaddingY: 4,
-                    });
+                    if (this.isSeamDebugEnabled()) {
+                        console.log("[SeamDebug][LayerInit]", {
+                            layer: layer.name,
+                            width: layer.width,
+                            height: layer.height,
+                            parallaxX: layer.parallaxx ?? 1,
+                            parallaxY: layer.parallaxy ?? 1,
+                            alpha: layer.opacity,
+                            visible: layer.visible,
+                            skipCull: true,
+                            cullPaddingX: 4,
+                            cullPaddingY: 4,
+                        });
+                    }
                     this.phaserLayers.push(
                         phaserLayer
                             .setDepth(depth)
@@ -648,12 +650,21 @@ export class GameMapFrontWrapper {
         return seamDebugWindow.__waSeam?.layerShimEnabled !== false;
     }
 
+    private isSeamDebugEnabled(): boolean {
+        const seamDebugWindow = window as unknown as {
+            __waSeam?: {
+                debugLogs?: boolean;
+            };
+        };
+        return seamDebugWindow.__waSeam?.debugLogs ?? this.SEAM_PHASE_SHIM_DEBUG_DEFAULT;
+    }
+
     public applyRenderPhaseShim(camera: Phaser.Cameras.Scene2D.Camera, reason = "pre_render"): void {
         if (!this.isLayerShimEnabled()) {
             if (this.seamPhaseShimApplied) {
                 this.clearRenderPhaseShim(`${reason}:disabled`);
             }
-            if (this.SEAM_PHASE_SHIM_DEBUG) {
+            if (this.isSeamDebugEnabled()) {
                 console.log("[SeamDebug][LayerShim] skipped:disabled", { reason });
             }
             return;
@@ -672,7 +683,7 @@ export class GameMapFrontWrapper {
         const effY = zoom * ry;
 
         if (!Number.isFinite(effX) || !Number.isFinite(effY) || effX <= 0 || effY <= 0) {
-            if (this.SEAM_PHASE_SHIM_DEBUG) {
+            if (this.isSeamDebugEnabled()) {
                 console.log("[SeamDebug][LayerShim] skipped:invalid-eff", { reason, zoom, rx, ry, effX, effY });
             }
             return;
@@ -708,7 +719,7 @@ export class GameMapFrontWrapper {
             layer.setPosition(base.x + offX, base.y + offY);
             appliedCount++;
 
-            if (this.SEAM_PHASE_SHIM_DEBUG) {
+            if (this.isSeamDebugEnabled()) {
                 debugLayers.push({
                     layer: layer.layer.name,
                     baseX: base.x,
@@ -728,7 +739,7 @@ export class GameMapFrontWrapper {
         }
 
         this.seamPhaseShimApplied = true;
-        if (this.SEAM_PHASE_SHIM_DEBUG) {
+        if (this.isSeamDebugEnabled()) {
             console.log("[SeamDebug][LayerShim] applied", {
                 reason,
                 zoom,
@@ -766,7 +777,7 @@ export class GameMapFrontWrapper {
         }
 
         this.seamPhaseShimApplied = false;
-        if (this.SEAM_PHASE_SHIM_DEBUG) {
+        if (this.isSeamDebugEnabled()) {
             console.log("[SeamDebug][LayerShim] cleared", { reason, restored });
         }
     }

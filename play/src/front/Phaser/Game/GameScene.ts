@@ -258,6 +258,7 @@ const debug = Debug("GameScene");
 type SeamExperimentControls = {
     layerShimEnabled: boolean;
     uvInsetTexels: number;
+    debugLogs: boolean;
 };
 const DEFAULT_UV_INSET_TEXELS = 0.03;
 
@@ -646,9 +647,11 @@ export class GameScene extends DirtyScene {
 
     private forceNearestFilterOnTexture(textureKey: string): void {
         if (!this.textures.exists(textureKey)) {
-            console.warn("[SeamDebug][NearestFilter] texture missing", {
-                textureKey,
-            });
+            if (this.isSeamDebugLogsEnabled()) {
+                console.warn("[SeamDebug][NearestFilter] texture missing", {
+                    textureKey,
+                });
+            }
             return;
         }
 
@@ -658,17 +661,19 @@ export class GameScene extends DirtyScene {
         const afterModes = texture.source.map((source) => source.scaleMode);
         const allNearest = afterModes.every((mode) => mode === Phaser.Textures.FilterMode.NEAREST);
 
-        console.log("[SeamDebug][NearestFilter] applied", {
-            textureKey,
-            frameTotal: texture.frameTotal,
-            sourceCount: texture.source.length,
-            beforeModes,
-            afterModes,
-            nearestEnumValue: Phaser.Textures.FilterMode.NEAREST,
-            allNearest,
-        });
+        if (this.isSeamDebugLogsEnabled()) {
+            console.log("[SeamDebug][NearestFilter] applied", {
+                textureKey,
+                frameTotal: texture.frameTotal,
+                sourceCount: texture.source.length,
+                beforeModes,
+                afterModes,
+                nearestEnumValue: Phaser.Textures.FilterMode.NEAREST,
+                allNearest,
+            });
+        }
 
-        if (!allNearest) {
+        if (!allNearest && this.isSeamDebugLogsEnabled()) {
             console.warn("[SeamDebug][NearestFilter] non-nearest source detected", {
                 textureKey,
                 afterModes,
@@ -689,6 +694,7 @@ export class GameScene extends DirtyScene {
             seamDebugWindow.__waSeam = {
                 layerShimEnabled: true,
                 uvInsetTexels: DEFAULT_UV_INSET_TEXELS,
+                debugLogs: false,
             };
         } else {
             if (typeof seamDebugWindow.__waSeam.layerShimEnabled !== "boolean") {
@@ -696,6 +702,9 @@ export class GameScene extends DirtyScene {
             }
             if (typeof seamDebugWindow.__waSeam.uvInsetTexels !== "number") {
                 seamDebugWindow.__waSeam.uvInsetTexels = DEFAULT_UV_INSET_TEXELS;
+            }
+            if (typeof seamDebugWindow.__waSeam.debugLogs !== "boolean") {
+                seamDebugWindow.__waSeam.debugLogs = false;
             }
         }
 
@@ -743,31 +752,39 @@ export class GameScene extends DirtyScene {
         };
 
         seamDebugWindow.__waSeamPatchInstalled = true;
-        console.log("[SeamDebug][Experiment] tools ready", {
-            controls: seamDebugWindow.__waSeam,
-            usage: {
-                layerShimEnabled: "window.__waSeam.layerShimEnabled = false|true",
-                uvInsetTexels: "window.__waSeam.uvInsetTexels = 0|0.03|0.05|0.1",
-            },
-            defaults: {
-                uvInsetTexels: DEFAULT_UV_INSET_TEXELS,
-            },
-        });
+        if (this.isSeamDebugLogsEnabled()) {
+            console.log("[SeamDebug][Experiment] tools ready", {
+                controls: seamDebugWindow.__waSeam,
+                usage: {
+                    debugLogs: "window.__waSeam.debugLogs = false|true",
+                    layerShimEnabled: "window.__waSeam.layerShimEnabled = false|true",
+                    uvInsetTexels: "window.__waSeam.uvInsetTexels = 0|0.03|0.05|0.1",
+                },
+                defaults: {
+                    debugLogs: false,
+                    uvInsetTexels: DEFAULT_UV_INSET_TEXELS,
+                },
+            });
+        }
     }
 
     private forceClampToEdgeOnTexture(textureKey: string): void {
         if (!this.textures.exists(textureKey)) {
-            console.warn("[SeamDebug][ClampWrap] texture missing", {
-                textureKey,
-            });
+            if (this.isSeamDebugLogsEnabled()) {
+                console.warn("[SeamDebug][ClampWrap] texture missing", {
+                    textureKey,
+                });
+            }
             return;
         }
 
         const renderer = this.game.renderer;
         if (!("gl" in renderer) || !renderer.gl) {
-            console.log("[SeamDebug][ClampWrap] skipped:non-webgl-renderer", {
-                textureKey,
-            });
+            if (this.isSeamDebugLogsEnabled()) {
+                console.log("[SeamDebug][ClampWrap] skipped:non-webgl-renderer", {
+                    textureKey,
+                });
+            }
             return;
         }
         const gl = renderer.gl;
@@ -822,12 +839,21 @@ export class GameScene extends DirtyScene {
             gl.bindTexture(texture2D, null);
         }
 
-        console.log("[SeamDebug][ClampWrap] applied", {
-            textureKey,
-            sourceCount: texture.source.length,
-            clampValue: clamp,
-            sources,
-        });
+        if (this.isSeamDebugLogsEnabled()) {
+            console.log("[SeamDebug][ClampWrap] applied", {
+                textureKey,
+                sourceCount: texture.source.length,
+                clampValue: clamp,
+                sources,
+            });
+        }
+    }
+
+    private isSeamDebugLogsEnabled(): boolean {
+        const seamDebugWindow = window as unknown as {
+            __waSeam?: Partial<SeamExperimentControls>;
+        };
+        return seamDebugWindow.__waSeam?.debugLogs ?? false;
     }
 
     //hook initialisation

@@ -494,6 +494,8 @@ export class MapEditorModeManager {
             console.error("No area property data");
             return;
         }
+        // Close the claim dialog immediately once input is valid.
+        mapEditorAskToClaimPersonalAreaStore.set(undefined);
 
         // Get and revoke the personal area of the user if it exists
         const gameMapFrontWrapper = gameManager.getCurrentGameScene().getGameMapFrontWrapper();

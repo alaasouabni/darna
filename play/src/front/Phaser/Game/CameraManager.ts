@@ -89,7 +89,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private readonly ZOOM_INTEGER_EPSILON = 0.000001;
     private readonly BOUNDARY_INSET_PX = 1;
     private readonly CAMERA_BOUNDARY_SLACK_WORLD = 0.5;
-    private readonly CAMERA_SEAM_DEBUG = true;
+    private readonly CAMERA_SEAM_DEBUG_DEFAULT = false;
 
     private unsubscribeMapEditorModeStore: () => void;
 
@@ -153,10 +153,12 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         };
         seamDebugWindow.__wa_scene = this.scene;
         seamDebugWindow.__wa_camera = this.camera;
-        console.log("[SeamDebug] ctor:globals", {
-            hasScene: Boolean(seamDebugWindow.__wa_scene),
-            hasCamera: Boolean(seamDebugWindow.__wa_camera),
-        });
+        if (this.isSeamDebugEnabled()) {
+            console.log("[SeamDebug] ctor:globals", {
+                hasScene: Boolean(seamDebugWindow.__wa_scene),
+                hasCamera: Boolean(seamDebugWindow.__wa_camera),
+            });
+        }
 
         // Default to rounded camera pixels for stable follow/focus rendering.
         // Exploration mode overrides this to keep seam mitigation behavior.
@@ -891,7 +893,9 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             try {
                 this.scene.getGameMapFrontWrapper().applyRenderPhaseShim(camera, "camera_pre_render");
             } catch (error) {
-                console.log("[SeamDebug] layer-shim:apply:error", error);
+                if (this.isSeamDebugEnabled()) {
+                    console.log("[SeamDebug] layer-shim:apply:error", error);
+                }
             }
         };
 
@@ -909,7 +913,9 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         try {
             this.scene.getGameMapFrontWrapper().clearRenderPhaseShim("post_render");
         } catch (error) {
-            console.log("[SeamDebug] layer-shim:clear:error", error);
+            if (this.isSeamDebugEnabled()) {
+                console.log("[SeamDebug] layer-shim:clear:error", error);
+            }
         }
         this.logSeamDebug("post_render");
     };
@@ -960,11 +966,6 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     private getSafeFitCameraZoom(): number {
         const fit = this.getFitCameraZoom();
-        console.log(
-            `Fit zoom: ${fit}, fit * safe factor: ${
-                fit * this.SAFE_MIN_ZOOM_OUT_FACTOR
-            }, max camera zoom: ${this.getMaximumCameraZoomForCurrentView()}`
-        );
         const maxCameraZoom = this.getMaximumCameraZoomForCurrentView();
 
         // you already keep it slightly zoomed-in vs fit (good)
@@ -1594,6 +1595,9 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private logZoomDebug(reason: string): void {
+        if (!this.isSeamDebugEnabled()) {
+            return;
+        }
         const canvas = this.scene.sys.game.canvas;
         const rect = canvas.getBoundingClientRect();
         const bufferRatio = rect.width > 0 ? canvas.width / rect.width : 1;
@@ -1629,7 +1633,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const rx = rect.width > 0 ? canvas.width / rect.width : 1;
         const ry = rect.height > 0 ? canvas.height / rect.height : 1;
 
-        if (this.CAMERA_SEAM_DEBUG && Math.abs(rx - ry) > 0.0001) {
+        if (this.isSeamDebugEnabled() && Math.abs(rx - ry) > 0.0001) {
             console.log("[SeamDebug] buffer:anisotropy", {
                 rx,
                 ry,
@@ -1770,7 +1774,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private logSeamDebug(stage: string, data: Record<string, unknown> = {}): void {
-        if (!this.CAMERA_SEAM_DEBUG) {
+        if (!this.isSeamDebugEnabled()) {
             return;
         }
 
@@ -1835,6 +1839,15 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             dpr: window.devicePixelRatio ?? 1,
             ...data,
         });
+    }
+
+    private isSeamDebugEnabled(): boolean {
+        const seamDebugWindow = window as unknown as {
+            __waSeam?: {
+                debugLogs?: boolean;
+            };
+        };
+        return seamDebugWindow.__waSeam?.debugLogs ?? this.CAMERA_SEAM_DEBUG_DEFAULT;
     }
 
     private resistZoomCallback: ((time: number, delta: number) => void) | undefined;

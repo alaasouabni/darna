@@ -16,7 +16,7 @@ export class WaScaleManager {
     private game!: Game;
     private actualZoom = 1;
     private _saveZoom = 1;
-    private readonly WA_SCALE_DEBUG = true;
+    private readonly WA_SCALE_DEBUG_DEFAULT = false;
 
     private focusTarget?: WaScaleManagerFocusTarget;
 
@@ -100,7 +100,7 @@ export class WaScaleManager {
         const budgetW = Math.max(1, Math.round(budgetRaw.width));
         const budgetH = Math.max(1, Math.round(budgetRaw.height));
         const budgetPixels = budgetW * budgetH;
-        if (this.WA_SCALE_DEBUG) {
+        if (this.isScaleDebugEnabled()) {
             console.log("[SeamDebug][Scale] applyNewSize:start", {
                 cssWraw,
                 cssHraw,
@@ -136,7 +136,7 @@ export class WaScaleManager {
             const exactW = Math.round(w * zoom) === cssW;
             const exactH = Math.round(h * zoom) === cssH;
             if (!exactW || !exactH) {
-                if (this.WA_SCALE_DEBUG) {
+                if (this.isScaleDebugEnabled()) {
                     console.log("[SeamDebug][Scale] candidate:reject-mapping", {
                         zoom,
                         w,
@@ -151,7 +151,7 @@ export class WaScaleManager {
             }
 
             const pixels = w * h;
-            if (this.WA_SCALE_DEBUG) {
+            if (this.isScaleDebugEnabled()) {
                 console.log("[SeamDebug][Scale] candidate", {
                     zoom,
                     w,
@@ -167,7 +167,7 @@ export class WaScaleManager {
                 bestW = w;
                 bestH = h;
                 bestPixels = pixels;
-                if (this.WA_SCALE_DEBUG) {
+                if (this.isScaleDebugEnabled()) {
                     console.log("[SeamDebug][Scale] candidate:new-best", {
                         bestZoom,
                         bestW,
@@ -184,7 +184,7 @@ export class WaScaleManager {
 
         this.scaleManager.setZoom(bestZoom);
         this.actualZoom = bestZoom;
-        if (this.WA_SCALE_DEBUG) {
+        if (this.isScaleDebugEnabled()) {
             console.log("[SeamDebug][Scale] applyNewSize:chosen", {
                 bestZoom,
                 bestW,
@@ -202,7 +202,7 @@ export class WaScaleManager {
         gameStyle.height = `${cssH}px`;
 
         this.game.markDirty();
-        if (this.WA_SCALE_DEBUG) {
+        if (this.isScaleDebugEnabled()) {
             console.log("[SeamDebug][Scale] applyNewSize:end", {
                 scaleW: this.scaleManager.width,
                 scaleH: this.scaleManager.height,
@@ -218,7 +218,7 @@ export class WaScaleManager {
      */
     public setRuntimeZoomModifier(zoomModifier: number, camera?: Phaser.Cameras.Scene2D.Camera): void {
         this.hdpiManager.zoomModifier = zoomModifier;
-        if (this.WA_SCALE_DEBUG) {
+        if (this.isScaleDebugEnabled()) {
             console.log("[SeamDebug][Scale] runtimeZoomModifier:set", {
                 zoomModifier,
                 computedCameraZoom: this.zoomModifierToCameraZoom(zoomModifier),
@@ -243,7 +243,7 @@ export class WaScaleManager {
     public setRuntimeCameraZoom(cameraZoom: number, camera?: Phaser.Cameras.Scene2D.Camera): void {
         const safeCameraZoom = Math.max(cameraZoom, Number.EPSILON);
         this.hdpiManager.zoomModifier = this.cameraZoomToZoomModifier(safeCameraZoom);
-        if (this.WA_SCALE_DEBUG) {
+        if (this.isScaleDebugEnabled()) {
             console.log("[SeamDebug][Scale] runtimeCameraZoom:set", {
                 cameraZoom,
                 safeCameraZoom,
@@ -368,6 +368,15 @@ export class WaScaleManager {
 
     public get isMaximumZoomInReached(): boolean {
         return this.hdpiManager.isMaximumZoomInReached;
+    }
+
+    private isScaleDebugEnabled(): boolean {
+        const seamDebugWindow = window as unknown as {
+            __waSeam?: {
+                debugLogs?: boolean;
+            };
+        };
+        return seamDebugWindow.__waSeam?.debugLogs ?? this.WA_SCALE_DEBUG_DEFAULT;
     }
 }
 
