@@ -640,9 +640,112 @@ export class GameScene extends DirtyScene {
 
     private forceNearestFilterOnTexture(textureKey: string): void {
         if (!this.textures.exists(textureKey)) {
+            console.warn("[SeamDebug][NearestFilter] texture missing", {
+                textureKey,
+            });
             return;
         }
-        this.textures.get(textureKey).setFilter(Phaser.Textures.FilterMode.NEAREST);
+
+        const texture = this.textures.get(textureKey);
+        const beforeModes = texture.source.map((source) => source.scaleMode);
+        texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+        const afterModes = texture.source.map((source) => source.scaleMode);
+        const allNearest = afterModes.every((mode) => mode === Phaser.Textures.FilterMode.NEAREST);
+
+        console.log("[SeamDebug][NearestFilter] applied", {
+            textureKey,
+            frameTotal: texture.frameTotal,
+            sourceCount: texture.source.length,
+            beforeModes,
+            afterModes,
+            nearestEnumValue: Phaser.Textures.FilterMode.NEAREST,
+            allNearest,
+        });
+
+        if (!allNearest) {
+            console.warn("[SeamDebug][NearestFilter] non-nearest source detected", {
+                textureKey,
+                afterModes,
+                nearestEnumValue: Phaser.Textures.FilterMode.NEAREST,
+            });
+        }
+
+        this.forceClampToEdgeOnTexture(textureKey);
+    }
+
+    private forceClampToEdgeOnTexture(textureKey: string): void {
+        if (!this.textures.exists(textureKey)) {
+            console.warn("[SeamDebug][ClampWrap] texture missing", {
+                textureKey,
+            });
+            return;
+        }
+
+        const renderer = this.game.renderer;
+        if (!("gl" in renderer) || !renderer.gl) {
+            console.log("[SeamDebug][ClampWrap] skipped:non-webgl-renderer", {
+                textureKey,
+            });
+            return;
+        }
+        const gl = renderer.gl;
+
+        const texture = this.textures.get(textureKey);
+        const clamp = gl.CLAMP_TO_EDGE;
+        const texture2D = gl.TEXTURE_2D;
+        const wrapS = gl.TEXTURE_WRAP_S;
+        const wrapT = gl.TEXTURE_WRAP_T;
+        const currentTexture = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+
+        const sources: Array<Record<string, unknown>> = [];
+        for (let i = 0; i < texture.source.length; i++) {
+            const source = texture.source[i];
+            const wrapper = source.glTexture;
+            const beforeWrapS = wrapper?.wrapS;
+            const beforeWrapT = wrapper?.wrapT;
+
+            if (!wrapper || !wrapper.webGLTexture) {
+                sources.push({
+                    index: i,
+                    ok: false,
+                    reason: "missing-gl-wrapper",
+                    beforeWrapS,
+                    beforeWrapT,
+                });
+                continue;
+            }
+
+            wrapper.wrapS = clamp;
+            wrapper.wrapT = clamp;
+
+            gl.bindTexture(texture2D, wrapper.webGLTexture);
+            gl.texParameteri(texture2D, wrapS, clamp);
+            gl.texParameteri(texture2D, wrapT, clamp);
+
+            sources.push({
+                index: i,
+                ok: true,
+                beforeWrapS,
+                beforeWrapT,
+                afterWrapS: wrapper.wrapS,
+                afterWrapT: wrapper.wrapT,
+                minFilter: wrapper.minFilter,
+                magFilter: wrapper.magFilter,
+            });
+        }
+
+        if (currentTexture) {
+            gl.bindTexture(texture2D, currentTexture);
+        } else {
+            gl.bindTexture(texture2D, null);
+        }
+
+        console.log("[SeamDebug][ClampWrap] applied", {
+            textureKey,
+            sourceCount: texture.source.length,
+            clampValue: clamp,
+            sources,
+        });
     }
 
     //hook initialisation

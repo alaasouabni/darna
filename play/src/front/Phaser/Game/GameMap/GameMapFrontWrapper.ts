@@ -61,6 +61,9 @@ export type PropertyChangeCallback = (
 export class GameMapFrontWrapper {
     private scene: GameScene;
     private gameMap: GameMap;
+    private readonly SEAM_PHASE_SHIM_DEBUG = true;
+    private readonly seamPhaseLayerBasePositions = new Map<TilemapLayer, { x: number; y: number }>();
+    private seamPhaseShimApplied = false;
 
     private oldKey: number | undefined;
     /**
@@ -176,6 +179,7 @@ export class GameMapFrontWrapper {
                             // Render a small safety margin around camera edges to avoid one-frame cull seams.
                             .setCullPadding(4, 4)
                     );
+                    this.seamPhaseLayerBasePositions.set(phaserLayer, { x: phaserLayer.x, y: phaserLayer.y });
                 }
             }
             if (layer.type === "objectgroup" && layer.name === "floorLayer") {
@@ -224,6 +228,10 @@ export class GameMapFrontWrapper {
         this.entitiesCollisionLayer.setDepth(-2).setCollisionByProperty({ collides: true }).setVisible(false);
 
         this.phaserLayers.push(this.entitiesCollisionLayer);
+        this.seamPhaseLayerBasePositions.set(this.entitiesCollisionLayer, {
+            x: this.entitiesCollisionLayer.x,
+            y: this.entitiesCollisionLayer.y,
+        });
 
         const phaserBlankCollisionsLayer2 = phaserMap.createBlankLayer("__areasCollisionLayer", terrains);
         if (!phaserBlankCollisionsLayer2) {
@@ -233,6 +241,10 @@ export class GameMapFrontWrapper {
         this.areasCollisionLayer.setDepth(-2).setCollisionByProperty({ collides: true }).setVisible(false);
 
         this.phaserLayers.push(this.areasCollisionLayer);
+        this.seamPhaseLayerBasePositions.set(this.areasCollisionLayer, {
+            x: this.areasCollisionLayer.x,
+            y: this.areasCollisionLayer.y,
+        });
 
         this.updateCollisionGrid(undefined, false);
     }
@@ -601,6 +613,142 @@ export class GameMapFrontWrapper {
     public addTerrain(terrain: Phaser.Tilemaps.Tileset): void {
         for (const phaserLayer of this.phaserLayers) {
             phaserLayer.tileset.push(terrain);
+        }
+    }
+
+    private shouldApplySeamShim(layer: TilemapLayer): boolean {
+        const layerName = layer.layer.name;
+        if (layerName === "__entitiesCollisionLayer" || layerName === "__areasCollisionLayer") {
+            return false;
+        }
+        return layer.visible;
+    }
+
+    private getLayerBasePosition(layer: TilemapLayer): { x: number; y: number } {
+        const current = this.seamPhaseLayerBasePositions.get(layer);
+        if (!current) {
+            const created = { x: layer.x, y: layer.y };
+            this.seamPhaseLayerBasePositions.set(layer, created);
+            return created;
+        }
+        if (!this.seamPhaseShimApplied && (Math.abs(current.x - layer.x) > 0.000001 || Math.abs(current.y - layer.y) > 0.000001)) {
+            const updated = { x: layer.x, y: layer.y };
+            this.seamPhaseLayerBasePositions.set(layer, updated);
+            return updated;
+        }
+        return current;
+    }
+
+    public applyRenderPhaseShim(camera: Phaser.Cameras.Scene2D.Camera, reason = "pre_render"): void {
+        if (this.seamPhaseShimApplied) {
+            this.clearRenderPhaseShim(`${reason}:auto-clear`);
+        }
+
+        const canvas = this.scene.sys.game.canvas;
+        const rect = canvas.getBoundingClientRect();
+        const rx = rect.width > 0 ? canvas.width / rect.width : 1;
+        const ry = rect.height > 0 ? canvas.height / rect.height : 1;
+        const zoom = camera.zoom || 1;
+        const effX = zoom * rx;
+        const effY = zoom * ry;
+
+        if (!Number.isFinite(effX) || !Number.isFinite(effY) || effX <= 0 || effY <= 0) {
+            if (this.SEAM_PHASE_SHIM_DEBUG) {
+                console.log("[SeamDebug][LayerShim] skipped:invalid-eff", { reason, zoom, rx, ry, effX, effY });
+            }
+            return;
+        }
+
+        // Tilemap rendering transform uses camera.scrollX/Y (not worldView.x/y).
+        // worldView is rounded from scroll + display size and can differ at non-integer zoom.
+        const phaseX = camera.scrollX;
+        const phaseY = camera.scrollY;
+        const worldViewX = camera.worldView.x;
+        const worldViewY = camera.worldView.y;
+        const debugLayers: Array<Record<string, unknown>> = [];
+        let appliedCount = 0;
+
+        for (const layer of this.phaserLayers) {
+            if (!this.shouldApplySeamShim(layer)) {
+                continue;
+            }
+
+            const base = this.getLayerBasePosition(layer);
+            const sfX = layer.scrollFactorX;
+            const sfY = layer.scrollFactorY;
+
+            const renderXPx = (base.x - phaseX * sfX) * effX;
+            const renderYPx = (base.y - phaseY * sfY) * effY;
+
+            const fracX = renderXPx - Math.round(renderXPx);
+            const fracY = renderYPx - Math.round(renderYPx);
+
+            const offX = -fracX / effX;
+            const offY = -fracY / effY;
+
+            layer.setPosition(base.x + offX, base.y + offY);
+            appliedCount++;
+
+            if (this.SEAM_PHASE_SHIM_DEBUG) {
+                debugLayers.push({
+                    layer: layer.layer.name,
+                    baseX: base.x,
+                    baseY: base.y,
+                    sfX,
+                    sfY,
+                    renderXPx,
+                    renderYPx,
+                    fracX,
+                    fracY,
+                    offX,
+                    offY,
+                    finalX: layer.x,
+                    finalY: layer.y,
+                });
+            }
+        }
+
+        this.seamPhaseShimApplied = true;
+        if (this.SEAM_PHASE_SHIM_DEBUG) {
+            console.log("[SeamDebug][LayerShim] applied", {
+                reason,
+                zoom,
+                rx,
+                ry,
+                effX,
+                effY,
+                phaseX,
+                phaseY,
+                worldViewX,
+                worldViewY,
+                phaseDeltaX: phaseX - worldViewX,
+                phaseDeltaY: phaseY - worldViewY,
+                appliedCount,
+                layers: debugLayers,
+            });
+        }
+    }
+
+    public clearRenderPhaseShim(reason = "post_render"): void {
+        if (!this.seamPhaseShimApplied) {
+            return;
+        }
+
+        let restored = 0;
+        for (const layer of this.phaserLayers) {
+            const base = this.seamPhaseLayerBasePositions.get(layer);
+            if (!base) {
+                continue;
+            }
+            if (Math.abs(layer.x - base.x) > 0.000001 || Math.abs(layer.y - base.y) > 0.000001) {
+                layer.setPosition(base.x, base.y);
+                restored++;
+            }
+        }
+
+        this.seamPhaseShimApplied = false;
+        if (this.SEAM_PHASE_SHIM_DEBUG) {
+            console.log("[SeamDebug][LayerShim] cleared", { reason, restored });
         }
     }
 
@@ -1420,6 +1568,8 @@ export class GameMapFrontWrapper {
     }
 
     public close() {
+        this.clearRenderPhaseShim("close");
+        this.seamPhaseLayerBasePositions.clear();
         this.entitiesManager.close();
     }
 }

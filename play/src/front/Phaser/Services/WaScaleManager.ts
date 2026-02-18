@@ -16,6 +16,7 @@ export class WaScaleManager {
     private game!: Game;
     private actualZoom = 1;
     private _saveZoom = 1;
+    private readonly WA_SCALE_DEBUG = true;
 
     private focusTarget?: WaScaleManagerFocusTarget;
 
@@ -99,6 +100,21 @@ export class WaScaleManager {
         const budgetW = Math.max(1, Math.round(budgetRaw.width));
         const budgetH = Math.max(1, Math.round(budgetRaw.height));
         const budgetPixels = budgetW * budgetH;
+        if (this.WA_SCALE_DEBUG) {
+            console.log("[SeamDebug][Scale] applyNewSize:start", {
+                cssWraw,
+                cssHraw,
+                cssW,
+                cssH,
+                dpr,
+                budgetW,
+                budgetH,
+                budgetPixels,
+                currentScaleW: this.scaleManager.width,
+                currentScaleH: this.scaleManager.height,
+                currentScaleZoom: this.scaleManager.zoom,
+            });
+        }
 
         // "Clean" zoom candidates only (avoid 0.998xxx type ratios)
         // 1 = internal == css
@@ -117,10 +133,33 @@ export class WaScaleManager {
             const h = Math.max(1, Math.round(cssH / zoom));
 
             // Require exact mapping to CSS to avoid 1px rounding resample
-            if (Math.round(w * zoom) !== cssW) continue;
-            if (Math.round(h * zoom) !== cssH) continue;
+            const exactW = Math.round(w * zoom) === cssW;
+            const exactH = Math.round(h * zoom) === cssH;
+            if (!exactW || !exactH) {
+                if (this.WA_SCALE_DEBUG) {
+                    console.log("[SeamDebug][Scale] candidate:reject-mapping", {
+                        zoom,
+                        w,
+                        h,
+                        exactW,
+                        exactH,
+                        mappedW: Math.round(w * zoom),
+                        mappedH: Math.round(h * zoom),
+                    });
+                }
+                continue;
+            }
 
             const pixels = w * h;
+            if (this.WA_SCALE_DEBUG) {
+                console.log("[SeamDebug][Scale] candidate", {
+                    zoom,
+                    w,
+                    h,
+                    pixels,
+                    budgetPixels,
+                });
+            }
 
             // Must fit budget; choose the largest internal resolution that fits
             if (pixels <= budgetPixels && pixels > bestPixels) {
@@ -128,6 +167,14 @@ export class WaScaleManager {
                 bestW = w;
                 bestH = h;
                 bestPixels = pixels;
+                if (this.WA_SCALE_DEBUG) {
+                    console.log("[SeamDebug][Scale] candidate:new-best", {
+                        bestZoom,
+                        bestW,
+                        bestH,
+                        bestPixels,
+                    });
+                }
             }
         }
 
@@ -137,6 +184,15 @@ export class WaScaleManager {
 
         this.scaleManager.setZoom(bestZoom);
         this.actualZoom = bestZoom;
+        if (this.WA_SCALE_DEBUG) {
+            console.log("[SeamDebug][Scale] applyNewSize:chosen", {
+                bestZoom,
+                bestW,
+                bestH,
+                bestPixels,
+                dpr,
+            });
+        }
 
         this.applyCameraZoom({ width: bestW, height: bestH }, { width: bestW, height: bestH }, camera);
 
@@ -146,6 +202,14 @@ export class WaScaleManager {
         gameStyle.height = `${cssH}px`;
 
         this.game.markDirty();
+        if (this.WA_SCALE_DEBUG) {
+            console.log("[SeamDebug][Scale] applyNewSize:end", {
+                scaleW: this.scaleManager.width,
+                scaleH: this.scaleManager.height,
+                scaleZoom: this.scaleManager.zoom,
+                actualZoom: this.actualZoom,
+            });
+        }
     }
 
     /**
@@ -154,6 +218,12 @@ export class WaScaleManager {
      */
     public setRuntimeZoomModifier(zoomModifier: number, camera?: Phaser.Cameras.Scene2D.Camera): void {
         this.hdpiManager.zoomModifier = zoomModifier;
+        if (this.WA_SCALE_DEBUG) {
+            console.log("[SeamDebug][Scale] runtimeZoomModifier:set", {
+                zoomModifier,
+                computedCameraZoom: this.zoomModifierToCameraZoom(zoomModifier),
+            });
+        }
         if (this.scaleManager === undefined) {
             return;
         }
@@ -173,6 +243,13 @@ export class WaScaleManager {
     public setRuntimeCameraZoom(cameraZoom: number, camera?: Phaser.Cameras.Scene2D.Camera): void {
         const safeCameraZoom = Math.max(cameraZoom, Number.EPSILON);
         this.hdpiManager.zoomModifier = this.cameraZoomToZoomModifier(safeCameraZoom);
+        if (this.WA_SCALE_DEBUG) {
+            console.log("[SeamDebug][Scale] runtimeCameraZoom:set", {
+                cameraZoom,
+                safeCameraZoom,
+                zoomModifier: this.hdpiManager.zoomModifier,
+            });
+        }
         if (this.scaleManager === undefined) {
             return;
         }

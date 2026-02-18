@@ -88,7 +88,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private readonly MAX_WHEEL_STEPS_PER_EVENT = Math.max(1, ZOOM_MAX_STEPS_PER_EVENT);
     private readonly BOUNDARY_INSET_PX = 1;
     private readonly CAMERA_BOUNDARY_SLACK_WORLD = 0.5;
-    private readonly CAMERA_SEAM_DEBUG = false;
+    private readonly CAMERA_SEAM_DEBUG = true;
 
     private unsubscribeMapEditorModeStore: () => void;
 
@@ -132,6 +132,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private explorationAllowOutsideMap = true;
     private wheelZoomAccumulator = 0;
     private resizeInProgress = false;
+    private unhookCameraPreRender?: () => void;
 
     // The tween for the camera offset
     private cameraOffsetCurrentTween?: Phaser.Tweens.Tween;
@@ -145,6 +146,17 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.animateCallback = this.animate.bind(this);
 
         this.camera = scene.cameras.main;
+        const seamDebugWindow = window as unknown as {
+            __wa_scene?: GameScene;
+            __wa_camera?: Phaser.Cameras.Scene2D.Camera;
+        };
+        seamDebugWindow.__wa_scene = this.scene;
+        seamDebugWindow.__wa_camera = this.camera;
+        console.log("[SeamDebug] ctor:globals", {
+            hasScene: Boolean(seamDebugWindow.__wa_scene),
+            hasCamera: Boolean(seamDebugWindow.__wa_camera),
+        });
+
         // Default to rounded camera pixels for stable follow/focus rendering.
         // Exploration mode overrides this to keep seam mitigation behavior.
         this.camera.roundPixels = true;
@@ -154,6 +166,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.waScaleManager = waScaleManager;
 
         this.initCamera();
+        this.hookCameraPreRender();
 
         this.bindEventHandlers();
 
@@ -181,6 +194,13 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         // Set zoom out to the maximum possible value (fit-to-map)
         this.refreshZoomBounds();
         this.targetZoomModifier = undefined;
+        this.logSeamDebug("ctor:init", {
+            mapW: this.mapSize.width,
+            mapH: this.mapSize.height,
+            cameraW: this.camera.width,
+            cameraH: this.camera.height,
+            cameraZoom: this.camera.zoom,
+        });
     }
 
     public destroy(): void {
@@ -189,6 +209,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.unsubscribeMapEditorModeStore();
         this.scene.events.off(Phaser.Scenes.Events.PRE_RENDER, this.preRenderSnap);
         this.scene.events.off(Phaser.Scenes.Events.RENDER, this.postRenderDebug);
+        this.unhookCameraPreRender?.();
+        this.unhookCameraPreRender = undefined;
 
         super.destroy();
     }
@@ -251,6 +273,14 @@ export class CameraManager extends Phaser.Events.EventEmitter {
      * @param duration Time for the transition im MS. If set to 0, transition will occur immediately
      */
     public enterFocusMode(focusOn: WaScaleManagerFocusTarget, margin = 0, duration = 1000): void {
+        this.logSeamDebug("focus:enter", {
+            focusX: focusOn.x,
+            focusY: focusOn.y,
+            focusW: focusOn.width,
+            focusH: focusOn.height,
+            margin,
+            duration,
+        });
         this.setCameraMode(CameraMode.Focus);
         this.waScaleManager.saveZoom();
         this.waScaleManager.setFocusTarget(focusOn);
@@ -297,6 +327,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     public leaveFocusMode(player: Player, duration = 0): void {
+        this.logSeamDebug("focus:leave", {
+            playerX: player.x,
+            playerY: player.y,
+            duration,
+        });
         this.waScaleManager.setFocusTarget();
         this.unlockCameraWithDelay(duration);
         this.startFollowPlayer(player, duration);
@@ -340,11 +375,25 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         targetZoomLevel: number | undefined = undefined,
         options: StartFollowPlayerOptions = {}
     ): void {
+        this.logSeamDebug("follow:start", {
+            duration,
+            targetZoomLevel,
+            playerX: player.x,
+            playerY: player.y,
+            preserveZoomOnComplete: options.preserveZoomOnComplete ?? false,
+            freezeTargetDuringTransition: options.freezeTargetDuringTransition ?? false,
+            smoothCatchUpMs: options.smoothCatchUpMs ?? 0,
+        });
         const preserveZoomOnComplete = options.preserveZoomOnComplete ?? false;
         const freezeTargetDuringTransition = options.freezeTargetDuringTransition ?? false;
         const smoothCatchUpMs = options.smoothCatchUpMs ?? 0;
 
         if (duration > 0 && this.followTransitionInProgress && this.playerToFollow === player) {
+            this.logSeamDebug("follow:skip-already-in-progress", {
+                duration,
+                playerX: player.x,
+                playerY: player.y,
+            });
             return;
         }
 
@@ -359,6 +408,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         if (duration === 0) {
             this.setCameraMode(CameraMode.Follow);
             this.camera.startFollow(player, true);
+            this.logSeamDebug("follow:immediate-applied", {
+                playerX: player.x,
+                playerY: player.y,
+            });
             this.scene.markDirty();
             this.applyMapBoundsWithSlack();
             this.refreshZoomBounds();
@@ -436,6 +489,12 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 }
                 this.followTransitionInProgress = false;
                 this.startFollowTween = undefined;
+                this.logSeamDebug("follow:complete", {
+                    playerX: player.x,
+                    playerY: player.y,
+                    smoothCatchUpMs,
+                    preserveZoomOnComplete,
+                });
             },
         });
     }
@@ -486,7 +545,6 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         // Let's put this in Game coordinates by applying the zoom level:
         let followOffsetX = (xCenter - game.offsetWidth / 2) / this.scene.scale.zoom;
         let followOffsetY = (yCenter - game.offsetHeight / 2) / this.scene.scale.zoom;
-        const dpr = window.devicePixelRatio ?? 1;
         const eff = this.getEffPixelsPerWorldUnit();
         if (eff <= 1.000001) {
             const q = 1 / eff;
@@ -568,7 +626,12 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         if (this.cameraMode === mode) {
             return;
         }
+        const previousMode = this.cameraMode;
         this.cameraMode = mode;
+        this.logSeamDebug("mode:changed", {
+            from: previousMode,
+            to: mode,
+        });
         this.updateRoundPixelsForMode();
     }
 
@@ -648,6 +711,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     // Create function to define the camera on exploration mode. The camera can be moved anywhere on the map. The camera is not locked on the player. The camera can be zoomed in and out. The camera can be moved with the mouse. The camera can be moved with the keyboard. The camera can be moved with the touchpad.
     public setExplorationMode(allowOutsideMap = true): void {
+        this.logSeamDebug("exploration:enter", {
+            allowOutsideMap,
+            currentScrollX: this.camera.scrollX,
+            currentScrollY: this.camera.scrollY,
+        });
         this.cameraLocked = false;
         //this.stopFollow();
         this.setCameraMode(CameraMode.Exploration);
@@ -677,6 +745,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
         this.refreshZoomBounds();
         this.snapCurrentZoomToDiscreteLevel();
+        this.logSeamDebug("exploration:ready", {
+            allowOutsideMap,
+            explorerX: this.explorerFocusOn.x,
+            explorerY: this.explorerFocusOn.y,
+        });
 
         // Center the camera on the player
         //this.scene.cameras.main.centerOn(this.scene.CurrentPlayer.x, this.scene.CurrentPlayer.y);
@@ -691,6 +764,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     public setResizeInProgress(isInProgress: boolean): void {
         this.resizeInProgress = isInProgress;
+        this.logSeamDebug("resize:flag", {
+            isInProgress,
+            wheelAccumulator: this.wheelZoomAccumulator,
+        });
         if (isInProgress) {
             this.wheelZoomAccumulator = 0;
             this.cancelSmoothZoomAndAnchor();
@@ -800,31 +877,67 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         return this.waScaleManager.cameraZoomToZoomModifier(this.getFitCameraZoom());
     }
 
+    private hookCameraPreRender(): void {
+        const camera = this.camera as Phaser.Cameras.Scene2D.Camera & {
+            preRender: () => void;
+        };
+        const originalPreRender = camera.preRender.bind(camera);
+
+        camera.preRender = () => {
+            originalPreRender();
+            this.logSeamDebug("camera_pre_render:after");
+            try {
+                this.scene.getGameMapFrontWrapper().applyRenderPhaseShim(camera, "camera_pre_render");
+            } catch (error) {
+                console.log("[SeamDebug] layer-shim:apply:error", error);
+            }
+        };
+
+        this.unhookCameraPreRender = () => {
+            camera.preRender = originalPreRender;
+        };
+    }
+
     private preRenderSnap = () => {
-        // Pixel-phase snapping is only needed in exploration to fight edge seams.
-        // In follow mode it introduces visible micro-jitter while zooming.
-        if (this.cameraMode !== CameraMode.Exploration) {
-            return;
-        }
-        // last chance before rendering
+        // Scene PRE_RENDER happens before camera.preRender; this is only for diagnostics.
         this.logSeamDebug("pre_render:start");
-        this.snapCameraToPixelGrid("pre_render");
-        this.logSeamDebug("pre_render:end");
     };
 
     private postRenderDebug = () => {
+        try {
+            this.scene.getGameMapFrontWrapper().clearRenderPhaseShim("post_render");
+        } catch (error) {
+            console.log("[SeamDebug] layer-shim:clear:error", error);
+        }
         this.logSeamDebug("post_render");
     };
 
     private quantizeCameraZoomToTileGrid(cameraZoom: number): number {
         const tileSize = 32;
-        const bufferRatio = this.getFramebufferPixelsPerScreenUnit();
+        const { rx, ry } = this.getCanvasBufferRatios();
 
-        const eff = cameraZoom * bufferRatio;
+        // If rx != ry (happens when CSS size becomes fractional / rounded differently),
+        // you *cannot* perfectly satisfy both axes with one zoom value.
+        // Still, using the average ratio makes it far more stable than using camera.width.
+        const r = (rx + ry) * 0.5;
+
+        const eff = cameraZoom * r;
         const k = Math.round(tileSize * eff);
         const effQ = k / tileSize;
+        const result = effQ / r;
+        this.logSeamDebug("zoom:quantize-tile-grid", {
+            cameraZoom,
+            tileSize,
+            rx,
+            ry,
+            avgRatio: r,
+            effBefore: eff,
+            effQuantized: effQ,
+            k,
+            result,
+        });
 
-        return effQ / bufferRatio;
+        return result;
     }
 
     private quantizeMinZoomToTileGrid(minZoom: number): number {
@@ -972,6 +1085,13 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     public zoomByWheelDelta(deltaY: number, smooth: boolean): void {
         if (this.resizeInProgress || this.isZoomLocked() || !Number.isFinite(deltaY) || deltaY === 0) {
+            this.logSeamDebug("wheel:ignored", {
+                deltaY,
+                smooth,
+                resizeInProgress: this.resizeInProgress,
+                zoomLocked: this.isZoomLocked(),
+                finite: Number.isFinite(deltaY),
+            });
             return;
         }
 
@@ -989,6 +1109,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         }
 
         if (steps === 0) {
+            this.logSeamDebug("wheel:no-step", {
+                deltaY,
+                normalizedDelta,
+                wheelAccumulator: this.wheelZoomAccumulator,
+            });
             return;
         }
 
@@ -1001,6 +1126,13 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         // Positive wheel delta means zoom-out in browser semantics.
         const nextIndex = Clamp(currentIndex - steps, 0, levels.length - 1);
         if (nextIndex === currentIndex) {
+            this.logSeamDebug("wheel:clamped-to-same-index", {
+                steps,
+                currentIndex,
+                nextIndex,
+                minCameraZoom,
+                maxCameraZoom,
+            });
             return;
         }
 
@@ -1182,6 +1314,15 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         if (this.animationInProgress) {
             return;
         }
+        this.logSeamDebug("animate:tick:start", {
+            time,
+            delta,
+            hasTargetZoom: this.targetZoomModifier !== undefined,
+            hasCameraSpeed: this.cameraSpeed !== undefined,
+            hasExplorerTarget: this.explorerFocusOnTarget !== undefined,
+            targetDirection: this.targetDirection,
+            zoomModifier: this.waScaleManager.zoomModifier,
+        });
         const minZoomModifier = this.getMinimumZoomModifierForCurrentView();
         const maxZoomModifier = this.getMaximumZoomModifierForCurrentView();
         if (this.targetZoomModifier !== undefined) {
@@ -1189,7 +1330,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             const currentZoomModifier = this.waScaleManager.cameraZoomToZoomModifier(this.camera.zoom || 1);
 
             let newZoom =
-                currentZoomModifier + (((targetZoomModifier - currentZoomModifier) * delta) / 100) * this.cameraZoomSpeed;
+                currentZoomModifier +
+                (((targetZoomModifier - currentZoomModifier) * delta) / 100) * this.cameraZoomSpeed;
 
             if (Math.abs(targetZoomModifier - newZoom) <= 0.0001) {
                 newZoom = targetZoomModifier;
@@ -1268,13 +1410,28 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             this.clearZoomAnchor();
             this.scene.events.off(Phaser.Scenes.Events.UPDATE, this.animateCallback);
             this.targetReachInProgress = false;
+            this.logSeamDebug("animate:tick:stop", {
+                time,
+                delta,
+            });
         }
 
+        this.logSeamDebug("animate:tick:end", {
+            time,
+            delta,
+            zoomModifier: this.waScaleManager.zoomModifier,
+            targetZoomModifier: this.targetZoomModifier,
+            explorerTargetX: this.explorerFocusOnTarget?.x,
+            explorerTargetY: this.explorerFocusOnTarget?.y,
+            explorerTargetZoom: this.explorerFocusOnTarget?.zoom,
+            cameraSpeedX: this.cameraSpeed?.x,
+            cameraSpeedY: this.cameraSpeed?.y,
+        });
         this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
     }
 
     private getFramebufferPixelsPerScreenUnit(): number {
-        const canvas = this.scene.sys.game.canvas as HTMLCanvasElement;
+        const canvas = this.scene.sys.game.canvas;
         const camW = this.camera.width || 1; // "screen units" Phaser uses for camera
         return canvas.width / camW; // framebuffer px per camera screen unit
     }
@@ -1435,7 +1592,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private logZoomDebug(reason: string): void {
-        const canvas = this.scene.sys.game.canvas as HTMLCanvasElement;
+        const canvas = this.scene.sys.game.canvas;
         const rect = canvas.getBoundingClientRect();
         const bufferRatio = rect.width > 0 ? canvas.width / rect.width : 1;
 
@@ -1463,50 +1620,150 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         });
     }
 
+    private getCanvasBufferRatios(): { rx: number; ry: number; rectW: number; rectH: number } {
+        const canvas = this.scene.sys.game.canvas;
+        const rect = canvas.getBoundingClientRect();
+
+        const rx = rect.width > 0 ? canvas.width / rect.width : 1;
+        const ry = rect.height > 0 ? canvas.height / rect.height : 1;
+
+        if (this.CAMERA_SEAM_DEBUG && Math.abs(rx - ry) > 0.0001) {
+            console.log("[SeamDebug] buffer:anisotropy", {
+                rx,
+                ry,
+                delta: rx - ry,
+                canvasW: canvas.width,
+                canvasH: canvas.height,
+                rectW: rect.width,
+                rectH: rect.height,
+            });
+        }
+
+        return { rx, ry, rectW: rect.width, rectH: rect.height };
+    }
+
+    private getEffPixelsPerWorldUnitXY(): { effX: number; effY: number; rx: number; ry: number } {
+        const { rx, ry } = this.getCanvasBufferRatios();
+        const z = this.camera.zoom || 1;
+        return { effX: z * rx, effY: z * ry, rx, ry };
+    }
+
     private snapCameraToPixelGrid(reason = "snap"): void {
-        const eff = this.getEffPixelsPerWorldUnit();
-        if (!Number.isFinite(eff) || eff <= 0) {
-            this.logSeamDebug("snap:invalid-eff", { reason, eff });
+        const { effX, effY } = this.getEffPixelsPerWorldUnitXY();
+        if (!Number.isFinite(effX) || !Number.isFinite(effY) || effX <= 0 || effY <= 0) {
+            this.logSeamDebug("snapxy:invalid-eff", {
+                reason,
+                effX,
+                effY,
+            });
             return;
         }
 
-        const q = 1 / eff;
-        const snap = (v: number) => Math.round(v / q) * q;
+        const qx = 1 / effX;
+        const qy = 1 / effY;
 
-        this.logSeamDebug("snap:entry", {
+        const snapX = (v: number) => Math.round(v / qx) * qx;
+        const snapY = (v: number) => Math.round(v / qy) * qy;
+
+        this.logSeamDebug("snapxy:entry", {
             reason,
-            eff,
-            q,
-            followOffsetX: this.camera.followOffset.x,
-            followOffsetY: this.camera.followOffset.y,
-            scrollX: this.camera.scrollX,
-            scrollY: this.camera.scrollY,
+            effX,
+            effY,
+            qx,
+            qy,
+            scrollXBefore: this.camera.scrollX,
+            scrollYBefore: this.camera.scrollY,
+            followOffsetXBefore: this.camera.followOffset.x,
+            followOffsetYBefore: this.camera.followOffset.y,
         });
 
         if (this.cameraMode === CameraMode.Exploration) {
-            this.explorerFocusOn.x = snap(this.explorerFocusOn.x);
-            this.explorerFocusOn.y = snap(this.explorerFocusOn.y);
+            this.explorerFocusOn.x = snapX(this.explorerFocusOn.x);
+            this.explorerFocusOn.y = snapY(this.explorerFocusOn.y);
         }
 
-        this.camera.setFollowOffset(snap(this.camera.followOffset.x), snap(this.camera.followOffset.y));
+        this.camera.setFollowOffset(snapX(this.camera.followOffset.x), snapY(this.camera.followOffset.y));
 
-        this.camera.scrollX = snap(this.camera.scrollX);
-        this.camera.scrollY = snap(this.camera.scrollY);
+        this.camera.scrollX = snapX(this.camera.scrollX);
+        this.camera.scrollY = snapY(this.camera.scrollY);
 
-        this.clampScrollToBoundsOnPixelGrid(eff);
-        this.alignRenderPhaseToPixelGrid(eff);
-        this.clampScrollToBoundsContinuous(eff);
+        // IMPORTANT: update clamps to use effX/effY too (see below)
+        this.clampScrollToBoundsOnPixelGridXY(effX, effY);
 
-        const matrix = (this.camera as unknown as { matrix?: { tx: number; ty: number } }).matrix;
-        this.logSeamDebug("snap:exit", {
+        this.logSeamDebug("snapxy:exit", {
             reason,
-            eff,
+            effX,
+            effY,
+            scrollXAfter: this.camera.scrollX,
+            scrollYAfter: this.camera.scrollY,
+            scrollXPx: this.camera.scrollX * effX,
+            scrollYPx: this.camera.scrollY * effY,
+            followOffsetXAfter: this.camera.followOffset.x,
+            followOffsetYAfter: this.camera.followOffset.y,
+        });
+    }
+
+    private clampScrollToBoundsOnPixelGridXY(effX: number, effY: number): void {
+        const bounds = this.getCameraBounds();
+        if (!bounds) {
+            this.logSeamDebug("clampxy:no-bounds", { effX, effY });
+            return;
+        }
+
+        const zoom = this.camera.zoom || 1;
+        const viewWidth = this.camera.width / zoom;
+        const viewHeight = this.camera.height / zoom;
+
+        const minScrollX = bounds.x;
+        const minScrollY = bounds.y;
+        const maxScrollX = Math.max(minScrollX, bounds.x + bounds.width - viewWidth);
+        const maxScrollY = Math.max(minScrollY, bounds.y + bounds.height - viewHeight);
+
+        // Convert bounds to framebuffer pixels
+        const minXPx = Math.ceil(minScrollX * effX);
+        const maxXPx = Math.floor(maxScrollX * effX);
+        const minYPx = Math.ceil(minScrollY * effY);
+        const maxYPx = Math.floor(maxScrollY * effY);
+
+        // Your inset logic, but per axis
+        const insetMinXPx = maxXPx - minXPx >= this.BOUNDARY_INSET_PX * 2 ? minXPx + this.BOUNDARY_INSET_PX : minXPx;
+        const insetMaxXPx = maxXPx - minXPx >= this.BOUNDARY_INSET_PX * 2 ? maxXPx - this.BOUNDARY_INSET_PX : maxXPx;
+
+        const xPx = Clamp(Math.round(this.camera.scrollX * effX), insetMinXPx, insetMaxXPx);
+        const yPx = Clamp(Math.round(this.camera.scrollY * effY), minYPx, maxYPx);
+
+        this.logSeamDebug("clampxy:computed", {
+            effX,
+            effY,
+            zoom,
+            viewWidth,
+            viewHeight,
+            minScrollX,
+            maxScrollX,
+            minScrollY,
+            maxScrollY,
+            minXPx,
+            maxXPx,
+            minYPx,
+            maxYPx,
+            insetMinXPx,
+            insetMaxXPx,
+            xPx,
+            yPx,
+            scrollXPxBefore: this.camera.scrollX * effX,
+            scrollYPxBefore: this.camera.scrollY * effY,
+        });
+
+        this.camera.scrollX = xPx / effX;
+        this.camera.scrollY = yPx / effY;
+
+        this.logSeamDebug("clampxy:applied", {
+            effX,
+            effY,
             scrollX: this.camera.scrollX,
             scrollY: this.camera.scrollY,
-            scrollXPx: this.camera.scrollX * eff,
-            scrollYPx: this.camera.scrollY * eff,
-            tx: matrix?.tx,
-            ty: matrix?.ty,
+            scrollXPx: this.camera.scrollX * effX,
+            scrollYPx: this.camera.scrollY * effY,
         });
     }
 
@@ -1519,6 +1776,15 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const rect = canvas?.getBoundingClientRect();
         const bounds = this.getCameraBounds();
         const eff = this.getEffPixelsPerWorldUnit();
+        const tileSize = 32;
+        const rx = canvas && rect && rect.width > 0 ? canvas.width / rect.width : undefined;
+        const ry = canvas && rect && rect.height > 0 ? canvas.height / rect.height : undefined;
+        const rxNum = typeof rx === "number" ? rx : undefined;
+        const ryNum = typeof ry === "number" ? ry : undefined;
+        const effX = typeof rxNum === "number" ? (this.camera.zoom || 1) * rxNum : undefined;
+        const effY = typeof ryNum === "number" ? (this.camera.zoom || 1) * ryNum : undefined;
+        const effXNum = typeof effX === "number" ? effX : undefined;
+        const effYNum = typeof effY === "number" ? effY : undefined;
         const worldView = this.camera.worldView;
         const followTarget = (this.camera as unknown as { _follow?: { x: number; y: number } | null })._follow;
 
@@ -1546,6 +1812,17 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             canvasH: canvas?.height,
             rectW: rect?.width,
             rectH: rect?.height,
+            rx,
+            ry,
+            ratioDelta: typeof rxNum === "number" && typeof ryNum === "number" ? rxNum - ryNum : undefined,
+            effX,
+            effY,
+            tilePx: Number.isFinite(eff) ? tileSize * eff : undefined,
+            tilePxX: typeof effXNum === "number" ? tileSize * effXNum : undefined,
+            tilePxY: typeof effYNum === "number" ? tileSize * effYNum : undefined,
+            tileFrac: Number.isFinite(eff) ? (tileSize * eff) % 1 : undefined,
+            tileFracX: typeof effXNum === "number" ? (tileSize * effXNum) % 1 : undefined,
+            tileFracY: typeof effYNum === "number" ? (tileSize * effYNum) % 1 : undefined,
             dpr: window.devicePixelRatio ?? 1,
             ...data,
         });
@@ -1701,17 +1978,32 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     scrollCamera(x: number, y: number): void {
+        this.logSeamDebug("scroll:request", {
+            deltaX: x,
+            deltaY: y,
+            explorerXBefore: this.explorerFocusOn.x,
+            explorerYBefore: this.explorerFocusOn.y,
+        });
         this.explorerFocusOn.x += x;
         this.explorerFocusOn.y += y;
         this.clampExplorerFocus();
 
         this.explorerFocusOnTarget = undefined;
+        this.logSeamDebug("scroll:applied", {
+            explorerXAfter: this.explorerFocusOn.x,
+            explorerYAfter: this.explorerFocusOn.y,
+        });
 
         this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
         this.scene.markDirty();
     }
 
     adjustCameraAnchor(deltaX: number, deltaY: number): void {
+        this.logSeamDebug("anchor:adjust:request", {
+            deltaX,
+            deltaY,
+            mode: this.cameraMode,
+        });
         if (this.cameraMode === CameraMode.Exploration) {
             this.scrollCamera(deltaX, deltaY);
             return;
@@ -1722,27 +2014,53 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         );
         if (hasFollowTarget) {
             this.camera.setFollowOffset(this.camera.followOffset.x + deltaX, this.camera.followOffset.y + deltaY);
+            this.logSeamDebug("anchor:adjust:follow-offset", {
+                followOffsetX: this.camera.followOffset.x,
+                followOffsetY: this.camera.followOffset.y,
+            });
             this.scene.markDirty();
             return;
         }
 
         this.camera.scrollX += deltaX;
         this.camera.scrollY += deltaY;
+        this.logSeamDebug("anchor:adjust:scroll", {
+            scrollX: this.camera.scrollX,
+            scrollY: this.camera.scrollY,
+        });
         this.scene.markDirty();
     }
 
     setZoomAnchor(anchor: { screenX: number; screenY: number; worldX: number; worldY: number } | undefined): void {
         this.zoomAnchor = anchor;
+        this.logSeamDebug("anchor:set", {
+            hasAnchor: Boolean(anchor),
+            screenX: anchor?.screenX,
+            screenY: anchor?.screenY,
+            worldX: anchor?.worldX,
+            worldY: anchor?.worldY,
+        });
     }
 
     clearZoomAnchor(): void {
         this.zoomAnchor = undefined;
+        this.logSeamDebug("anchor:clear");
     }
 
     private clampExplorerFocus(): void {
+        const beforeX = this.explorerFocusOn.x;
+        const beforeY = this.explorerFocusOn.y;
         if (this.explorationAllowOutsideMap) {
             this.explorerFocusOn.x = Clamp(this.explorerFocusOn.x, 0, this.mapSize.width);
             this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, 0, this.mapSize.height);
+            this.logSeamDebug("exploration:clamp", {
+                allowOutsideMap: true,
+                beforeX,
+                beforeY,
+                afterX: this.explorerFocusOn.x,
+                afterY: this.explorerFocusOn.y,
+                changed: beforeX !== this.explorerFocusOn.x || beforeY !== this.explorerFocusOn.y,
+            });
 
             return;
         }
@@ -1766,17 +2084,24 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         } else {
             this.explorerFocusOn.y = Clamp(this.explorerFocusOn.y, minY, maxY);
         }
+
+        this.logSeamDebug("exploration:clamp", {
+            allowOutsideMap: false,
+            beforeX,
+            beforeY,
+            afterX: this.explorerFocusOn.x,
+            afterY: this.explorerFocusOn.y,
+            minX,
+            maxX,
+            minY,
+            maxY,
+            changed: beforeX !== this.explorerFocusOn.x || beforeY !== this.explorerFocusOn.y,
+        });
     }
 
     private applyMapBoundsWithSlack(): void {
         const slack = this.CAMERA_BOUNDARY_SLACK_WORLD;
-        this.camera.setBounds(
-            -slack,
-            -slack,
-            this.mapSize.width + slack * 2,
-            this.mapSize.height + slack * 2,
-            false
-        );
+        this.camera.setBounds(-slack, -slack, this.mapSize.width + slack * 2, this.mapSize.height + slack * 2, false);
     }
 
     private applyZoomAnchor(): void {
@@ -1784,6 +2109,12 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             return;
         }
         const { screenX, screenY, worldX, worldY } = this.zoomAnchor;
+        this.logSeamDebug("anchor:apply:start", {
+            screenX,
+            screenY,
+            worldX,
+            worldY,
+        });
 
         if (this.cameraMode === CameraMode.Exploration) {
             // In exploration mode, the camera follows explorerFocusOn.
@@ -1793,17 +2124,32 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             const desiredCenterY = worldY - (screenY - this.camera.height / 2) / zoom;
             const deltaX = desiredCenterX - this.explorerFocusOn.x;
             const deltaY = desiredCenterY - this.explorerFocusOn.y;
+            this.logSeamDebug("anchor:apply:exploration", {
+                zoom,
+                desiredCenterX,
+                desiredCenterY,
+                deltaX,
+                deltaY,
+                explorerX: this.explorerFocusOn.x,
+                explorerY: this.explorerFocusOn.y,
+            });
 
             if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
                 this.scrollCamera(deltaX, deltaY);
             }
-            
+
             return;
         }
 
         const current = this.camera.getWorldPoint(screenX, screenY);
         const deltaX = worldX - current.x;
         const deltaY = worldY - current.y;
+        this.logSeamDebug("anchor:apply:follow-focus", {
+            currentX: current.x,
+            currentY: current.y,
+            deltaX,
+            deltaY,
+        });
         if (Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001) {
             this.adjustCameraAnchor(deltaX, deltaY);
         }
