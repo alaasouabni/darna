@@ -86,6 +86,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private readonly DISCRETE_ZOOM_LEVEL_COUNT = Math.max(2, ZOOM_DISCRETE_LEVEL_COUNT);
     private readonly NORMALIZED_WHEEL_STEP = Math.max(1, ZOOM_WHEEL_STEP);
     private readonly MAX_WHEEL_STEPS_PER_EVENT = Math.max(1, ZOOM_MAX_STEPS_PER_EVENT);
+    private readonly ZOOM_INTEGER_EPSILON = 0.000001;
     private readonly BOUNDARY_INSET_PX = 1;
     private readonly CAMERA_BOUNDARY_SLACK_WORLD = 0.5;
     private readonly CAMERA_SEAM_DEBUG = true;
@@ -884,6 +885,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const originalPreRender = camera.preRender.bind(camera);
 
         camera.preRender = () => {
+            this.syncRoundPixelsForModeAndZoom("camera_pre_render:before");
             originalPreRender();
             this.logSeamDebug("camera_pre_render:after");
             try {
@@ -1787,11 +1789,18 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         const effYNum = typeof effY === "number" ? effY : undefined;
         const worldView = this.camera.worldView;
         const followTarget = (this.camera as unknown as { _follow?: { x: number; y: number } | null })._follow;
+        const renderRoundPixels = (
+            this.camera as unknown as {
+                renderRoundPixels?: boolean;
+            }
+        ).renderRoundPixels;
 
         console.log(`[SeamDebug] ${stage}`, {
             mode: this.cameraMode,
             zoom: this.camera.zoom,
             scaleZoom: this.scene.scale.zoom,
+            roundPixels: this.camera.roundPixels,
+            renderRoundPixels,
             eff,
             scrollX: this.camera.scrollX,
             scrollY: this.camera.scrollY,
@@ -2155,7 +2164,27 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         }
     }
 
+    private getDesiredRoundPixels(): boolean {
+        if (this.cameraMode === CameraMode.Exploration) {
+            return false;
+        }
+        const zoom = this.camera.zoom || 1;
+        return Math.abs(zoom - Math.round(zoom)) <= this.ZOOM_INTEGER_EPSILON;
+    }
+
+    private syncRoundPixelsForModeAndZoom(reason: string): void {
+        const desiredRoundPixels = this.getDesiredRoundPixels();
+        if (this.camera.roundPixels === desiredRoundPixels) {
+            return;
+        }
+        this.camera.roundPixels = desiredRoundPixels;
+        this.logSeamDebug("roundPixels:toggle", {
+            reason,
+            desiredRoundPixels,
+        });
+    }
+
     private updateRoundPixelsForMode(): void {
-        this.camera.roundPixels = this.cameraMode !== CameraMode.Exploration;
+        this.syncRoundPixelsForModeAndZoom("mode_change");
     }
 }

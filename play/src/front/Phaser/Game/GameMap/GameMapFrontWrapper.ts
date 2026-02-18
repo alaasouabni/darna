@@ -639,7 +639,26 @@ export class GameMapFrontWrapper {
         return current;
     }
 
+    private isLayerShimEnabled(): boolean {
+        const seamDebugWindow = window as unknown as {
+            __waSeam?: {
+                layerShimEnabled?: boolean;
+            };
+        };
+        return seamDebugWindow.__waSeam?.layerShimEnabled !== false;
+    }
+
     public applyRenderPhaseShim(camera: Phaser.Cameras.Scene2D.Camera, reason = "pre_render"): void {
+        if (!this.isLayerShimEnabled()) {
+            if (this.seamPhaseShimApplied) {
+                this.clearRenderPhaseShim(`${reason}:disabled`);
+            }
+            if (this.SEAM_PHASE_SHIM_DEBUG) {
+                console.log("[SeamDebug][LayerShim] skipped:disabled", { reason });
+            }
+            return;
+        }
+
         if (this.seamPhaseShimApplied) {
             this.clearRenderPhaseShim(`${reason}:auto-clear`);
         }

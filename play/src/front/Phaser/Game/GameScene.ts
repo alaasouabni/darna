@@ -255,6 +255,12 @@ const WORLD_SPACE_NAME = "allWorldUser";
 const PERSONAL_AREA_OWNER_CACHE_TTL_MS = 15_000;
 const debug = Debug("GameScene");
 
+type SeamExperimentControls = {
+    layerShimEnabled: boolean;
+    uvInsetTexels: number;
+};
+const DEFAULT_UV_INSET_TEXELS = 0.03;
+
 export class GameScene extends DirtyScene {
     Terrains: Array<Phaser.Tilemaps.Tileset>;
     CurrentPlayer!: Player;
@@ -673,6 +679,82 @@ export class GameScene extends DirtyScene {
         this.forceClampToEdgeOnTexture(textureKey);
     }
 
+    private installSeamExperimentTools(): void {
+        const seamDebugWindow = window as unknown as {
+            __waSeam?: Partial<SeamExperimentControls>;
+            __waSeamPatchInstalled?: boolean;
+        };
+
+        if (!seamDebugWindow.__waSeam) {
+            seamDebugWindow.__waSeam = {
+                layerShimEnabled: true,
+                uvInsetTexels: DEFAULT_UV_INSET_TEXELS,
+            };
+        } else {
+            if (typeof seamDebugWindow.__waSeam.layerShimEnabled !== "boolean") {
+                seamDebugWindow.__waSeam.layerShimEnabled = true;
+            }
+            if (typeof seamDebugWindow.__waSeam.uvInsetTexels !== "number") {
+                seamDebugWindow.__waSeam.uvInsetTexels = DEFAULT_UV_INSET_TEXELS;
+            }
+        }
+
+        if (seamDebugWindow.__waSeamPatchInstalled) {
+            return;
+        }
+
+        const pipelineProto = Phaser.Renderer.WebGL.Pipelines.MultiPipeline.prototype as unknown as {
+            batchTexture: (...args: unknown[]) => unknown;
+        };
+        const originalBatchTexture = pipelineProto.batchTexture;
+        pipelineProto.batchTexture = function (...args: unknown[]): unknown {
+            const controls = (window as unknown as { __waSeam?: Partial<SeamExperimentControls> }).__waSeam;
+            const insetRaw = controls?.uvInsetTexels;
+            const inset = typeof insetRaw === "number" ? insetRaw : 0;
+
+            if (inset > 0) {
+                const gameObject = args[0];
+                if (gameObject instanceof Phaser.Tilemaps.TilemapLayer) {
+                    const frameX = typeof args[17] === "number" ? args[17] : undefined;
+                    const frameY = typeof args[18] === "number" ? args[18] : undefined;
+                    const frameWidth = typeof args[19] === "number" ? args[19] : undefined;
+                    const frameHeight = typeof args[20] === "number" ? args[20] : undefined;
+
+                    if (
+                        frameX !== undefined &&
+                        frameY !== undefined &&
+                        frameWidth !== undefined &&
+                        frameHeight !== undefined
+                    ) {
+                        const maxInset = Math.max(0, Math.min(frameWidth, frameHeight) * 0.49);
+                        const clampedInset = Math.min(inset, maxInset);
+
+                        if (clampedInset > 0) {
+                            args[17] = frameX + clampedInset;
+                            args[18] = frameY + clampedInset;
+                            args[19] = frameWidth - clampedInset * 2;
+                            args[20] = frameHeight - clampedInset * 2;
+                        }
+                    }
+                }
+            }
+
+            return originalBatchTexture.apply(this, args);
+        };
+
+        seamDebugWindow.__waSeamPatchInstalled = true;
+        console.log("[SeamDebug][Experiment] tools ready", {
+            controls: seamDebugWindow.__waSeam,
+            usage: {
+                layerShimEnabled: "window.__waSeam.layerShimEnabled = false|true",
+                uvInsetTexels: "window.__waSeam.uvInsetTexels = 0|0.03|0.05|0.1",
+            },
+            defaults: {
+                uvInsetTexels: DEFAULT_UV_INSET_TEXELS,
+            },
+        });
+    }
+
     private forceClampToEdgeOnTexture(textureKey: string): void {
         if (!this.textures.exists(textureKey)) {
             console.warn("[SeamDebug][ClampWrap] texture missing", {
@@ -763,6 +845,7 @@ export class GameScene extends DirtyScene {
         this.input.topOnly = false;
         this.preloading = false;
         this.cleanupDone = false;
+        this.installSeamExperimentTools();
 
         this.bindSceneEventHandlers();
 
