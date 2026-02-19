@@ -633,7 +633,10 @@ export class GameMapFrontWrapper {
             this.seamPhaseLayerBasePositions.set(layer, created);
             return created;
         }
-        if (!this.seamPhaseShimApplied && (Math.abs(current.x - layer.x) > 0.000001 || Math.abs(current.y - layer.y) > 0.000001)) {
+        if (
+            !this.seamPhaseShimApplied &&
+            (Math.abs(current.x - layer.x) > 0.000001 || Math.abs(current.y - layer.y) > 0.000001)
+        ) {
             const updated = { x: layer.x, y: layer.y };
             this.seamPhaseLayerBasePositions.set(layer, updated);
             return updated;

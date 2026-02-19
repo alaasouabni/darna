@@ -919,7 +919,7 @@ export class GameScene extends DirtyScene {
             const tilesetImage = this.Map.addTilesetImage(
                 tileset.name,
                 `${mapDirUrl}/${tileset.image}`,
-                tileset.tilewidth,  
+                tileset.tilewidth,
                 tileset.tileheight,
                 tileset.margin,
                 tileset.spacing /*, tileset.firstgid*/
