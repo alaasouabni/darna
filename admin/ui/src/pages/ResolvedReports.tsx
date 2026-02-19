@@ -4,6 +4,7 @@ import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
+import { ContextFields } from "../components/ContextFields";
 import { EyeIcon } from "../components/icons";
 
 type ReportItem = {
@@ -23,7 +24,7 @@ type ReportsResponse = {
 };
 
 export function ResolvedReportsPage() {
-  const { context, updateContext } = useAdminContext();
+  const { context } = useAdminContext();
   const [reportDetails, setReportDetails] = useState<ReportItem | null>(null);
 
   const formatStatusLabel = (status: string) =>
@@ -58,15 +59,7 @@ export function ResolvedReportsPage() {
 
       <div className="card">
         <h2 className="section-title">Context</h2>
-        <label className="field">
-          <span>World slug</span>
-          <input
-            className="input"
-            placeholder="darna"
-            value={context.worldSlug}
-            onChange={(event) => updateContext({ worldSlug: event.target.value })}
-          />
-        </label>
+        <ContextFields showWorld allowEmptyWorld />
       </div>
 
       <div className="card">

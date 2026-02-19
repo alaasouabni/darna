@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api/client";
+import { useContextOptionsQuery } from "../api/context";
 import { buildQuery } from "../api/query";
 import { copyText } from "../clipboard";
-import { useAdminContext } from "../context";
+import { ContextFields } from "../components/ContextFields";
 import { PageHeader } from "../components/PageHeader";
 import { StatCard } from "../components/StatCard";
+import { inferWorldSlug } from "../config";
+import { useAdminContext } from "../context";
 
 type ActiveMembersResponse = {
   total: number;
@@ -16,8 +19,23 @@ type ReportsResponse = {
   total: number;
 };
 
+type BansResponse = {
+  total: number;
+};
+
+type LiveUsersStatsResponse = {
+  available: boolean;
+  reason: string | null;
+  totalConnectedUsers: number;
+  knownRoomsConnectedUsers: number;
+  roomsWithUsers: number;
+  trackedRooms: number;
+  domainsChecked: number;
+  domainsFailed: number;
+};
+
 export function DashboardPage() {
-  const { context, updateContext } = useAdminContext();
+  const { context } = useAdminContext();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -25,11 +43,19 @@ export function DashboardPage() {
   const [liveStatus, setLiveStatus] = useState<"idle" | "connecting" | "live" | "error">("idle");
   const liveUsersRef = useRef<Set<string>>(new Set());
 
+  const selectedWorldSlug = context.worldSlug || inferWorldSlug(context.roomUrl);
+  const contextOptionsQuery = useContextOptionsQuery(true);
+  const rooms = contextOptionsQuery.data?.rooms ?? [];
+  const roomsInSelectedWorld = selectedWorldSlug
+    ? rooms.filter((room) => room.worldSlug === selectedWorldSlug).length
+    : 0;
+
   const resolvedRoomId = useMemo(() => {
     const playTarget = context.roomUrl || context.playUri;
     if (!playTarget) {
       return "";
     }
+
     if (context.playUri) {
       try {
         const playHost = new URL(context.playUri).host;
@@ -43,6 +69,7 @@ export function DashboardPage() {
         return "";
       }
     }
+
     try {
       return new URL(playTarget).toString();
     } catch {
@@ -63,41 +90,75 @@ export function DashboardPage() {
     }
   }, [resolvedRoomId]);
 
-  const activeMembersQuery = useQuery({
-    queryKey: ["members", "active", "summary"],
+  const connectedMembersQuery = useQuery({
+    queryKey: ["members", "active", "connected-now"],
     queryFn: () =>
-      apiRequest<ActiveMembersResponse>(
-        buildQuery("/members/active", { minutes: 60, limit: 1 })
-      ),
+      apiRequest<ActiveMembersResponse>(buildQuery("/members/active", { minutes: 5, limit: 1 })),
+  });
+
+  const liveUsersTotalQuery = useQuery({
+    queryKey: ["stats", "live-users"],
+    queryFn: () =>
+      apiRequest<LiveUsersStatsResponse>(buildQuery("/stats/live-users", { includeInactive: 1 })),
+    refetchInterval: 10000,
+    refetchIntervalInBackground: true,
+  });
+
+  const activeMembersHourQuery = useQuery({
+    queryKey: ["members", "active", "last-hour"],
+    queryFn: () =>
+      apiRequest<ActiveMembersResponse>(buildQuery("/members/active", { minutes: 60, limit: 1 })),
   });
 
   const directoryQuery = useQuery({
     queryKey: ["keycloak", "users", "summary"],
-    queryFn: () =>
-      apiRequest<{ total: number }>(
-        buildQuery("/keycloak/users", { first: 0, max: 1 })
-      ),
+    queryFn: () => apiRequest<{ total: number }>(buildQuery("/keycloak/users", { first: 0, max: 1 })),
   });
 
-  const roomsQuery = useQuery({
-    queryKey: ["rooms", "summary", context.roomUrl],
-    enabled: Boolean(context.roomUrl),
-    queryFn: () =>
-      apiRequest<unknown[]>(
-        buildQuery("/room/sameWorld", {
-          roomUrl: context.roomUrl,
-          bypassTagFilter: 1,
-        })
-      ),
-  });
-
-  const reportsQuery = useQuery({
-    queryKey: ["reports", "summary", context.worldSlug],
+  const globalReportsQuery = useQuery({
+    queryKey: ["reports", "summary", "global"],
     queryFn: () =>
       apiRequest<ReportsResponse>(
         buildQuery("/reports", {
           status: "open",
-          worldSlug: context.worldSlug || undefined,
+          take: 1,
+          skip: 0,
+        })
+      ),
+  });
+
+  const contextReportsQuery = useQuery({
+    queryKey: ["reports", "summary", selectedWorldSlug],
+    queryFn: () =>
+      apiRequest<ReportsResponse>(
+        buildQuery("/reports", {
+          status: "open",
+          worldSlug: selectedWorldSlug || undefined,
+          take: 1,
+          skip: 0,
+        })
+      ),
+  });
+
+  const globalBansQuery = useQuery({
+    queryKey: ["bans", "summary", "global"],
+    queryFn: () =>
+      apiRequest<BansResponse>(
+        buildQuery("/bans", {
+          activeOnly: 1,
+          take: 1,
+          skip: 0,
+        })
+      ),
+  });
+
+  const contextBansQuery = useQuery({
+    queryKey: ["bans", "summary", selectedWorldSlug],
+    queryFn: () =>
+      apiRequest<BansResponse>(
+        buildQuery("/bans", {
+          worldSlug: selectedWorldSlug || undefined,
+          activeOnly: 1,
           take: 1,
           skip: 0,
         })
@@ -108,17 +169,40 @@ export function DashboardPage() {
     queryKey: ["livekit", "summary", context.playUri],
     enabled: Boolean(context.playUri),
     queryFn: () =>
-      apiRequest<{ livekitHost: string | null }>(
-        buildQuery("/livekit/credentials", { playUri: context.playUri })
-      ),
+      apiRequest<{ livekitHost: string | null }>(buildQuery("/livekit/credentials", { playUri: context.playUri })),
   });
 
-  const activeCount = activeMembersQuery.data?.total ?? 0;
+  const connectedUsersTotal = connectedMembersQuery.data?.total ?? 0;
+  const liveUsersTotal = liveUsersTotalQuery.data?.totalConnectedUsers ?? 0;
+  const liveUsersKnownRooms = liveUsersTotalQuery.data?.knownRoomsConnectedUsers ?? 0;
+  const activeHourTotal = activeMembersHourQuery.data?.total ?? 0;
   const directoryCount = directoryQuery.data?.total ?? 0;
-  const roomsCount = roomsQuery.data?.length ?? 0;
-  const reportsCount = reportsQuery.data?.total ?? 0;
+  const globalOpenReports = globalReportsQuery.data?.total ?? 0;
+  const globalActiveBans = globalBansQuery.data?.total ?? 0;
+  const contextOpenReports = contextReportsQuery.data?.total ?? 0;
+  const contextActiveBans = contextBansQuery.data?.total ?? 0;
+  const totalWorlds = contextOptionsQuery.data?.summary.totalWorlds ?? 0;
+  const totalRooms = contextOptionsQuery.data?.summary.totalRooms ?? 0;
+  const activeRooms = contextOptionsQuery.data?.summary.totalActiveRooms ?? 0;
   const livekitStatus = livekitQuery.data?.livekitHost ? "Connected" : "Missing";
   const inviteLabel = inviteCopied ? "Invite copied" : "Generate invite";
+  const hasLiveUsersTotal = liveUsersTotalQuery.data?.available ?? false;
+  const connectedUsersCardValue = hasLiveUsersTotal
+    ? String(liveUsersTotal)
+    : connectedMembersQuery.isLoading
+    ? "--"
+    : String(connectedUsersTotal);
+  let connectedUsersCardTrend = "Fallback: active in the last 5 minutes";
+  if (hasLiveUsersTotal) {
+    connectedUsersCardTrend =
+      liveUsersTotalQuery.data?.domainsFailed && liveUsersTotalQuery.data.domainsChecked > 0
+        ? `Live now (${liveUsersTotalQuery.data.domainsChecked - liveUsersTotalQuery.data.domainsFailed}/${liveUsersTotalQuery.data.domainsChecked} domains reachable)`
+        : `Live now across ${liveUsersTotalQuery.data?.domainsChecked ?? 0} domains`;
+  } else if (liveUsersTotalQuery.isLoading) {
+    connectedUsersCardTrend = "Loading live totals...";
+  } else if (liveUsersTotalQuery.isError) {
+    connectedUsersCardTrend = "Live source unavailable, fallback in use";
+  }
 
   useEffect(() => {
     if (!resolvedRoomId || !adminSocketUrl) {
@@ -166,41 +250,36 @@ export function DashboardPage() {
               type?: string;
               data?: { uuid?: string; roomId?: string };
             };
-            const type = payload.type;
             if (!payload.data?.uuid) {
               return;
             }
-            const userId = payload.data.uuid;
-            if (type === "MemberJoin") {
-              liveUsersRef.current.add(userId);
+            if (payload.type === "MemberJoin") {
+              liveUsersRef.current.add(payload.data.uuid);
               setLiveCount(liveUsersRef.current.size);
-            } else if (type === "MemberLeave") {
-              liveUsersRef.current.delete(userId);
+            } else if (payload.type === "MemberLeave") {
+              liveUsersRef.current.delete(payload.data.uuid);
               setLiveCount(liveUsersRef.current.size);
             }
           } catch {
-            // Ignore malformed admin socket payloads.
+            // Ignore malformed payloads.
           }
         };
 
         socket.onerror = () => {
-          if (!mounted) {
-            return;
+          if (mounted) {
+            setLiveStatus("error");
           }
-          setLiveStatus("error");
         };
 
         socket.onclose = () => {
-          if (!mounted) {
-            return;
+          if (mounted) {
+            setLiveStatus("idle");
           }
-          setLiveStatus("idle");
         };
       } catch {
-        if (!mounted) {
-          return;
+        if (mounted) {
+          setLiveStatus("error");
         }
-        setLiveStatus("error");
       }
     };
 
@@ -215,11 +294,13 @@ export function DashboardPage() {
   }, [adminSocketUrl, resolvedRoomId]);
 
   const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["context", "options"] });
     queryClient.invalidateQueries({ queryKey: ["members"] });
     queryClient.invalidateQueries({ queryKey: ["keycloak"] });
-    queryClient.invalidateQueries({ queryKey: ["rooms"] });
     queryClient.invalidateQueries({ queryKey: ["reports"] });
+    queryClient.invalidateQueries({ queryKey: ["bans"] });
     queryClient.invalidateQueries({ queryKey: ["livekit"] });
+    queryClient.invalidateQueries({ queryKey: ["stats", "live-users"] });
   };
 
   const handleBroadcast = () => {
@@ -248,7 +329,7 @@ export function DashboardPage() {
     <section className="page">
       <PageHeader
         title="Operational overview"
-        subtitle="Live rooms, active members, and system status."
+        subtitle="Global metrics and context-specific room activity."
         actions={
           <button className="button ghost" type="button" onClick={handleRefresh}>
             Refresh
@@ -259,62 +340,68 @@ export function DashboardPage() {
       <div className="card">
         <h2 className="section-title">Context</h2>
         <div className="grid-two">
-          <label className="field">
-            <span>Play URL</span>
-            <input
-              className="input"
-              placeholder="https://darna.lightency.io/@/darna/office"
-              value={context.playUri}
-              onChange={(event) => updateContext({ playUri: event.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Room URL</span>
-            <input
-              className="input"
-              placeholder="/@/darna/office"
-              value={context.roomUrl}
-              onChange={(event) => updateContext({ roomUrl: event.target.value })}
-            />
-          </label>
+          <ContextFields showWorld showRoom showPlayUri includeInactiveRooms />
         </div>
       </div>
 
-      <div className="stats-grid">
-        <StatCard
-          label="Rooms in world"
-          value={roomsQuery.isLoading ? "—" : String(roomsCount)}
-          trend={context.roomUrl ? "Based on room URL" : "Set a room URL"}
-        />
-        <StatCard
-          label="Live users"
-          value={
-            liveStatus === "live"
-              ? String(liveCount ?? 0)
-              : context.roomUrl || context.playUri
-              ? "—"
-              : "—"
-          }
-          trend={
-            liveStatus === "live"
-              ? "Live via admin socket"
-              : context.roomUrl || context.playUri
-              ? "Connecting…"
-              : "Set a play or room URL"
-          }
-          status={liveStatus === "live" ? "Live" : "Offline"}
-          statusTone={liveStatus === "live" ? "live" : "muted"}
-        />
-        <StatCard
-          label="Open reports"
-          value={reportsQuery.isLoading ? "—" : String(reportsCount)}
-          trend={context.worldSlug ? `World: ${context.worldSlug}` : "All worlds"}
-        />
-        <StatCard
-          label="Livekit"
-          value={livekitQuery.isLoading ? "—" : livekitStatus}
-          trend={context.playUri ? "Configured per world" : "Set play URL"}
-        />
+      <div className="card">
+        <h2 className="section-title">Global platform stats</h2>
+        <div className="stats-grid">
+          <StatCard
+            label="Connected users"
+            value={connectedUsersCardValue}
+            trend={connectedUsersCardTrend}
+          />
+          <StatCard
+            label="Worlds"
+            value={contextOptionsQuery.isLoading ? "--" : String(totalWorlds)}
+            trend="Configured in admin database"
+          />
+          <StatCard
+            label="Rooms"
+            value={contextOptionsQuery.isLoading ? "--" : String(totalRooms)}
+            trend={contextOptionsQuery.isLoading ? "Loading..." : `${activeRooms} active`}
+          />
+          <StatCard
+            label="Open reports"
+            value={globalReportsQuery.isLoading ? "--" : String(globalOpenReports)}
+            trend={globalBansQuery.isLoading ? "Loading bans..." : `${globalActiveBans} active bans`}
+          />
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="section-title">Context stats</h2>
+        <div className="stats-grid">
+          <StatCard
+            label="Rooms in world"
+            value={selectedWorldSlug ? String(roomsInSelectedWorld) : "--"}
+            trend={selectedWorldSlug ? `World: ${selectedWorldSlug}` : "Select a world"}
+          />
+          <StatCard
+            label="Live users in room"
+            value={liveStatus === "live" ? String(liveCount ?? 0) : "--"}
+            trend={
+              liveStatus === "live"
+                ? "Live via admin socket"
+                : context.roomUrl || context.playUri
+                ? "Connecting..."
+                : "Select a room"
+            }
+            status={liveStatus === "live" ? "Live" : "Offline"}
+            statusTone={liveStatus === "live" ? "live" : "muted"}
+          />
+          <StatCard
+            label="Open reports in world"
+            value={selectedWorldSlug ? String(contextOpenReports) : "--"}
+            trend={selectedWorldSlug ? "Filtered by selected world" : "Select a world"}
+          />
+          <StatCard
+            label="Livekit"
+            value={livekitQuery.isLoading ? "--" : livekitStatus}
+            trend={context.playUri ? "Resolved from selected play URL" : "Select a room/play URL"}
+          />
+        </div>
       </div>
 
       <div className="grid-two">
@@ -323,12 +410,21 @@ export function DashboardPage() {
           <ul className="list">
             <li>{directoryQuery.isLoading ? "Loading directory..." : `${directoryCount} users in Keycloak.`}</li>
             <li>
-              {liveStatus === "live"
-                ? `${liveCount ?? 0} live right now.`
-                : "Live users unavailable. Set a play or room URL."}
+              {hasLiveUsersTotal
+                ? `${liveUsersKnownRooms} users currently in configured admin rooms.`
+                : "Live total source unavailable, showing fallback activity metric."}
             </li>
-            <li>{activeMembersQuery.isLoading ? "Loading members..." : `${activeCount} active in last hour.`}</li>
-            <li>{reportsQuery.isLoading ? "Loading reports..." : `${reportsCount} open reports.`}</li>
+            <li>
+              {liveStatus === "live"
+                ? `${liveCount ?? 0} users currently in selected room.`
+                : "Room live stream unavailable. Select a room and wait for socket sync."}
+            </li>
+            <li>{activeMembersHourQuery.isLoading ? "Loading..." : `${activeHourTotal} active in last hour.`}</li>
+            <li>
+              {selectedWorldSlug
+                ? `${contextActiveBans} active bans in ${selectedWorldSlug}.`
+                : "Select a world to display scoped bans."}
+            </li>
           </ul>
         </div>
         <div className="card">

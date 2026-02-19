@@ -22,6 +22,14 @@ const worldTagsQuery = z.object({
     searchText: z.string().optional(),
 });
 
+const contextOptionsQuery = z.object({
+    includeInactive: z.string().optional(),
+});
+
+const liveUsersStatsQuery = z.object({
+    includeInactive: z.string().optional(),
+});
+
 const roomStateParams = z.object({
     roomId: z.string().uuid(),
 });
@@ -91,6 +99,48 @@ function parseBooleanFlag(value?: string): boolean {
     return value === "true" || value === "1";
 }
 
+function normalizeWorldDomain(domain?: string | null): string | null {
+    if (!domain) {
+        return null;
+    }
+    const trimmed = domain.trim();
+    if (!trimmed) {
+        return null;
+    }
+    try {
+        if (trimmed.includes("://")) {
+            return new URL(trimmed).host;
+        }
+        return new URL(`https://${trimmed}`).host;
+    } catch {
+        return null;
+    }
+}
+
+function buildRoomKey(roomId: string, fallbackDomain?: string): string | null {
+    if (!roomId) {
+        return null;
+    }
+
+    try {
+        const parsed = new URL(roomId);
+        return `${parsed.host}${normalizeRoomPath(parsed.pathname)}`;
+    } catch {
+        if (!fallbackDomain) {
+            return null;
+        }
+        const normalizedPath = roomId.startsWith("/") ? normalizeRoomPath(roomId) : normalizeRoomPath(`/${roomId}`);
+        return `${fallbackDomain}${normalizedPath}`;
+    }
+}
+
+function getRoomsListEndpoint(domain: string): string {
+    if (domain.startsWith("localhost") || domain.startsWith("127.0.0.1")) {
+        return `http://${domain}/rooms`;
+    }
+    return `https://${domain}/rooms`;
+}
+
 function getRoomDisplayName(entry: { metadata: unknown; slug: string }): string {
     if (entry.metadata && typeof entry.metadata === "object" && !Array.isArray(entry.metadata)) {
         const metadataName = (entry.metadata as Record<string, unknown>).name;
@@ -137,6 +187,260 @@ async function fetchMapStorageRooms() {
 }
 
 export async function roomRoutes(app: FastifyInstance) {
+    app.get("/context/options", { preHandler: requireAdminAuth }, async (request, reply) => {
+        const query = contextOptionsQuery.parse(request.query);
+        const includeInactive = parseBooleanFlag(query.includeInactive);
+
+        const [worlds, rooms, roomCounts] = await Promise.all([
+            app.db.world.findMany({
+                orderBy: { slug: "asc" },
+                include: {
+                    defaultRoom: {
+                        select: {
+                            id: true,
+                            roomUrl: true,
+                        },
+                    },
+                },
+            }),
+            app.db.room.findMany({
+                where: includeInactive ? undefined : { isActive: true },
+                include: {
+                    world: {
+                        select: {
+                            slug: true,
+                            name: true,
+                            domain: true,
+                            defaultRoomId: true,
+                        },
+                    },
+                    tagsTable: true,
+                },
+                orderBy: { slug: "asc" },
+            }),
+            app.db.room.groupBy({
+                by: ["worldId", "isActive"],
+                _count: { _all: true },
+            }),
+        ]);
+
+        const countsByWorld = new Map<string, { total: number; active: number }>();
+        for (const row of roomCounts) {
+            const current = countsByWorld.get(row.worldId) ?? { total: 0, active: 0 };
+            current.total += row._count._all;
+            if (row.isActive) {
+                current.active += row._count._all;
+            }
+            countsByWorld.set(row.worldId, current);
+        }
+
+        let totalRooms = 0;
+        let totalActiveRooms = 0;
+        for (const counts of countsByWorld.values()) {
+            totalRooms += counts.total;
+            totalActiveRooms += counts.active;
+        }
+
+        const worldOptions = worlds.map((world) => {
+            const counts = countsByWorld.get(world.id) ?? { total: 0, active: 0 };
+            return {
+                id: world.id,
+                slug: world.slug,
+                name: world.name,
+                domain: world.domain ?? null,
+                roomCount: counts.total,
+                activeRoomCount: counts.active,
+                defaultRoomUrl: world.defaultRoom?.roomUrl ?? null,
+            };
+        });
+
+        const roomOptions = rooms
+            .map((entry) => {
+                const tags = new Set<string>(entry.tags);
+                entry.tagsTable.forEach((tag) => tags.add(tag.tag));
+                return {
+                    id: entry.id,
+                    name: getRoomDisplayName(entry),
+                    roomUrl: entry.roomUrl,
+                    wamUrl: entry.wamUrl ?? null,
+                    isActive: entry.isActive,
+                    isDefault: entry.id === entry.world.defaultRoomId,
+                    worldSlug: entry.world.slug,
+                    worldName: entry.world.name,
+                    worldDomain: entry.world.domain ?? null,
+                    tags: Array.from(tags).sort(),
+                };
+            })
+            .sort((left, right) => {
+                if (left.worldSlug === right.worldSlug) {
+                    return left.roomUrl.localeCompare(right.roomUrl);
+                }
+                return left.worldSlug.localeCompare(right.worldSlug);
+            });
+
+        reply.send({
+            summary: {
+                totalWorlds: worlds.length,
+                totalRooms,
+                totalActiveRooms,
+                totalInactiveRooms: Math.max(totalRooms - totalActiveRooms, 0),
+            },
+            worlds: worldOptions,
+            rooms: roomOptions,
+        });
+    });
+
+    app.get("/stats/live-users", { preHandler: requireAdminAuth }, async (request, reply) => {
+        const query = liveUsersStatsQuery.parse(request.query);
+        const includeInactive = parseBooleanFlag(query.includeInactive);
+        const adminToken = config.ADMIN_API_TOKEN?.trim();
+
+        if (!adminToken) {
+            reply.send({
+                available: false,
+                reason: "ADMIN_API_TOKEN is missing.",
+                totalConnectedUsers: 0,
+                knownRoomsConnectedUsers: 0,
+                roomsWithUsers: 0,
+                trackedRooms: 0,
+                domainsChecked: 0,
+                domainsFailed: 0,
+                domainStats: [],
+            });
+            return;
+        }
+
+        const [worlds, rooms] = await Promise.all([
+            app.db.world.findMany({
+                select: {
+                    id: true,
+                    slug: true,
+                    domain: true,
+                },
+            }),
+            app.db.room.findMany({
+                where: includeInactive ? undefined : { isActive: true },
+                include: {
+                    world: {
+                        select: {
+                            domain: true,
+                        },
+                    },
+                },
+            }),
+        ]);
+
+        const domains = Array.from(
+            new Set(worlds.map((world) => normalizeWorldDomain(world.domain)).filter((value): value is string => !!value))
+        );
+
+        if (!domains.length) {
+            reply.send({
+                available: false,
+                reason: "No world domains configured.",
+                totalConnectedUsers: 0,
+                knownRoomsConnectedUsers: 0,
+                roomsWithUsers: 0,
+                trackedRooms: 0,
+                domainsChecked: 0,
+                domainsFailed: 0,
+                domainStats: [],
+            });
+            return;
+        }
+
+        const trackedRoomKeys = new Set<string>();
+        for (const room of rooms) {
+            const domain = normalizeWorldDomain(room.world.domain);
+            if (!domain) {
+                continue;
+            }
+            trackedRoomKeys.add(`${domain}${normalizeRoomPath(room.roomUrl)}`);
+        }
+
+        const connectedByRoomKey = new Map<string, number>();
+        const domainStats: Array<{
+            domain: string;
+            connectedUsers: number;
+            rooms: number;
+            error: string | null;
+        }> = [];
+
+        await Promise.all(
+            domains.map(async (domain) => {
+                const url = getRoomsListEndpoint(domain);
+                try {
+                    const response = await fetch(url, {
+                        headers: {
+                            authorization: adminToken,
+                        },
+                        signal: AbortSignal.timeout(5000),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const payload = (await response.json()) as Record<string, unknown>;
+                    let connectedUsers = 0;
+                    let roomsCount = 0;
+
+                    for (const [roomId, value] of Object.entries(payload)) {
+                        const count = typeof value === "number" ? value : Number(value);
+                        if (!Number.isFinite(count)) {
+                            continue;
+                        }
+                        const roomKey = buildRoomKey(roomId, domain);
+                        if (!roomKey) {
+                            continue;
+                        }
+                        connectedUsers += count;
+                        roomsCount += 1;
+                        connectedByRoomKey.set(roomKey, (connectedByRoomKey.get(roomKey) ?? 0) + count);
+                    }
+
+                    domainStats.push({
+                        domain,
+                        connectedUsers,
+                        rooms: roomsCount,
+                        error: null,
+                    });
+                } catch (error) {
+                    domainStats.push({
+                        domain,
+                        connectedUsers: 0,
+                        rooms: 0,
+                        error: error instanceof Error ? error.message : "Unable to query /rooms.",
+                    });
+                }
+            })
+        );
+
+        const totalConnectedUsers = Array.from(connectedByRoomKey.values()).reduce((sum, count) => sum + count, 0);
+        let knownRoomsConnectedUsers = 0;
+        for (const [roomKey, count] of connectedByRoomKey.entries()) {
+            if (!trackedRoomKeys.has(roomKey)) {
+                continue;
+            }
+            knownRoomsConnectedUsers += count;
+        }
+
+        const roomsWithUsers = Array.from(connectedByRoomKey.values()).filter((count) => count > 0).length;
+        const domainsFailed = domainStats.filter((entry) => entry.error !== null).length;
+
+        reply.send({
+            available: true,
+            reason: null,
+            totalConnectedUsers,
+            knownRoomsConnectedUsers,
+            roomsWithUsers,
+            trackedRooms: trackedRoomKeys.size,
+            domainsChecked: domains.length,
+            domainsFailed,
+            domainStats: domainStats.sort((left, right) => left.domain.localeCompare(right.domain)),
+        });
+    });
+
     app.post("/room", { preHandler: requireAdminAuth }, async (request, reply) => {
         const body = createRoomBody.parse(request.body);
         const normalized = normalizeRoomPath(body.roomUrl);

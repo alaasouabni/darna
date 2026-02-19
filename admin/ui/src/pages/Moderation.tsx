@@ -4,6 +4,7 @@ import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
+import { ContextFields } from "../components/ContextFields";
 import { BanIcon, EyeIcon, RejectIcon, UnbanIcon } from "../components/icons";
 
 type ReportItem = {
@@ -38,7 +39,7 @@ type BansResponse = {
 };
 
 export function ModerationPage() {
-  const { context, updateContext } = useAdminContext();
+  const { context } = useAdminContext();
   const [showAllReports, setShowAllReports] = useState(false);
   const [showAllBans, setShowAllBans] = useState(false);
   const [banDraft, setBanDraft] = useState<ReportItem | null>(null);
@@ -86,7 +87,7 @@ export function ModerationPage() {
       apiRequest<BansResponse>(
         buildQuery("/bans", {
           worldSlug: context.worldSlug || undefined,
-          activeOnly: true,
+          activeOnly: 1,
           take: 20,
           skip: 0,
         })
@@ -379,17 +380,9 @@ export function ModerationPage() {
         }
       />
 
-      <div className="card context-bar">
-        <span className="context-title">Context</span>
-        <label className="context-field">
-          <span>World slug</span>
-          <input
-            className="input"
-            placeholder="darna"
-            value={context.worldSlug}
-            onChange={(event) => updateContext({ worldSlug: event.target.value })}
-          />
-        </label>
+      <div className="card">
+        <h2 className="section-title">Context</h2>
+        <ContextFields showWorld allowEmptyWorld />
       </div>
 
       <div className="grid-two">

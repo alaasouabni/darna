@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import {
   DEFAULT_PLAY_URI,
   DEFAULT_ROOM_URL,
@@ -15,6 +15,9 @@ export type AdminContext = {
 };
 
 const STORAGE_KEY = "wa-admin-context";
+const listeners = new Set<() => void>();
+let contextStore = loadContext();
+let storageSyncBound = false;
 
 function getDefaultContext(): AdminContext {
   const inferredWorld = DEFAULT_WORLD_SLUG || inferWorldSlug(DEFAULT_ROOM_URL);
@@ -48,22 +51,67 @@ function loadContext(): AdminContext {
   }
 }
 
-export function useAdminContext() {
-  const [context, setContext] = useState<AdminContext>(() => loadContext());
+function notifyContextChange() {
+  listeners.forEach((listener) => listener());
+}
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
+function persistContext(value: AdminContext) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function setContextStore(value: AdminContext) {
+  contextStore = value;
+  persistContext(value);
+  notifyContextChange();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function getSnapshot() {
+  return contextStore;
+}
+
+function getServerSnapshot() {
+  return getDefaultContext();
+}
+
+function ensureStorageSync() {
+  if (storageSyncBound || typeof window === "undefined") {
+    return;
+  }
+
+  window.addEventListener("storage", (event) => {
+    if (event.key !== STORAGE_KEY) {
       return;
     }
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(context));
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [context]);
+    contextStore = loadContext();
+    notifyContextChange();
+  });
+
+  storageSyncBound = true;
+}
+
+export function useAdminContext() {
+  ensureStorageSync();
+  const context = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const updateContext = (patch: Partial<AdminContext>) => {
-    setContext((prev) => ({ ...prev, ...patch }));
+    setContextStore({
+      ...contextStore,
+      ...patch,
+    });
   };
 
   return { context, updateContext };

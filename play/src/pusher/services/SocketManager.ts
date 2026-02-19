@@ -150,6 +150,7 @@ export class SocketManager implements ZoneEventListener {
                                     type: "MemberLeave",
                                     data: {
                                         uuid: userLeftRoomMessage.uuid,
+                                        roomId: roomId,
                                     },
                                 })
                             );

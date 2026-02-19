@@ -4,6 +4,7 @@ import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
+import { ContextFields } from "../components/ContextFields";
 import { inferWorldDomain, inferWorldSlug } from "../config";
 
 type RoomSummary = {
@@ -19,7 +20,7 @@ type RoomSummary = {
 type RoomTagFilter = "all" | "active" | "inactive";
 
 export function RoomsPage() {
-  const { context, updateContext } = useAdminContext();
+  const { context } = useAdminContext();
   const [createRoomUrl, setCreateRoomUrl] = useState("");
   const [createWamUrl, setCreateWamUrl] = useState("");
   const [createRoomName, setCreateRoomName] = useState("");
@@ -267,24 +268,7 @@ export function RoomsPage() {
       <div className="grid-two">
         <div className="card">
           <h2 className="section-title">Context</h2>
-          <label className="field">
-            <span>Play URL</span>
-            <input
-              className="input"
-              placeholder="https://darna.lightency.io/@/darna/office"
-              value={context.playUri}
-              onChange={(event) => updateContext({ playUri: event.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Room URL</span>
-            <input
-              className="input"
-              placeholder="/@/darna/office"
-              value={context.roomUrl}
-              onChange={(event) => updateContext({ roomUrl: event.target.value })}
-            />
-          </label>
+          <ContextFields showWorld showRoom showPlayUri includeInactiveRooms />
           <p className="muted">
             {roomsQuery.isLoading
               ? "Loading rooms..."

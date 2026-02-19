@@ -3,6 +3,7 @@ import { apiRequest } from "../api/client";
 import { buildQuery } from "../api/query";
 import { useAdminContext } from "../context";
 import { PageHeader } from "../components/PageHeader";
+import { ContextFields } from "../components/ContextFields";
 
 type LivekitCredentials = {
   livekitHost: string | null;
@@ -19,7 +20,7 @@ type IceServer = {
 
 function maskValue(value: string | null | undefined) {
   if (!value) {
-    return "—";
+    return "--";
   }
   if (value.length <= 8) {
     return value;
@@ -28,7 +29,7 @@ function maskValue(value: string | null | undefined) {
 }
 
 export function IntegrationsPage() {
-  const { context, updateContext } = useAdminContext();
+  const { context } = useAdminContext();
 
   const livekitQuery = useQuery({
     queryKey: ["livekit", context.playUri],
@@ -74,33 +75,13 @@ export function IntegrationsPage() {
       <div className="grid-two">
         <div className="card">
           <h2 className="section-title">Context</h2>
-          <label className="field">
-            <span>Play URL</span>
-            <input
-              className="input"
-              placeholder="https://darna.lightency.io/@/darna/office"
-              value={context.playUri}
-              onChange={(event) => updateContext({ playUri: event.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Room URL</span>
-            <input
-              className="input"
-              placeholder="/@/darna/office"
-              value={context.roomUrl}
-              onChange={(event) => updateContext({ roomUrl: event.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>User identifier</span>
-            <input
-              className="input"
-              placeholder="admin@example.com"
-              value={context.userIdentifier}
-              onChange={(event) => updateContext({ userIdentifier: event.target.value })}
-            />
-          </label>
+          <ContextFields
+            showWorld
+            showRoom
+            showPlayUri
+            showUserIdentifier
+            includeInactiveRooms
+          />
         </div>
 
         <div className="card">
@@ -148,9 +129,9 @@ export function IntegrationsPage() {
             {iceServers.map((server, index) => (
               <tr key={`${server.urls.join(",")}-${index}`}>
                 <td>{server.urls.join(", ")}</td>
-                <td>{server.username ?? "—"}</td>
+                <td>{server.username ?? "--"}</td>
                 <td>{maskValue(server.credential)}</td>
-                <td>{server.credentialType ?? "—"}</td>
+                <td>{server.credentialType ?? "--"}</td>
               </tr>
             ))}
             {!iceServers.length && !iceQuery.isLoading && (
