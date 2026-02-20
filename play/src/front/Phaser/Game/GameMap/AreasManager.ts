@@ -1,5 +1,5 @@
 import type { AreaData, AtLeast, GameMapAreas, PersonalAreaPropertyData } from "@workadventure/map-editor";
-import { AreaPermissions } from "@workadventure/map-editor";
+import { AreaPermissions, PersonalAreaAccessClaimMode } from "@workadventure/map-editor";
 import { Area } from "../../Entity/Area";
 import type { GameScene } from "../GameScene";
 import { mapEditorActivatedForThematics } from "../../../Stores/MenuStore";
@@ -17,7 +17,11 @@ export class AreasManager {
         { over: (pointer: Phaser.Input.Pointer) => void; out: (pointer: Phaser.Input.Pointer) => void }
     >();
     private personalAreaHoverZones = new Map<string, Phaser.GameObjects.Zone>();
-    private personalAreaHoverOutlines = new Map<string, Phaser.GameObjects.Rectangle>();
+    private personalAreaHoverOutlines = new Map<string, Phaser.GameObjects.Graphics>();
+    private personalAreaUnclaimedIndicators = new Map<
+        string,
+        { graphics: Phaser.GameObjects.Graphics; pulse: Phaser.Tweens.Tween }
+    >();
     private personalAreaHoverMeta = new Map<
         string,
         { area: Area; areaData: AreaData; property: PersonalAreaPropertyData }
@@ -181,6 +185,8 @@ export class AreasManager {
             (prop): prop is PersonalAreaPropertyData => prop.type === "personalAreaPropertyData"
         );
 
+        this.updateUnclaimedPersonalAreaIndicator(area, property);
+
         if (!property?.ownerId) {
             this.clearPersonalAreaHover(area);
             return;
@@ -247,15 +253,116 @@ export class AreasManager {
     private updatePersonalAreaOutline(area: Area) {
         let outline = this.personalAreaHoverOutlines.get(area.areaData.id);
         if (!outline) {
-            outline = this.scene.add.rectangle(area.x, area.y, area.width, area.height);
-            outline.setStrokeStyle(1, 0x5aa9ff, 0.45);
-            outline.setFillStyle(0x5aa9ff, 0.12);
+            outline = this.scene.add.graphics();
             outline.setVisible(false);
             this.personalAreaHoverOutlines.set(area.areaData.id, outline);
         }
-        outline.setPosition(area.x, area.y);
-        outline.setSize(area.width, area.height);
-        outline.updateDisplayOrigin();
+
+        const width = area.width;
+        const height = area.height;
+        const left = area.x - width * 0.5;
+        const top = area.y - height * 0.5;
+        const radius = Math.max(6, Math.min(18, Math.min(width, height) * 0.2));
+
+        outline.clear();
+        outline.fillStyle(0x5aa9ff, 0.12);
+        outline.fillRoundedRect(left, top, width, height, radius);
+        outline.lineStyle(1, 0x5aa9ff, 0.45);
+        outline.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
+    }
+
+    private canShowUnclaimedPersonalAreaIndicator(property: PersonalAreaPropertyData): boolean {
+        if (property.ownerId !== null) {
+            return false;
+        }
+
+        if (property.accessClaimMode !== PersonalAreaAccessClaimMode.enum.dynamic) {
+            return false;
+        }
+
+        if (this.userCanEdit) {
+            return true;
+        }
+
+        if (!localUserStore.isLogged()) {
+            return false;
+        }
+
+        return (
+            property.allowedTags.length === 0 ||
+            property.allowedTags.some((tag) => this.userConnectedTags.includes(tag))
+        );
+    }
+
+    private updateUnclaimedPersonalAreaIndicator(area: Area, property?: PersonalAreaPropertyData): void {
+        if (!property || !this.canShowUnclaimedPersonalAreaIndicator(property)) {
+            this.clearUnclaimedPersonalAreaIndicator(area.areaData.id);
+            return;
+        }
+
+        let entry = this.personalAreaUnclaimedIndicators.get(area.areaData.id);
+        if (!entry) {
+            const graphics = this.scene.add.graphics();
+            graphics.setAlpha(1);
+            const pulse = this.scene.tweens.add({
+                targets: graphics,
+                alpha: { from: 0.9, to: 1 },
+                duration: 1400,
+                ease: Phaser.Math.Easing.Sine.InOut,
+                yoyo: true,
+                repeat: -1,
+            });
+            entry = { graphics, pulse };
+            this.personalAreaUnclaimedIndicators.set(area.areaData.id, entry);
+        }
+
+        const width = area.width;
+        const height = area.height;
+        const left = area.x - width * 0.5;
+        const top = area.y - height * 0.5;
+        const radius = Math.max(6, Math.min(18, Math.min(width, height) * 0.2));
+        const badgeRadius = Math.max(4, Math.min(9, Math.min(width, height) * 0.08));
+        const badgeInset = badgeRadius + 7;
+        const badgeX = left + width - badgeInset;
+        const badgeY = top + badgeInset;
+        const plusSize = badgeRadius * 0.9;
+
+        const graphics = entry.graphics;
+        graphics.clear();
+        graphics.fillStyle(0xffffff, 0.12);
+        graphics.fillRoundedRect(left, top, width, height, radius);
+        graphics.lineStyle(2, 0x0b1220, 0.28);
+        graphics.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
+        graphics.lineStyle(1, 0xffffff, 0.92);
+        graphics.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
+
+        graphics.fillStyle(0xffffff, 0.72);
+        graphics.fillCircle(badgeX, badgeY, badgeRadius);
+        graphics.lineStyle(1.5, 0x0b1220, 0.45);
+        graphics.strokeCircle(badgeX, badgeY, badgeRadius + 0.5);
+        graphics.lineStyle(1, 0xffffff, 0.98);
+        graphics.strokeCircle(badgeX, badgeY, badgeRadius + 0.5);
+
+        graphics.lineStyle(1.5, 0x1f2430, 0.9);
+        graphics.beginPath();
+        graphics.moveTo(badgeX - plusSize * 0.5, badgeY);
+        graphics.lineTo(badgeX + plusSize * 0.5, badgeY);
+        graphics.moveTo(badgeX, badgeY - plusSize * 0.5);
+        graphics.lineTo(badgeX, badgeY + plusSize * 0.5);
+        graphics.strokePath();
+        graphics.setVisible(true);
+    }
+
+    private clearUnclaimedPersonalAreaIndicator(areaId: string): void {
+        const entry = this.personalAreaUnclaimedIndicators.get(areaId);
+        if (!entry) {
+            return;
+        }
+
+        entry.pulse.stop();
+        entry.pulse.destroy();
+        entry.graphics.destroy();
+        this.personalAreaUnclaimedIndicators.delete(areaId);
     }
 
     private setPersonalAreaOutlineVisible(area: Area, visible: boolean) {
@@ -397,6 +504,10 @@ export class AreasManager {
     }
 
     private destroy() {
+        for (const areaId of [...this.personalAreaUnclaimedIndicators.keys()]) {
+            this.clearUnclaimedPersonalAreaIndicator(areaId);
+        }
+
         this.scene.input.off(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
         this.scene.input.off(Phaser.Input.Events.GAME_OUT, this.onGameOut);
         window.removeEventListener("pointermove", this.onWindowPointerMove);

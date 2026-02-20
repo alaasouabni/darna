@@ -54,6 +54,10 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
                 description: get(LL).menu.shortcuts.rotatePlayer(),
             },
             {
+                key: "X",
+                description: "Center camera on me",
+            },
+            {
                 key: "1",
                 description: get(LL).menu.shortcuts.emote1(),
             },
@@ -263,7 +267,7 @@ export class GameSceneUserInputHandler implements UserInputHandlerInterface {
                 this.gameScene.CurrentPlayer.rotate();
                 break;
             }
-            case "KeyF": {
+            case "KeyX": {
                 this.gameScene.getCameraManager().startFollowPlayer(this.gameScene.CurrentPlayer, 500);
                 break;
             }

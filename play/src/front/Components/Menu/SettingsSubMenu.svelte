@@ -110,6 +110,11 @@
         valueNoiseSuppression = false;
         requestedNoiseSuppressionStore.set(false);
     }
+    $: autoGainControlAvailable = valueNoiseSuppression && !valueRnnoise;
+    $: if (!autoGainControlAvailable && valueAutoGainControl) {
+        valueAutoGainControl = false;
+        requestedAutoGainControlStore.set(false);
+    }
 
     async function updateLocale() {
         await setCurrentLocale(valueLocale as Locales);
@@ -205,6 +210,9 @@
         if (valueNoiseSuppression) {
             valueRnnoise = false;
             requestedRnnoiseStore.set(false);
+        } else if (valueAutoGainControl) {
+            valueAutoGainControl = false;
+            requestedAutoGainControlStore.set(false);
         }
         requestedNoiseSuppressionStore.set(valueNoiseSuppression);
         restartMicTestIfActive();
@@ -224,6 +232,10 @@
         if (valueRnnoise) {
             valueNoiseSuppression = false;
             requestedNoiseSuppressionStore.set(false);
+            if (valueAutoGainControl) {
+                valueAutoGainControl = false;
+                requestedAutoGainControlStore.set(false);
+            }
         }
         requestedRnnoiseStore.set(valueRnnoise);
         restartMicTestIfActive();
@@ -244,12 +256,12 @@
                 audio: deviceId
                     ? {
                           deviceId: { exact: deviceId },
-                          autoGainControl: valueAutoGainControl,
+                          autoGainControl: valueAutoGainControl && valueNoiseSuppression && !valueRnnoise,
                           echoCancellation: valueEchoCancellation,
                           noiseSuppression: valueNoiseSuppression && !valueRnnoise,
                       }
                     : {
-                          autoGainControl: valueAutoGainControl,
+                          autoGainControl: valueAutoGainControl && valueNoiseSuppression && !valueRnnoise,
                           echoCancellation: valueEchoCancellation,
                           noiseSuppression: valueNoiseSuppression && !valueRnnoise,
                       },
@@ -423,7 +435,7 @@
     <div class="settings-content divide-y divide-white/20">
         {#if activeTab === "video"}
             <section class=" p-0 first:pt-0 pt-0 m-0">
-                <div class="bg-contrast font-bold text-lg p-4 flex items-center">
+                <div class="settings-section-head bg-contrast font-bold text-lg p-4 flex items-center">
                     <div class="me-4 opacity-50"><IconCameraUp /></div>
                     {$LL.menu.settings.videoBandwidth.title()}
                 </div>
@@ -485,7 +497,7 @@
                 </div>
             </section>
             <section class="flex flex-col p-0 first:pt-0 pt-8 m-0">
-                <div class="bg-contrast font-bold text-lg p-4 flex items-center">
+                <div class="settings-section-head bg-contrast font-bold text-lg p-4 flex items-center">
                     <div class="me-4 opacity-50"><IconScreenShare /></div>
 
                     {$LL.menu.settings.shareScreenBandwidth.title()}
@@ -550,7 +562,7 @@
         {/if}
         {#if activeTab === "audio"}
             <section class="flex flex-col p-0 first:pt-0 pt-0 m-0">
-                <div class="bg-contrast font-bold text-lg p-4 flex items-center">
+                <div class="settings-section-head bg-contrast font-bold text-lg p-4 flex items-center">
                     <div class="me-4 opacity-50"><IconAdjustements /></div>
 
                     {$LL.menu.settings.proximityDiscussionVolume()}
@@ -604,7 +616,7 @@
                 </div>
             </section>
             <section class="flex flex-col p-0 first:pt-0 pt-8 m-0">
-                <div class="bg-contrast font-bold text-lg p-4 flex items-center">
+                <div class="settings-section-head bg-contrast font-bold text-lg p-4 flex items-center">
                     <div class="me-4 opacity-50"><IconAdjustements /></div>
                     Audio settings
                 </div>
@@ -626,7 +638,7 @@
                     </div>
                 </div>
 
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="decreaseAudioPlayerVolumeWhileTalking-toggle"
                         bind:value={decreaseAudioPlayerVolumeWhileTalking}
@@ -635,7 +647,7 @@
                     />
                 </div>
 
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="changeBlockAudio"
                         bind:value={blockAudio}
@@ -643,7 +655,7 @@
                         label={$LL.menu.settings.blockAudio()}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="echo-cancellation-toggle"
                         bind:value={valueEchoCancellation}
@@ -651,15 +663,25 @@
                         label={$LL.menu.settings.echoCancellation()}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="auto-gain-control-toggle"
                         bind:value={valueAutoGainControl}
                         onChange={changeAutoGainControl}
                         label={$LL.menu.settings.autoGainControl()}
+                        disabled={!autoGainControlAvailable}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                {#if valueRnnoise}
+                    <div class="mx-4 mb-2 text-sm text-white/50">
+                        Auto gain control is disabled while RNNoise is active.
+                    </div>
+                {:else if !valueNoiseSuppression}
+                    <div class="mx-4 mb-2 text-sm text-white/50">
+                        Enable browser noise suppression to use auto gain control.
+                    </div>
+                {/if}
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="noise-suppression-toggle"
                         bind:value={valueNoiseSuppression}
@@ -668,11 +690,12 @@
                         disabled={valueRnnoise}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="rnnoise-toggle"
                         bind:value={valueRnnoise}
                         onChange={changeRnnoise}
+                        labelPill="BETA"
                         label="RNNoise (desktop only)"
                         disabled={!rnnoiseSupported || valueNoiseSuppression}
                     />
@@ -690,7 +713,7 @@
                         RNNoise replaces the browser noise suppression toggle.
                     </div>
                 {/if}
-                <div class="bg-contrast font-bold text-lg p-4 flex items-center mt-6">
+                <div class="settings-section-head bg-contrast font-bold text-lg p-4 flex items-center mt-6">
                     <div class="me-4 opacity-50"><IconMicrophone /></div>
                     Microphone test
                 </div>
@@ -716,7 +739,7 @@
         {/if}
         {#if activeTab === "general"}
             <section class="flex flex-col p-0 first:pt-0 pt-0 m-0">
-                <div class="bg-contrast font-bold text-lg p-4 flex items-center">
+                <div class="settings-section-head bg-contrast font-bold text-lg p-4 flex items-center">
                     <div class="me-4 opacity-50"><IconLanguage /></div>
                     {$LL.menu.settings.language.title()}
                 </div>
@@ -739,12 +762,12 @@
                 </div>
             </section>
             <section class="flex flex-col p-0 first:pt-0 pt-8 m-0">
-                <div class="bg-contrast font-bold text-lg p-4 flex items-center">
+                <div class="settings-section-head bg-contrast font-bold text-lg p-4 flex items-center">
                     <div class="me-4 opacity-50"><IconAdjustements /></div>
                     {$LL.menu.settings.otherSettings()}
                 </div>
 
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="fullscreen-toggle"
                         bind:value={fullscreen}
@@ -752,7 +775,7 @@
                         label={$LL.menu.settings.fullscreen()}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="notification-toggle"
                         bind:value={notification}
@@ -760,7 +783,7 @@
                         label={$LL.menu.settings.notifications()}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="picture-in-picture-toggle"
                         bind:value={allowPictureInPicture}
@@ -768,7 +791,7 @@
                         label={$LL.menu.settings.enablePictureInPicture()}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="cowebsiteTrigger-toggle"
                         bind:value={forceCowebsiteTrigger}
@@ -777,7 +800,7 @@
                     />
                 </div>
 
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="cowebsiteTrigger-toggle"
                         bind:value={ignoreFollowRequests}
@@ -785,7 +808,7 @@
                         label={$LL.menu.settings.ignoreFollowRequest()}
                     />
                 </div>
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="changeDisableAnimations"
                         bind:value={disableAnimations}
@@ -798,7 +821,9 @@
         {#if activeTab === "privacy"}
             <section class="flex flex-col p-0 first:pt-0 pt-0 m-0">
                 <div class="tooltip">
-                    <div class="group bg-contrast font-bold text-lg p-4 flex items-center relative">
+                    <div
+                        class="settings-section-head group bg-contrast font-bold text-lg p-4 flex items-center relative"
+                    >
                         <div class="me-4 opacity-50"><IconDoorExit /></div>
                         <div class="grow">
                             <div>{$LL.menu.settings.privacySettings.title()}</div>
@@ -809,7 +834,7 @@
                     </div>
                 </div>
 
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="cam-toggle"
                         bind:value={valueCameraPrivacySettings}
@@ -818,7 +843,7 @@
                     />
                 </div>
 
-                <div class="flex cursor-pointer items-center relative m-4">
+                <div class="settings-toggle-row flex cursor-pointer items-center relative m-4">
                     <InputSwitch
                         id="mic-toggle"
                         bind:value={valueMicrophonePrivacySettings}
@@ -833,42 +858,117 @@
 
 <style lang="scss">
     .settings-shell {
-        display: flex;
-        gap: 16px;
-        padding: 12px 16px 16px 16px;
+        display: grid;
+        grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+        gap: 18px;
+        padding: 20px 22px 24px 22px;
         align-items: flex-start;
     }
 
     .settings-tabs {
-        min-width: 200px;
+        min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        padding-top: 4px;
+        gap: 10px;
+        padding: 10px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: radial-gradient(circle at 0% 0%, rgba(255, 255, 255, 0.12), transparent 45%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+        backdrop-filter: blur(6px);
+        position: sticky;
+        top: 0;
     }
 
     .settings-tab {
         text-align: left;
         padding: 10px 12px;
-        border-radius: 10px;
+        border-radius: 12px;
         background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.1);
         color: rgba(255, 255, 255, 0.8);
+        font-weight: 600;
+        transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease, transform 180ms ease,
+            box-shadow 180ms ease;
     }
 
     .settings-tab:hover {
         color: rgba(255, 255, 255, 1);
-        border-color: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.28);
+        background: rgba(255, 255, 255, 0.1);
+        transform: translateX(2px);
     }
 
     .settings-tab.active {
-        background: rgba(32, 200, 160, 0.12);
-        border-color: rgba(32, 200, 160, 0.35);
+        background: linear-gradient(180deg, rgba(32, 200, 160, 0.24), rgba(32, 200, 160, 0.14));
+        border-color: rgba(72, 229, 191, 0.5);
         color: #ffffff;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+        transform: translateX(2px);
     }
 
     .settings-content {
         flex: 1;
-        padding-top: 4px;
+        padding: 6px 8px 12px 8px;
+        display: grid;
+        gap: 16px;
+    }
+
+    .settings-content > section {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        overflow: hidden;
+        background: radial-gradient(circle at 100% 0%, rgba(255, 255, 255, 0.08), transparent 42%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
+        backdrop-filter: blur(6px);
+        box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
+        padding-bottom: 8px;
+    }
+
+    .settings-section-head {
+        background: linear-gradient(90deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.01)), rgba(0, 0, 0, 0.2);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .settings-toggle-row {
+        margin: 8px 14px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.02);
+        transition: background-color 160ms ease, border-color 160ms ease;
+    }
+
+    .settings-toggle-row:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    @media (max-width: 980px) {
+        .settings-shell {
+            grid-template-columns: minmax(0, 1fr);
+            gap: 12px;
+            padding: 14px;
+        }
+
+        .settings-tabs {
+            position: static;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            padding: 8px;
+        }
+
+        .settings-tab {
+            text-align: center;
+            padding: 9px 8px;
+            font-size: 0.82rem;
+            transform: none !important;
+        }
+
+        .settings-content {
+            padding: 4px 2px 10px 2px;
+            gap: 12px;
+        }
     }
 </style>

@@ -317,9 +317,10 @@ export const audioConstraintStore = derived(
         requestedAutoGainControlStore,
     ],
     ([$microphoneDeviceIdStore, $noiseSuppression, $rnnoiseEnabled, $echoCancellation, $autoGainControl]) => {
+        const autoGainControlEnabled = $noiseSuppression && !$rnnoiseEnabled ? $autoGainControl : false;
         let constraints = {
             //TODO: make these values configurable in the game settings menu and store them in localstorage
-            autoGainControl: $autoGainControl,
+            autoGainControl: autoGainControlEnabled,
             echoCancellation: $echoCancellation,
             noiseSuppression: $noiseSuppression && !$rnnoiseEnabled,
         } as boolean | MediaTrackConstraints;

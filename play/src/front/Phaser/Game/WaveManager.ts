@@ -199,6 +199,7 @@ export class WaveManager {
     private async notifyIncomingWave(senderName: string, senderUserId: number): Promise<void> {
         const icon = await this.resolveWaveIconForUserId(senderUserId);
         notificationPlayingStore.playNotification(`${senderName} waved at you.`, icon);
+        this.onWaveReceived?.();
     }
 
     private queueHiddenWave(params: {
