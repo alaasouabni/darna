@@ -18,10 +18,8 @@ export class AreasManager {
     >();
     private personalAreaHoverZones = new Map<string, Phaser.GameObjects.Zone>();
     private personalAreaHoverOutlines = new Map<string, Phaser.GameObjects.Graphics>();
-    private personalAreaUnclaimedIndicators = new Map<
-        string,
-        { graphics: Phaser.GameObjects.Graphics; pulse: Phaser.Tweens.Tween }
-    >();
+    private personalAreaUnclaimedIndicators = new Map<string, Phaser.GameObjects.Image>();
+    private personalAreaUnclaimedHoverOverlay?: Phaser.GameObjects.Graphics;
     private personalAreaHoverMeta = new Map<
         string,
         { area: Area; areaData: AreaData; property: PersonalAreaPropertyData }
@@ -187,7 +185,7 @@ export class AreasManager {
 
         this.updateUnclaimedPersonalAreaIndicator(area, property);
 
-        if (!property?.ownerId) {
+        if (!property || !this.canHoverPersonalArea(property)) {
             this.clearPersonalAreaHover(area);
             return;
         }
@@ -204,7 +202,15 @@ export class AreasManager {
         zone.setPosition(area.x, area.y);
         zone.setSize(area.width, area.height);
         zone.setInteractive({ cursor: "pointer" });
-        this.updatePersonalAreaOutline(area);
+        if (property.ownerId) {
+            this.updatePersonalAreaOutline(area);
+        } else {
+            const outline = this.personalAreaHoverOutlines.get(area.areaData.id);
+            if (outline) {
+                outline.destroy();
+                this.personalAreaHoverOutlines.delete(area.areaData.id);
+            }
+        }
         this.personalAreaHoverMeta.set(area.areaData.id, { area, areaData: area.areaData, property });
         const over = (pointer: Phaser.Input.Pointer) => {
             this.setPersonalAreaOutlineVisible(area, true);
@@ -246,6 +252,7 @@ export class AreasManager {
         }
         this.personalAreaHoverMeta.delete(area.areaData.id);
         if (this.currentHoverAreaId === area.areaData.id) {
+            this.personalAreaUnclaimedHoverOverlay?.setVisible(false);
             this.currentHoverAreaId = undefined;
         }
     }
@@ -269,6 +276,81 @@ export class AreasManager {
         outline.fillRoundedRect(left, top, width, height, radius);
         outline.lineStyle(1, 0x5aa9ff, 0.45);
         outline.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
+    }
+
+    private drawUnclaimedPersonalAreaHoverOverlay(graphics: Phaser.GameObjects.Graphics, area: Area): void {
+        const width = area.width;
+        const height = area.height;
+        const left = area.x - width * 0.5;
+        const top = area.y - height * 0.5;
+        const radius = Math.max(6, Math.min(18, Math.min(width, height) * 0.2));
+        const badgeRadius = Math.max(4, Math.min(9, Math.min(width, height) * 0.08));
+        const badgeInset = badgeRadius + 7;
+        const badgeX = left + width - badgeInset;
+        const badgeY = top + badgeInset;
+        const plusSize = badgeRadius * 0.9;
+
+        graphics.clear();
+        graphics.fillStyle(0xffffff, 0.12);
+        graphics.fillRoundedRect(left, top, width, height, radius);
+        graphics.lineStyle(2, 0x0b1220, 0.28);
+        graphics.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
+        graphics.lineStyle(1, 0xffffff, 0.92);
+        graphics.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
+
+        graphics.fillStyle(0xffffff, 0.72);
+        graphics.fillCircle(badgeX, badgeY, badgeRadius);
+        graphics.lineStyle(1.5, 0x0b1220, 0.45);
+        graphics.strokeCircle(badgeX, badgeY, badgeRadius + 0.5);
+        graphics.lineStyle(1, 0xffffff, 0.98);
+        graphics.strokeCircle(badgeX, badgeY, badgeRadius + 0.5);
+
+        graphics.lineStyle(1.5, 0x1f2430, 0.9);
+        graphics.beginPath();
+        graphics.moveTo(badgeX - plusSize * 0.5, badgeY);
+        graphics.lineTo(badgeX + plusSize * 0.5, badgeY);
+        graphics.moveTo(badgeX, badgeY - plusSize * 0.5);
+        graphics.lineTo(badgeX, badgeY + plusSize * 0.5);
+        graphics.strokePath();
+    }
+
+    private getUnclaimedIndicatorBadgeTextureKey(): string {
+        return "wa-personal-area-unclaimed-badge-v1";
+    }
+
+    private ensureUnclaimedIndicatorBadgeTexture(): string {
+        const key = this.getUnclaimedIndicatorBadgeTextureKey();
+        if (this.scene.textures.exists(key)) {
+            return key;
+        }
+
+        // Build once and reuse to keep persistent indicators on the sprite path.
+        const size = 24;
+        const center = size * 0.5;
+        const radius = 9;
+        const g = this.scene.add.graphics();
+        g.setVisible(false);
+        g.fillStyle(0xffffff, 0.82);
+        g.fillCircle(center, center, radius);
+        g.lineStyle(2, 0x0b1220, 0.5);
+        g.strokeCircle(center, center, radius + 0.5);
+        g.lineStyle(1, 0xffffff, 0.98);
+        g.strokeCircle(center, center, radius + 0.5);
+        g.lineStyle(2, 0x1f2430, 0.92);
+        g.beginPath();
+        g.moveTo(center - 4, center);
+        g.lineTo(center + 4, center);
+        g.moveTo(center, center - 4);
+        g.lineTo(center, center + 4);
+        g.strokePath();
+        g.generateTexture(key, size, size);
+        g.destroy();
+
+        return key;
+    }
+
+    private canHoverPersonalArea(property: PersonalAreaPropertyData): boolean {
+        return property.ownerId !== null || this.canShowUnclaimedPersonalAreaIndicator(property);
     }
 
     private canShowUnclaimedPersonalAreaIndicator(property: PersonalAreaPropertyData): boolean {
@@ -300,72 +382,53 @@ export class AreasManager {
             return;
         }
 
-        let entry = this.personalAreaUnclaimedIndicators.get(area.areaData.id);
-        if (!entry) {
-            const graphics = this.scene.add.graphics();
-            graphics.setAlpha(1);
-            const pulse = this.scene.tweens.add({
-                targets: graphics,
-                alpha: { from: 0.9, to: 1 },
-                duration: 1400,
-                ease: Phaser.Math.Easing.Sine.InOut,
-                yoyo: true,
-                repeat: -1,
-            });
-            entry = { graphics, pulse };
-            this.personalAreaUnclaimedIndicators.set(area.areaData.id, entry);
+        let badge = this.personalAreaUnclaimedIndicators.get(area.areaData.id);
+        if (!badge) {
+            badge = this.scene.add.image(0, 0, this.ensureUnclaimedIndicatorBadgeTexture());
+            badge.setAlpha(0.96);
+            this.personalAreaUnclaimedIndicators.set(area.areaData.id, badge);
         }
 
         const width = area.width;
         const height = area.height;
         const left = area.x - width * 0.5;
         const top = area.y - height * 0.5;
-        const radius = Math.max(6, Math.min(18, Math.min(width, height) * 0.2));
         const badgeRadius = Math.max(4, Math.min(9, Math.min(width, height) * 0.08));
         const badgeInset = badgeRadius + 7;
         const badgeX = left + width - badgeInset;
         const badgeY = top + badgeInset;
-        const plusSize = badgeRadius * 0.9;
+        const badgeSize = Math.max(12, Math.min(22, badgeRadius * 2 + 6));
 
-        const graphics = entry.graphics;
-        graphics.clear();
-        graphics.fillStyle(0xffffff, 0.12);
-        graphics.fillRoundedRect(left, top, width, height, radius);
-        graphics.lineStyle(2, 0x0b1220, 0.28);
-        graphics.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
-        graphics.lineStyle(1, 0xffffff, 0.92);
-        graphics.strokeRoundedRect(left + 0.5, top + 0.5, Math.max(0, width - 1), Math.max(0, height - 1), radius);
-
-        graphics.fillStyle(0xffffff, 0.72);
-        graphics.fillCircle(badgeX, badgeY, badgeRadius);
-        graphics.lineStyle(1.5, 0x0b1220, 0.45);
-        graphics.strokeCircle(badgeX, badgeY, badgeRadius + 0.5);
-        graphics.lineStyle(1, 0xffffff, 0.98);
-        graphics.strokeCircle(badgeX, badgeY, badgeRadius + 0.5);
-
-        graphics.lineStyle(1.5, 0x1f2430, 0.9);
-        graphics.beginPath();
-        graphics.moveTo(badgeX - plusSize * 0.5, badgeY);
-        graphics.lineTo(badgeX + plusSize * 0.5, badgeY);
-        graphics.moveTo(badgeX, badgeY - plusSize * 0.5);
-        graphics.lineTo(badgeX, badgeY + plusSize * 0.5);
-        graphics.strokePath();
-        graphics.setVisible(true);
+        badge.setPosition(badgeX, badgeY);
+        badge.setDisplaySize(badgeSize, badgeSize);
+        badge.setVisible(true);
     }
 
     private clearUnclaimedPersonalAreaIndicator(areaId: string): void {
-        const entry = this.personalAreaUnclaimedIndicators.get(areaId);
-        if (!entry) {
+        const badge = this.personalAreaUnclaimedIndicators.get(areaId);
+        if (!badge) {
             return;
         }
 
-        entry.pulse.stop();
-        entry.pulse.destroy();
-        entry.graphics.destroy();
+        badge.destroy();
         this.personalAreaUnclaimedIndicators.delete(areaId);
     }
 
     private setPersonalAreaOutlineVisible(area: Area, visible: boolean) {
+        const meta = this.personalAreaHoverMeta.get(area.areaData.id);
+        if (meta?.property.ownerId === null) {
+            if (!visible) {
+                this.personalAreaUnclaimedHoverOverlay?.setVisible(false);
+                return;
+            }
+            if (!this.personalAreaUnclaimedHoverOverlay) {
+                this.personalAreaUnclaimedHoverOverlay = this.scene.add.graphics();
+            }
+            this.drawUnclaimedPersonalAreaHoverOverlay(this.personalAreaUnclaimedHoverOverlay, area);
+            this.personalAreaUnclaimedHoverOverlay.setVisible(true);
+            return;
+        }
+
         const outline = this.personalAreaHoverOutlines.get(area.areaData.id);
         if (outline) {
             outline.setVisible(visible);
@@ -507,6 +570,8 @@ export class AreasManager {
         for (const areaId of [...this.personalAreaUnclaimedIndicators.keys()]) {
             this.clearUnclaimedPersonalAreaIndicator(areaId);
         }
+        this.personalAreaUnclaimedHoverOverlay?.destroy();
+        this.personalAreaUnclaimedHoverOverlay = undefined;
 
         this.scene.input.off(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
         this.scene.input.off(Phaser.Input.Events.GAME_OUT, this.onGameOut);
