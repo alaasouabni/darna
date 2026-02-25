@@ -1,40 +1,51 @@
-import { ipcMain, app, desktopCapturer } from "electron";
+import { ipcMain, app, desktopCapturer, shell } from "electron";
 import electronIsDev from "electron-is-dev";
+import path from "path";
 import { createAndShowNotification } from "./notification";
 import { Server } from "./preload-local-app/types";
 import settings, { SettingsData } from "./settings";
 import { loadShortcuts, setShortcutsEnabled } from "./shortcuts";
-import { getAppView, hideAppView, showAppView } from "./window";
-// import fetch from "node-fetch";
+import { getAppView, hideAppView, setAppViewInsets, showAppView } from "./window";
+import runtimeConfig from "./runtime-config";
 
 export function emitMuteToggle() {
-    const appView = getAppView();
-    if (!appView) {
+    const currentAppView = getAppView();
+    if (!currentAppView) {
         throw new Error("Main window not found");
     }
 
-    appView.webContents.send("app:on-mute-toggle");
+    currentAppView.webContents.send("app:on-mute-toggle");
 }
 
 export function emitCameraToggle() {
-    const appView = getAppView();
-    if (!appView) {
+    const currentAppView = getAppView();
+    if (!currentAppView) {
         throw new Error("Main window not found");
     }
 
-    appView.webContents.send("app:on-camera-toggle");
+    currentAppView.webContents.send("app:on-camera-toggle");
+}
+
+function isLockedServerMode() {
+    return runtimeConfig.get().lockedServerMode;
+}
+
+function toResultFromOpenPathResult(result: string) {
+    if (result && result.length > 0) {
+        return new Error(result);
+    }
+    return true;
 }
 
 export default () => {
     ipcMain.handle("is-development", () => electronIsDev);
     ipcMain.handle("get-version", () => (electronIsDev ? "dev" : app.getVersion()));
 
-    // app ipc
-    ipcMain.on("app:notify", (event, txt: string) => {
+    ipcMain.on("app:notify", (_event, txt: string) => {
         createAndShowNotification({ body: txt });
     });
 
-    ipcMain.handle("app:getDesktopCapturerSources", async (event, options: Electron.SourcesOptions) => {
+    ipcMain.handle("app:getDesktopCapturerSources", async (_event, options: Electron.SourcesOptions) => {
         return (await desktopCapturer.getSources(options)).map((source) => ({
             id: source.id,
             name: source.name,
@@ -42,16 +53,45 @@ export default () => {
         }));
     });
 
-    // local-app ipc
     ipcMain.handle("local-app:showLocalApp", () => {
         hideAppView();
+    });
+
+    ipcMain.handle("local-app:getDesktopConfig", () => {
+        const config = runtimeConfig.get();
+        return {
+            ...config,
+            configPath: runtimeConfig.getPath(),
+        };
+    });
+
+    ipcMain.handle("local-app:connectConfiguredServer", async () => {
+        const config = runtimeConfig.get();
+        await showAppView(config.server.url);
+        return true;
+    });
+
+    ipcMain.handle("local-app:setAppViewInsets", (_event, insets) => {
+        setAppViewInsets(insets || {});
+    });
+
+    ipcMain.handle("local-app:openDesktopConfigFile", async () => {
+        return toResultFromOpenPathResult(await shell.openPath(runtimeConfig.getPath()));
+    });
+
+    ipcMain.handle("local-app:openDesktopConfigFolder", async () => {
+        return toResultFromOpenPathResult(await shell.openPath(path.dirname(runtimeConfig.getPath())));
     });
 
     ipcMain.handle("local-app:getServers", () => {
         return settings.get("servers");
     });
 
-    ipcMain.handle("local-app:selectServer", async (event, serverId: string) => {
+    ipcMain.handle("local-app:selectServer", async (_event, serverId: string) => {
+        if (isLockedServerMode()) {
+            return new Error("Server selection is disabled in locked server mode");
+        }
+
         const servers = settings.get("servers") || [];
         const selectedServer = servers.find((s) => s._id === serverId);
 
@@ -63,18 +103,12 @@ export default () => {
         return true;
     });
 
-    ipcMain.handle("local-app:addServer", (event, server: Omit<Server, "_id">) => {
+    ipcMain.handle("local-app:addServer", (_event, server: Omit<Server, "_id">) => {
+        if (isLockedServerMode()) {
+            return new Error("Adding servers is disabled in locked server mode");
+        }
+
         const servers = settings.get("servers") || [];
-
-        // TODO: add proper test to see if server url is valid and points to a real WA server
-        // try {
-        //
-        //     await fetch(`${server.url}/iframe_api.js`);
-        // } catch (e) {
-        //     console.error(e);
-        //     return new Error("Invalid server url");
-        // }
-
         const newServer = {
             ...server,
             _id: `${Date.now()}-${servers.length + 1}`,
@@ -84,23 +118,27 @@ export default () => {
         return newServer;
     });
 
-    ipcMain.handle("local-app:removeServer", (event, server: Server) => {
+    ipcMain.handle("local-app:removeServer", (_event, serverId: string) => {
+        if (isLockedServerMode()) {
+            return new Error("Removing servers is disabled in locked server mode");
+        }
+
         const servers = settings.get("servers") || [];
         settings.set(
             "servers",
-            servers.filter((s) => s._id !== server._id)
+            servers.filter((s) => s._id !== serverId)
         );
         return true;
     });
 
-    ipcMain.handle("local-app:reloadShortcuts", (event) => loadShortcuts());
+    ipcMain.handle("local-app:reloadShortcuts", () => loadShortcuts());
 
-    ipcMain.handle("local-app:getSettings", (event) => settings.get() || {});
+    ipcMain.handle("local-app:getSettings", () => settings.get() || {});
     ipcMain.handle(
         "local-app:saveSetting",
-        <T extends keyof SettingsData>(event: Electron.IpcMainInvokeEvent, key: T, value: SettingsData[T]) =>
+        <T extends keyof SettingsData>(_event: Electron.IpcMainInvokeEvent, key: T, value: SettingsData[T]) =>
             settings.set(key, value)
     );
 
-    ipcMain.handle("local-app:setShortcutsEnabled", (event, enabled: boolean) => setShortcutsEnabled(enabled));
+    ipcMain.handle("local-app:setShortcutsEnabled", (_event, enabled: boolean) => setShortcutsEnabled(enabled));
 };

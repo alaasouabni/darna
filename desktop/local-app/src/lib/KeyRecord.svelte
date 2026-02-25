@@ -8,7 +8,6 @@
         change: string;
     }>();
 
-    // https://www.electronjs.org/de/docs/latest/api/accelerator
     function keyCodeToElectron(key: string): string {
         if (key.match(/^Key[A-Z]/)) {
             return key.replace(/^Key/, "").toLocaleUpperCase();
@@ -23,9 +22,7 @@
         }
 
         switch (key) {
-            // Modifiers
             case "ControlLeft":
-                return "CmdOrCtrl";
             case "ControlRight":
                 return "CmdOrCtrl";
             case "AltLeft":
@@ -35,10 +32,8 @@
             case "ScrollLock":
                 return "Scrolllock";
             case "ShiftLeft":
-                return "Shift";
             case "ShiftRight":
                 return "Shift";
-            // Specialchars
             case "Period":
                 return ".";
             case "Comma":
@@ -63,7 +58,6 @@
                 return "\\";
             case "Backquote":
                 return "`";
-            // Numpad
             case "NumpadDecimal":
                 return "numdec";
             case "NumpadAdd":
@@ -83,21 +77,6 @@
     let recording = false;
     let recordingTimeout: NodeJS.Timeout;
     let keyInputTimeout: NodeJS.Timeout;
-
-    function camelPad(str: string) {
-        return (
-            str
-                // Look for long acronyms and filter out the last letter
-                .replace(/([A-Z]+)([A-Z][a-z])/g, " $1 $2")
-                // Look for lower-case letters followed by upper-case letters
-                .replace(/([a-z\d])([A-Z])/g, "$1 $2")
-                // Look for lower-case letters followed by numbers
-                // .replace(/([a-zA-Z])(\d)/g, "$1 $2")
-                .replace(/^./, (str) => str.toUpperCase())
-                // Remove any white space left around the word
-                .trim()
-        );
-    }
 
     function resetRecording() {
         recording = false;
@@ -143,37 +122,96 @@
     }
 </script>
 
-<div
-    class={`flex items-center w-full h-8 border-1 rounded-md overflow-hidden text-gray-200 text-xs appearance-none focus:outline-none ${
-        recording ? "border-red-500" : "border-gray-400"
-    }`}
-    on:keyup={keyUp}
-    on:click={startRecording}
-    tabindex="0"
->
-    <input
-        {id}
-        type="text"
-        class="flex-grow h-full border-none mx-2 bg-transparent appearance-none focus:outline-none"
-        disabled
-        {value}
-    />
+<div class="key-record" class:is-recording={recording} on:keyup={keyUp} on:click={startRecording} tabindex="0" role="button">
+    <input {id} type="text" disabled {value} aria-label="Shortcut" />
+
     {#if value.length > 0}
-        <span
-            class="flex items-center justify-center w-4 h-4 p-2 mr-1 rounded-full cursor-pointer bg-gray-500 hover:bg-gray-400"
-            on:click|stopPropagation={resetRecording}>x</span
-        >
+        <button class="clear" type="button" title="Clear shortcut" on:click|stopPropagation={resetRecording}>×</button>
     {/if}
-    <div
-        class={`flex h-6 items-center px-2 m-0.5 rounded-sm w-28 justify-center cursor-pointer ${
-            recording ? "bg-red-500" : "hover:bg-gray-400"
-        }`}
-        on:click={recording ? stopRecording : startRecording}
-    >
+
+    <button class="record" type="button" on:click|stopPropagation={recording ? stopRecording : startRecording}>
         {#if recording}
-            <span>recording</span>
+            Recording...
         {:else}
-            <span>record</span>
+            Record
         {/if}
-    </div>
+    </button>
 </div>
+
+<style>
+    .key-record {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: 42px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.03);
+        padding: 6px;
+        color: #edf2f8;
+        outline: none;
+    }
+
+    .key-record:focus {
+        border-color: rgba(14, 165, 233, 0.5);
+        box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+    }
+
+    .key-record.is-recording {
+        border-color: rgba(239, 68, 68, 0.45);
+        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+    }
+
+    input {
+        width: 100%;
+        min-width: 0;
+        background: transparent;
+        border: none;
+        color: inherit;
+        font-size: 12px;
+        padding: 0 8px;
+        outline: none;
+    }
+
+    input:disabled {
+        opacity: 1;
+        -webkit-text-fill-color: currentColor;
+    }
+
+    button {
+        border: 0;
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        color: #edf2f8;
+    }
+
+    .clear {
+        width: 28px;
+        height: 28px;
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .clear:hover {
+        background: rgba(255, 255, 255, 0.14);
+    }
+
+    .record {
+        min-width: 94px;
+        height: 28px;
+        padding: 0 12px;
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .record:hover {
+        background: rgba(255, 255, 255, 0.12);
+    }
+
+    .key-record.is-recording .record {
+        background: rgba(239, 68, 68, 0.18);
+        color: #fecaca;
+    }
+</style>

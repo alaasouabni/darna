@@ -9,6 +9,7 @@ import settings from "./settings";
 import { setLogLevel } from "./log";
 import "./serve"; // prepare custom url scheme
 import { loadShortcuts } from "./shortcuts";
+import runtimeConfig from "./runtime-config";
 
 async function init() {
     const appLock = app.requestSingleInstanceLock();
@@ -37,6 +38,7 @@ async function init() {
 
     // This method will be called when Electron has finished loading
     await app.whenReady().then(async () => {
+        await runtimeConfig.init();
         await settings.init();
 
         setLogLevel(settings.get("log_level") || "info");

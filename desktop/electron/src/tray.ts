@@ -4,7 +4,7 @@ import { showAboutWindow } from "electron-util";
 
 import * as autoUpdater from "./auto-updater";
 import * as log from "./log";
-import { getAppView, getWindow } from "./window";
+import { getAppView, getWindow, hideAppView } from "./window";
 
 let tray: Tray | undefined;
 
@@ -32,6 +32,22 @@ export function createTray() {
                 } else {
                     mainWindow.show();
                 }
+            },
+        },
+        {
+            label: "Show Controls",
+            click() {
+                const mainWindow = getWindow();
+                if (!mainWindow) {
+                    throw new Error("Main window not found");
+                }
+
+                if (!mainWindow.isVisible()) {
+                    mainWindow.show();
+                }
+
+                hideAppView();
+                mainWindow.focus();
             },
         },
         {

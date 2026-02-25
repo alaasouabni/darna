@@ -1,6 +1,7 @@
 import ElectronLog from "electron-log";
 import Settings from "electron-settings";
 import type { Server } from "./preload-local-app/types";
+import runtimeConfig from "./runtime-config";
 
 export type SettingsData = {
     log_level: ElectronLog.LogLevel;
@@ -27,12 +28,41 @@ const defaultSettings: SettingsData = {
     },
 };
 
+function getLockedServerSettingsValue(): Server[] {
+    const config = runtimeConfig.get();
+    return [
+        {
+            _id: "locked-server",
+            name: config.server.name,
+            url: config.server.url,
+        },
+    ];
+}
+
+function applyLockedServerMode() {
+    if (!runtimeConfig.get().lockedServerMode) {
+        return;
+    }
+    settings.servers = getLockedServerSettingsValue();
+}
+
 async function init() {
     let _settings = await Settings.get();
     if (Object.keys(_settings).length === 0) {
         _settings = defaultSettings;
     }
-    settings = _settings as SettingsData;
+    settings = {
+        ...defaultSettings,
+        ...(_settings as Partial<SettingsData>),
+        shortcuts: {
+            ...defaultSettings.shortcuts,
+            ...(((_settings as Partial<SettingsData>).shortcuts || {}) as Partial<SettingsData["shortcuts"]>),
+        },
+        servers: Array.isArray((_settings as Partial<SettingsData>).servers)
+            ? (((_settings as Partial<SettingsData>).servers || []) as Server[])
+            : defaultSettings.servers,
+    };
+    applyLockedServerMode();
 }
 
 function get(): SettingsData;
@@ -61,6 +91,8 @@ function set<T extends keyof SettingsData>(key: T | SettingsData, value?: Settin
     } else if (typeof key !== "string") {
         Object.assign(settings, key);
     }
+
+    applyLockedServerMode();
 
     void Settings.set(settings);
 }

@@ -1,4 +1,4 @@
-appId: re.workadventu.desktop
+appId: io.darna.lightency.desktop
 
 files:
     - "dist/**/*"
@@ -26,6 +26,6 @@ win:
 
 publish:
     provider: github
-    owner: thecodingmachine
-    repo: workadventure
+    owner: alaasouabni
+    repo: darna-desktop
     releaseType: release

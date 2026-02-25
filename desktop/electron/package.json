@@ -1,8 +1,8 @@
 {
-    "name": "workadventure-desktop",
-    "version": "managedbyci",
-    "description": "Desktop application for WorkAdventure",
-    "author": "thecodingmachine",
+    "name": "darna-desktop",
+    "version": "1.0.0",
+    "description": "Desktop application for Darna",
+    "author": "DarBlockchain",
     "main": "dist/main.js",
     "license": "SEE LICENSE IN LICENSE.txt",
     "scripts": {
@@ -33,7 +33,7 @@
         "@types/auto-launch": "^5.0.2",
         "@typescript-eslint/eslint-plugin": "^5.18.0",
         "@typescript-eslint/parser": "^5.18.0",
-        "electron": "^18.0.3",
+        "electron": "^40.0.0",
         "electron-builder": "^23.6.0",
         "eslint": "^8.12.0",
         "prettier": "^2.6.2",
