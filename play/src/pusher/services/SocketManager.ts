@@ -1,5 +1,6 @@
 import Jwt from "jsonwebtoken";
 import Debug from "debug";
+import { randomBytes } from "crypto";
 import {
     AvailabilityStatus,
     FilterType,
@@ -85,9 +86,19 @@ export type AdminSocket = WebSocket<AdminSocketData>;
 export type Socket = WebSocket<SocketData>;
 export type SocketUpgradeFailed = WebSocket<UpgradeFailedData>;
 
+type ActiveUserSession = {
+    sessionId: string;
+    userUuid: string;
+    clientInstanceId?: string;
+    roomId: string;
+    connectedAt: number;
+    socket: Socket;
+};
+
 export class SocketManager implements ZoneEventListener {
     private rooms: Map<string, PusherRoom> = new Map<string, PusherRoom>();
     private spaces: Map<string, SpaceInterface> = new Map<string, SpaceInterface>();
+    private activeSessionsByUserUuid = new Map<string, ActiveUserSession>();
 
     constructor(private _spaceConnection = new SpaceConnection()) {
         clientEventsEmitter.registerToClientJoin((clientUUid: string, roomId: string) => {
@@ -240,6 +251,8 @@ export class SocketManager implements ZoneEventListener {
             if (!Number.isFinite(socketData.availabilityStatus)) {
                 socketData.availabilityStatus = AvailabilityStatus.ONLINE;
             }
+
+            this.registerActiveSessionOrReplace(client);
 
             console.info("[joinRoom] payload", {
                 userUuid: socketData.userUuid,
@@ -602,6 +615,81 @@ export class SocketManager implements ZoneEventListener {
         client.end(code, reason);
     }
 
+    private generateSessionId(): string {
+        return randomBytes(16).toString("hex");
+    }
+
+    private registerActiveSessionOrReplace(client: Socket): void {
+        const socketData = client.getUserData();
+        const userUuid = socketData.userUuid;
+        const sessionId = socketData.sessionId ?? this.generateSessionId();
+        socketData.sessionId = sessionId;
+
+        const previous = this.activeSessionsByUserUuid.get(userUuid);
+        const current: ActiveUserSession = {
+            sessionId,
+            userUuid,
+            clientInstanceId: socketData.clientInstanceId,
+            roomId: socketData.roomId,
+            connectedAt: Date.now(),
+            socket: client,
+        };
+
+        // New session wins. Stale disconnects are ignored by compare-on-cleanup.
+        this.activeSessionsByUserUuid.set(userUuid, current);
+
+        if (!previous || previous.socket === client) {
+            return;
+        }
+
+        const previousSocketData = previous.socket.getUserData();
+        if (previousSocketData.disconnecting) {
+            return;
+        }
+
+        const sameClientInstance =
+            Boolean(previous.clientInstanceId) &&
+            Boolean(current.clientInstanceId) &&
+            previous.clientInstanceId === current.clientInstanceId;
+
+        debug(
+            `[single-session] replacing session for ${userUuid} old=${previous.sessionId} new=${current.sessionId} sameInstance=${sameClientInstance}`
+        );
+
+        if (!sameClientInstance) {
+            this.emitErrorScreenMessage(previous.socket, {
+                status: "error",
+                type: "error",
+                code: "SESSION_REPLACED",
+                title: "Session replaced",
+                subtitle: "This account was opened in another tab or device.",
+                details: "This session has been closed to keep one active session per user.",
+            });
+        }
+
+        this.closeWebsocketConnection(previous.socket, 4001, "Session replaced");
+    }
+
+    private unregisterActiveSession(client: Socket): void {
+        const socketData = client.getUserData();
+        const userUuid = socketData.userUuid;
+        const sessionId = socketData.sessionId;
+        if (!userUuid || !sessionId) {
+            return;
+        }
+
+        const current = this.activeSessionsByUserUuid.get(userUuid);
+        if (!current) {
+            return;
+        }
+
+        if (current.sessionId !== sessionId) {
+            return;
+        }
+
+        this.activeSessionsByUserUuid.delete(userUuid);
+    }
+
     private closeWebsocketConnection(client: Socket, code: number, reason: string): void {
         this.cleanupSocket(client);
         client.end(code, reason);
@@ -616,6 +704,7 @@ export class SocketManager implements ZoneEventListener {
         }
 
         socketData.disconnecting = true;
+        this.unregisterActiveSession(client);
 
         if (socketData.keepAliveInterval) {
             clearInterval(socketData.keepAliveInterval);
@@ -1089,7 +1178,7 @@ export class SocketManager implements ZoneEventListener {
         );
     }
 
-    public emitErrorScreenMessage(client: SocketUpgradeFailed, errorApi: ErrorApiData): void {
+    public emitErrorScreenMessage(client: Socket | SocketUpgradeFailed, errorApi: ErrorApiData): void {
         // FIXME: improve typing of ErrorScreenMessage
         const errorScreenMessage: ErrorScreenMessage = {
             type: errorApi.type,

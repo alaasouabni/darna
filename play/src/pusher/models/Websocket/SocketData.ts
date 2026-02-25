@@ -31,6 +31,8 @@ export type SocketData = {
     roomId: string;
     userId?: number; // User Id served by the back
     userUuid: string; // Admin UUID
+    clientInstanceId?: string;
+    sessionId?: string;
     isLogged: boolean;
     ipAddress: string;
     name: string;

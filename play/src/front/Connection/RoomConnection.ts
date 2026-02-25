@@ -130,6 +130,26 @@ import { ConnectionClosedError } from "./ConnectionClosedError";
 
 // This must be greater than RoomManager's PING_INTERVAL
 const manualPingDelay = 100_000;
+const CLIENT_INSTANCE_ID_STORAGE_KEY = "wa-client-instance-id";
+
+function getOrCreateClientInstanceId(): string {
+    try {
+        const storage = window.sessionStorage;
+        const existing = storage.getItem(CLIENT_INSTANCE_ID_STORAGE_KEY);
+        if (existing) {
+            return existing;
+        }
+
+        const generated =
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `wa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        storage.setItem(CLIENT_INSTANCE_ID_STORAGE_KEY, generated);
+        return generated;
+    } catch {
+        return `wa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+}
 
 export class RoomConnection implements RoomConnection {
     private static websocketFactory: null | ((url: string, protocols?: string[]) => any) = null; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -292,6 +312,7 @@ export class RoomConnection implements RoomConnection {
         if (lastCommandId) {
             params.set("lastCommandId", lastCommandId);
         }
+        params.set("clientInstanceId", getOrCreateClientInstanceId());
         params.set("version", apiVersionHash);
         params.set("chatID", localUserStore.getChatId() ?? "");
         params.set("roomName", gameManager.currentStartedRoom.roomName ?? "");
