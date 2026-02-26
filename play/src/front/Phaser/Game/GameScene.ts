@@ -391,6 +391,7 @@ export class GameScene extends DirtyScene {
     private resizeTransactionZoomSnapshot: CameraZoomStateSnapshot | undefined;
     private playersDebugLogAlreadyDisplayed = false;
     private hideTimeout: ReturnType<typeof setTimeout> | undefined;
+    private lastPlayerNameScaleEffectiveZoom: number | undefined;
     // The promise that will resolve to the current player textures. This will be available only after connection is established.
     private currentPlayerTexturesResolve!: (value: string[]) => void;
     private currentPlayerTexturesReject!: (reason: unknown) => void;
@@ -1647,7 +1648,31 @@ export class GameScene extends DirtyScene {
                 group.step();
             }
         }
+        this.updatePlayerNameScalesForZoom();
         this.hasMovedThisFrame = false;
+    }
+
+    private updatePlayerNameScalesForZoom(): void {
+        const camera = this.cameras?.main;
+        if (!camera || !this.cameraManager) {
+            return;
+        }
+
+        const effectiveZoom = (camera.zoom || 1) * (this.scale.zoom || 1);
+        if (
+            this.lastPlayerNameScaleEffectiveZoom !== undefined &&
+            Math.abs(this.lastPlayerNameScaleEffectiveZoom - effectiveZoom) <= 0.0001
+        ) {
+            return;
+        }
+
+        this.lastPlayerNameScaleEffectiveZoom = effectiveZoom;
+        const { normalizedDiscreteLevel } = this.cameraManager.captureZoomStateSnapshot();
+
+        this.CurrentPlayer?.updatePlayerNameScaleForDiscreteLevel(camera.zoom || 1, normalizedDiscreteLevel);
+        this.MapPlayersByKey.forEach((player: RemotePlayer) => {
+            player.updatePlayerNameScaleForDiscreteLevel(camera.zoom || 1, normalizedDiscreteLevel);
+        });
     }
 
     deleteGroup(groupId: number): void {
@@ -1765,6 +1790,8 @@ export class GameScene extends DirtyScene {
                     this.reposition(true);
                     this.cameraManager.refreshZoomBounds();
                     this.cameraManager.restoreZoomStateSnapshotAfterResize(zoomSnapshot);
+                    this.lastPlayerNameScaleEffectiveZoom = undefined;
+                    this.updatePlayerNameScalesForZoom();
                     this.throttledSendViewportToServer();
                 } finally {
                     this.cameraManager.setResizeInProgress(false);

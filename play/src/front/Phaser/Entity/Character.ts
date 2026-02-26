@@ -36,6 +36,24 @@ import RenderTexture = Phaser.GameObjects.RenderTexture;
 
 const playerNameY = -25;
 const interactiveRadius = 25;
+const NAME_LABEL_ZOOM_AWARE_SCALING = true;
+const PLAYER_NAME_FONT_SIZE_LATIN = "8px";
+const PLAYER_NAME_FONT_SIZE_NON_LATIN = "10px";
+// World-space clamp for text object scale (actual visible size also depends on camera zoom).
+// Keep low enough so super-zoom-in compensation can still shrink labels when needed.
+const NAME_LABEL_SCALE_MIN = 0.25;
+const NAME_LABEL_SCALE_MAX = 1.8;
+// Desired on-screen size multiplier (relative to the default label size).
+// We only boost labels when zoomed out; zoomed-in stays at baseline size.
+const NAME_LABEL_SCREEN_SCALE_BASE = 1.0;
+const NAME_LABEL_SCREEN_SCALE_MAX = 1.20; // zoomed-out
+// For super zoom-in, reduce label growth only slightly vs default world scaling.
+const NAME_LABEL_ZOOM_IN_WORLD_SCALE_MIN = 0.90;
+const NAME_LABEL_ZOOM_IN_SHRINK_START = 1.25;
+const NAME_LABEL_ZOOM_IN_SHRINK_RANGE = 1.75;
+const NAME_LABEL_SCALE_STEP = 0.01;
+const NAME_LABEL_SCALE_ZOOM_EXPONENT = 0.65;
+const NAME_LABEL_ZOOM_IN_SHRINK_EXPONENT = 1.6;
 
 export const CHARACTER_BODY_WIDTH = 16;
 export const CHARACTER_BODY_HEIGHT = 16;
@@ -69,6 +87,7 @@ export abstract class Character extends Container implements OutlineableInterfac
     private outlineColorStoreUnsubscribe: Unsubscriber | undefined;
     private texturePromise: CancelablePromise<string[] | void> | undefined;
     private destroyed = false;
+    private playerNameVisualScale = 1;
 
     /**
      * A deferred promise that resolves when the texture of the character is actually displayed.
@@ -171,7 +190,9 @@ export abstract class Character extends Container implements OutlineableInterfac
 
             // Todo: Replace the font family with a better one
             // Use larger font size for non-Latin characters (Arabic, CJK, etc.) for better readability
-            const fontSize = StringUtils.containsNonLatinCharacters(name) ? "9px" : "7px";
+            const fontSize = StringUtils.containsNonLatinCharacters(name)
+                ? PLAYER_NAME_FONT_SIZE_NON_LATIN
+                : PLAYER_NAME_FONT_SIZE_LATIN;
             this.playerNameText = new Text(scene, 0, playerNameY, name, {
                 fontFamily: '"Press Start 2P"',
                 fontSize,
@@ -186,10 +207,10 @@ export abstract class Character extends Container implements OutlineableInterfac
 
             this.playerNameText.setOrigin(0.5).setDepth(DEPTH_INGAME_TEXT_INDEX);
             this.add([this.playerNameText]);
+            this.applyPlayerNameScaleForCurrentSceneZoom();
 
             // Reposition status dot and megaphone icon
-            this.statusDot.x = (this.playerNameText.getLeftCenter().x ?? 0) - 6;
-            this.megaphoneIcon.setX((this.playerNameText.getRightCenter().x ?? 0) + 8);
+            this.refreshPlayerNameAccessoriesPosition();
             this.statusDot.visible = true;
             this.megaphoneIcon.visible = true;
 
@@ -234,12 +255,29 @@ export abstract class Character extends Container implements OutlineableInterfac
     public updatePlayerName(name: string): void {
         this.playerName = name;
         if (this.playerNameText) {
-            const fontSize = StringUtils.containsNonLatinCharacters(name) ? "9px" : "7px";
+            const fontSize = StringUtils.containsNonLatinCharacters(name)
+                ? PLAYER_NAME_FONT_SIZE_NON_LATIN
+                : PLAYER_NAME_FONT_SIZE_LATIN;
             this.playerNameText.setText(name);
             this.playerNameText.setFontSize(fontSize);
-            this.statusDot.x = (this.playerNameText.getLeftCenter().x ?? 0) - 6;
-            this.megaphoneIcon.setX((this.playerNameText.getRightCenter().x ?? 0) + 8);
+            this.applyPlayerNameVisualScale(this.playerNameVisualScale);
         }
+    }
+
+    public updatePlayerNameScaleForZoom(cameraZoom: number): void {
+        if (!NAME_LABEL_ZOOM_AWARE_SCALING) {
+            return;
+        }
+        this.applyPlayerNameVisualScale(this.computePlayerNameVisualScale(cameraZoom));
+    }
+
+    public updatePlayerNameScaleForDiscreteLevel(cameraZoom: number, normalizedDiscreteLevel: number): void {
+        if (!NAME_LABEL_ZOOM_AWARE_SCALING) {
+            return;
+        }
+        this.applyPlayerNameVisualScale(
+            this.computePlayerNameVisualScaleForDiscreteLevel(cameraZoom, normalizedDiscreteLevel)
+        );
     }
 
     public updateTextures(textures: string[], frame?: string | number): void {
@@ -453,6 +491,102 @@ export abstract class Character extends Container implements OutlineableInterfac
 
     private getOutlinePlugin(): OutlinePipelinePlugin | undefined {
         return this.scene.plugins.get("rexOutlinePipeline") as unknown as OutlinePipelinePlugin | undefined;
+    }
+
+    private computePlayerNameVisualScale(cameraZoom: number): number {
+        if (!NAME_LABEL_ZOOM_AWARE_SCALING) {
+            return 1;
+        }
+
+        const scaleZoom = this.scene.scale.zoom || 1;
+        const effectiveZoom = Math.max(cameraZoom * scaleZoom, 0.0001);
+        const raw = 1 / Math.pow(effectiveZoom, NAME_LABEL_SCALE_ZOOM_EXPONENT);
+        const clamped = Phaser.Math.Clamp(raw, NAME_LABEL_SCALE_MIN, NAME_LABEL_SCALE_MAX);
+        const quantized = Math.round(clamped / NAME_LABEL_SCALE_STEP) * NAME_LABEL_SCALE_STEP;
+        return Phaser.Math.Clamp(quantized, NAME_LABEL_SCALE_MIN, NAME_LABEL_SCALE_MAX);
+    }
+
+    private computePlayerNameVisualScaleForDiscreteLevel(cameraZoom: number, normalizedDiscreteLevel: number): number {
+        if (!NAME_LABEL_ZOOM_AWARE_SCALING) {
+            return 1;
+        }
+
+        const scaleZoom = this.scene.scale.zoom || 1;
+        const effectiveZoom = Math.max(cameraZoom * scaleZoom, 0.0001);
+        // Preserve default behavior when zoomed in: labels scale with the world (text scale stays at 1).
+        if (effectiveZoom >= 1 && effectiveZoom <= NAME_LABEL_ZOOM_IN_SHRINK_START) {
+            return 1;
+        }
+
+        let worldScale: number;
+        if (effectiveZoom < 1) {
+            const t = Phaser.Math.Clamp(normalizedDiscreteLevel, 0, 1);
+            const easedT = Math.pow(t, NAME_LABEL_SCALE_ZOOM_EXPONENT);
+            const zoomOutBoost = 1 - easedT; // 1 at max zoom-out, 0 near baseline zoom
+            const targetScreenScale = Phaser.Math.Linear(
+                NAME_LABEL_SCREEN_SCALE_BASE,
+                NAME_LABEL_SCREEN_SCALE_MAX,
+                zoomOutBoost
+            );
+            worldScale = targetScreenScale / effectiveZoom;
+        } else {
+            const shrinkT = Phaser.Math.Clamp(
+                (effectiveZoom - NAME_LABEL_ZOOM_IN_SHRINK_START) / NAME_LABEL_ZOOM_IN_SHRINK_RANGE,
+                0,
+                1
+            );
+            const easedShrinkT = Math.pow(shrinkT, NAME_LABEL_ZOOM_IN_SHRINK_EXPONENT);
+            worldScale = Phaser.Math.Linear(
+                1,
+                NAME_LABEL_ZOOM_IN_WORLD_SCALE_MIN,
+                easedShrinkT
+            );
+        }
+        const clamped = Phaser.Math.Clamp(worldScale, NAME_LABEL_SCALE_MIN, NAME_LABEL_SCALE_MAX);
+        const quantized = Math.round(clamped / NAME_LABEL_SCALE_STEP) * NAME_LABEL_SCALE_STEP;
+        return Phaser.Math.Clamp(quantized, NAME_LABEL_SCALE_MIN, NAME_LABEL_SCALE_MAX);
+    }
+
+    private applyPlayerNameScaleForCurrentSceneZoom(): void {
+        const cameraZoom = this.scene.cameras.main?.zoom || 1;
+        const cameraManager =
+            typeof this.scene.getCameraManager === "function" ? (this.scene.getCameraManager() as GameScene["cameraManager"]) : undefined;
+
+        if (cameraManager && typeof cameraManager.captureZoomStateSnapshot === "function") {
+            const { normalizedDiscreteLevel } = cameraManager.captureZoomStateSnapshot();
+            this.updatePlayerNameScaleForDiscreteLevel(cameraZoom, normalizedDiscreteLevel);
+            return;
+        }
+
+        // Fallback during early init before CameraManager is ready.
+        this.applyPlayerNameVisualScale(this.computePlayerNameVisualScale(cameraZoom));
+    }
+
+    private applyPlayerNameVisualScale(nextScale: number): void {
+        if (!Number.isFinite(nextScale) || nextScale <= 0) {
+            return;
+        }
+
+        if (Math.abs(this.playerNameVisualScale - nextScale) <= 0.0001) {
+            return;
+        }
+
+        this.playerNameVisualScale = nextScale;
+
+        if (!this.playerNameText) {
+            return;
+        }
+
+        this.playerNameText.setScale(nextScale);
+        this.refreshPlayerNameAccessoriesPosition();
+    }
+
+    private refreshPlayerNameAccessoriesPosition(): void {
+        if (!this.playerNameText) {
+            return;
+        }
+        this.statusDot.x = (this.playerNameText.getLeftCenter().x ?? 0) - 6;
+        this.megaphoneIcon.setX((this.playerNameText.getRightCenter().x ?? 0) + 8);
     }
 
     protected playAnimation(direction: PositionMessage_Direction, moving: boolean): void {
