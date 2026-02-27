@@ -54,6 +54,7 @@ export class GameManager {
     private _chatConnection: ChatConnectionInterface | undefined;
     private chatVisibilitySubscription: Unsubscriber | undefined;
     private currentPlayerProfileSubscription: Unsubscriber;
+    private readonly mapVersionByWamUrl = new Map<string, string | undefined>();
 
     constructor() {
         const profile = get(currentPlayerProfileStore);
@@ -86,7 +87,7 @@ export class GameManager {
             return EmptySceneName;
         }
         this.startRoom = result.room;
-        this.loadMap(this.startRoom);
+        await this.loadMap(this.startRoom);
 
         const preferredAudioInputDeviceId = localUserStore.getPreferredAudioInputDevice();
         const preferredVideoInputDeviceId = localUserStore.getPreferredVideoInputDevice();
@@ -151,16 +152,63 @@ export class GameManager {
         return this.companionTextureId;
     }
 
-    public loadMap(room: Room) {
+    public async loadMap(room: Room): Promise<void> {
         const roomID = room.key;
 
         const gameIndex = this.scenePlugin.getIndex(roomID);
         if (gameIndex === -1) {
             const game: Phaser.Scene = new GameScene(room);
             const startPositionName = urlManager.getStartPositionNameFromUrl();
+            const mapVersion = await this.getMapVersion(room);
+            if (startPositionName === undefined) {
+                localUserStore.clearLastRoomPositionIfMapVersionChanged(room.key, mapVersion);
+            }
             const initPosition =
                 startPositionName === undefined ? localUserStore.getLastRoomPosition(room.key) : undefined;
             this.scenePlugin.add(roomID, game, false, { initPosition });
+        }
+    }
+
+    private async getMapVersion(room: Room): Promise<string | undefined> {
+        const fromMapUrl = this.extractVersionFromUrl(room.mapUrl, room.key);
+        if (fromMapUrl) {
+            return fromMapUrl;
+        }
+
+        if (!room.wamUrl) {
+            return undefined;
+        }
+
+        if (this.mapVersionByWamUrl.has(room.wamUrl)) {
+            return this.mapVersionByWamUrl.get(room.wamUrl);
+        }
+
+        try {
+            const wamUrl = new URL(room.wamUrl, room.key).toString();
+            const response = await fetch(wamUrl, { cache: "no-store" });
+            if (!response.ok) {
+                this.mapVersionByWamUrl.set(room.wamUrl, undefined);
+                return undefined;
+            }
+
+            const wam = (await response.json()) as { mapUrl?: string };
+            const fromWamMapUrl = this.extractVersionFromUrl(wam.mapUrl, wamUrl);
+            this.mapVersionByWamUrl.set(room.wamUrl, fromWamMapUrl);
+            return fromWamMapUrl;
+        } catch {
+            this.mapVersionByWamUrl.set(room.wamUrl, undefined);
+            return undefined;
+        }
+    }
+
+    private extractVersionFromUrl(url: string | undefined, baseUrl: string): string | undefined {
+        if (!url) {
+            return undefined;
+        }
+        try {
+            return new URL(url, baseUrl).searchParams.get("v") ?? undefined;
+        } catch {
+            return undefined;
         }
     }
 

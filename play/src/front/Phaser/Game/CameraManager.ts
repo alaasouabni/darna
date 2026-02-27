@@ -11,6 +11,7 @@ import type { ActiveEventList } from "../UserInput/UserInputManager";
 import { UserInputEvent } from "../UserInput/UserInputManager";
 import { debugZoom } from "../../Utils/Debuggers";
 import type { RemotePlayer } from "../Entity/RemotePlayer";
+import { PropertyUtils } from "../Map/PropertyUtils";
 import type { GameScene } from "./GameScene";
 import Clamp = Phaser.Math.Clamp;
 
@@ -58,6 +59,11 @@ export interface StartFollowPlayerOptions {
     smoothCatchUpMs?: number;
 }
 
+type WaCameraExperimentControls = {
+    topOverscanEnabled: boolean;
+    topOverscanWorld: number;
+};
+
 /**
  * The CameraManager is responsible for managing the camera in the game.
  * It allows to set the camera to follow the player, to focus on a specific point or to be in exploration mode.
@@ -90,8 +96,13 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     private readonly BOUNDARY_INSET_PX = 1;
     private readonly CAMERA_BOUNDARY_SLACK_WORLD = 0.5;
     private readonly CAMERA_SEAM_DEBUG_DEFAULT = false;
+    private readonly CAMERA_TOP_OVERSCAN_DEFAULT_WORLD = 96;
+    private readonly CAMERA_FIT_EXCLUDE_TOP_PROPERTY = "cameraFitExcludeTop";
 
     private unsubscribeMapEditorModeStore: () => void;
+    private mapEditorModeOpened = false;
+    private lastAppliedMapBoundsSignature: string | undefined;
+    private lastAppliedFitZoomSignature: string | undefined;
 
     // Whether a pan or tween effect is in progress
     private animationInProgress = false;
@@ -137,6 +148,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     // The tween for the camera offset
     private cameraOffsetCurrentTween?: Phaser.Tweens.Tween;
+    private readonly mapFitExcludeTopWorldFromMap: number;
 
     constructor(
         private scene: GameScene,
@@ -147,12 +159,14 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.animateCallback = this.animate.bind(this);
 
         this.camera = scene.cameras.main;
+        this.mapFitExcludeTopWorldFromMap = this.readMapFitExcludeTopWorldFromMap();
         const seamDebugWindow = window as unknown as {
             __wa_scene?: GameScene;
             __wa_camera?: Phaser.Cameras.Scene2D.Camera;
         };
         seamDebugWindow.__wa_scene = this.scene;
         seamDebugWindow.__wa_camera = this.camera;
+        this.ensureCameraExperimentControls();
         if (this.isSeamDebugEnabled()) {
             console.log("[SeamDebug] ctor:globals", {
                 hasScene: Boolean(seamDebugWindow.__wa_scene),
@@ -178,12 +192,19 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
         // Subscribe to map editor mode store to change camera bounds when the map editor is opened or closed
         this.unsubscribeMapEditorModeStore = mapEditorModeStore.subscribe((isOpened) => {
+            this.mapEditorModeOpened = isOpened;
             // Define new bounds for camera if the map editor is opened
             if (isOpened) {
                 this.camera.setBounds(0, 0, this.mapSize.width * 2, this.mapSize.height);
+                this.lastAppliedMapBoundsSignature = undefined;
             } else {
-                // We set the bounds back after a call to start following the player
-                //this.camera.setBounds(0, 0, this.mapSize.width, this.mapSize.height);
+                if (this.cameraMode === CameraMode.Exploration && this.explorationAllowOutsideMap) {
+                    return;
+                }
+                this.applyMapBoundsWithSlack();
+                if (this.cameraMode === CameraMode.Exploration) {
+                    this.clampExplorerFocus();
+                }
             }
         });
 
@@ -734,6 +755,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 this.mapSize.height * 3,
                 false
             );
+            this.lastAppliedMapBoundsSignature = undefined;
         } else {
             this.applyMapBoundsWithSlack();
         }
@@ -872,7 +894,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
     private getFitCameraZoom(): number {
         const safeMapWidth = Math.max(this.mapSize.width, 1);
-        const safeMapHeight = Math.max(this.mapSize.height, 1);
+        const safeMapHeight = Math.max(this.mapSize.height - this.getFitExcludeTopWorld(), 1);
         return Math.max(Math.min(this.camera.width / safeMapWidth, this.camera.height / safeMapHeight), Number.EPSILON);
     }
 
@@ -905,6 +927,8 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private preRenderSnap = () => {
+        this.syncFitZoomConstraints();
+        this.syncMapBoundsWithDevToolsOverrides();
         // Scene PRE_RENDER happens before camera.preRender; this is only for diagnostics.
         this.logSeamDebug("pre_render:start");
     };
@@ -1798,6 +1822,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
                 renderRoundPixels?: boolean;
             }
         ).renderRoundPixels;
+        const fitExcludeTopWorld = this.getFitExcludeTopWorld();
 
         console.log(`[SeamDebug] ${stage}`, {
             mode: this.cameraMode,
@@ -1836,6 +1861,7 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             tileFrac: Number.isFinite(eff) ? (tileSize * eff) % 1 : undefined,
             tileFracX: typeof effXNum === "number" ? (tileSize * effXNum) % 1 : undefined,
             tileFracY: typeof effYNum === "number" ? (tileSize * effYNum) % 1 : undefined,
+            fitExcludeTopWorld,
             dpr: window.devicePixelRatio ?? 1,
             ...data,
         });
@@ -2069,6 +2095,143 @@ export class CameraManager extends Phaser.Events.EventEmitter {
         this.logSeamDebug("anchor:clear");
     }
 
+    private readMapFitExcludeTopWorldFromMap(): number {
+        const rawValue = PropertyUtils.findProperty(this.CAMERA_FIT_EXCLUDE_TOP_PROPERTY, this.scene.mapFile?.properties);
+        if (rawValue === undefined) {
+            return 0;
+        }
+
+        if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) {
+            console.warn(
+                `[Camera] Ignoring map property "${this.CAMERA_FIT_EXCLUDE_TOP_PROPERTY}" because it is not a finite number.`,
+                rawValue
+            );
+            return 0;
+        }
+
+        return Math.max(0, rawValue);
+    }
+
+    private ensureCameraExperimentControls(): void {
+        const cameraDebugWindow = window as unknown as {
+            __waCamera?: Partial<WaCameraExperimentControls>;
+        };
+
+        if (!cameraDebugWindow.__waCamera) {
+            cameraDebugWindow.__waCamera = {
+                topOverscanEnabled: false,
+                topOverscanWorld: this.CAMERA_TOP_OVERSCAN_DEFAULT_WORLD,
+            };
+            return;
+        }
+
+        if (typeof cameraDebugWindow.__waCamera.topOverscanEnabled !== "boolean") {
+            cameraDebugWindow.__waCamera.topOverscanEnabled = false;
+        }
+
+        if (
+            typeof cameraDebugWindow.__waCamera.topOverscanWorld !== "number" ||
+            !Number.isFinite(cameraDebugWindow.__waCamera.topOverscanWorld)
+        ) {
+            cameraDebugWindow.__waCamera.topOverscanWorld = this.CAMERA_TOP_OVERSCAN_DEFAULT_WORLD;
+        }
+    }
+
+    private getCameraExperimentControls(): WaCameraExperimentControls {
+        this.ensureCameraExperimentControls();
+        const cameraDebugWindow = window as unknown as {
+            __waCamera?: Partial<WaCameraExperimentControls>;
+        };
+        return {
+            topOverscanEnabled: cameraDebugWindow.__waCamera?.topOverscanEnabled === true,
+            topOverscanWorld: cameraDebugWindow.__waCamera?.topOverscanWorld ?? this.CAMERA_TOP_OVERSCAN_DEFAULT_WORLD,
+        };
+    }
+
+    private getFitExcludeTopWorld(): number {
+        const maxExcludeWorld = Math.max(0, this.mapSize.height - 1);
+        return Clamp(this.mapFitExcludeTopWorldFromMap, 0, maxExcludeWorld);
+    }
+
+    private getTopBoundaryOverscanWorld(): number {
+        const controls = this.getCameraExperimentControls();
+        if (!controls.topOverscanEnabled) {
+            return 0;
+        }
+        const maxOverscanWorld = Math.max(0, this.mapSize.height);
+        return Clamp(controls.topOverscanWorld, 0, maxOverscanWorld);
+    }
+
+    private getMapBoundsWithSlack(): { x: number; y: number; width: number; height: number; topOverscanWorld: number } {
+        const slack = this.CAMERA_BOUNDARY_SLACK_WORLD;
+        const topOverscanWorld = this.getTopBoundaryOverscanWorld();
+
+        return {
+            x: -slack,
+            y: -slack - topOverscanWorld,
+            width: this.mapSize.width + slack * 2,
+            height: this.mapSize.height + slack * 2 + topOverscanWorld,
+            topOverscanWorld,
+        };
+    }
+
+    private buildMapBoundsSignature(): string {
+        const bounds = this.getMapBoundsWithSlack();
+        return `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`;
+    }
+
+    private buildFitZoomSignature(): string {
+        return `${this.getFitExcludeTopWorld()}:${this.cameraMode}`;
+    }
+
+    private syncFitZoomConstraints(): void {
+        const signature = this.buildFitZoomSignature();
+        if (signature === this.lastAppliedFitZoomSignature) {
+            return;
+        }
+
+        this.lastAppliedFitZoomSignature = signature;
+        this.refreshZoomBounds();
+        const minCameraZoom = this.getMinimumCameraZoomForCurrentView();
+        if (this.camera.zoom + 0.000001 < minCameraZoom) {
+            this.waScaleManager.setRuntimeCameraZoom(minCameraZoom, this.camera);
+            if (this.cameraMode === CameraMode.Exploration) {
+                this.clampExplorerFocus();
+            }
+            this.emit(CameraManagerEvent.CameraUpdate, this.getCameraUpdateEventData());
+        }
+        this.scene.markDirty();
+        this.logSeamDebug("fit:constraints-sync", {
+            signature,
+            fitExcludeTopWorld: this.getFitExcludeTopWorld(),
+            minCameraZoom,
+        });
+    }
+
+    private syncMapBoundsWithDevToolsOverrides(): void {
+        if (this.mapEditorModeOpened) {
+            return;
+        }
+
+        if (this.cameraMode === CameraMode.Exploration && this.explorationAllowOutsideMap) {
+            return;
+        }
+
+        const currentSignature = this.buildMapBoundsSignature();
+        if (currentSignature === this.lastAppliedMapBoundsSignature) {
+            return;
+        }
+
+        this.applyMapBoundsWithSlack();
+        if (this.cameraMode === CameraMode.Exploration) {
+            this.clampExplorerFocus();
+        }
+        this.scene.markDirty();
+        this.logSeamDebug("bounds:devtools-sync", {
+            signature: currentSignature,
+        });
+    }
+
     private clampExplorerFocus(): void {
         const beforeX = this.explorerFocusOn.x;
         const beforeY = this.explorerFocusOn.y;
@@ -2089,11 +2252,11 @@ export class CameraManager extends Phaser.Events.EventEmitter {
 
         const halfViewWidth = this.camera.worldView.width / 2;
         const halfViewHeight = this.camera.worldView.height / 2;
-        const slack = this.CAMERA_BOUNDARY_SLACK_WORLD;
-        const minX = halfViewWidth - slack;
-        const maxX = this.mapSize.width - halfViewWidth + slack;
-        const minY = halfViewHeight - slack;
-        const maxY = this.mapSize.height - halfViewHeight + slack;
+        const bounds = this.getMapBoundsWithSlack();
+        const minX = bounds.x + halfViewWidth;
+        const maxX = bounds.x + bounds.width - halfViewWidth;
+        const minY = bounds.y + halfViewHeight;
+        const maxY = bounds.y + bounds.height - halfViewHeight;
 
         if (minX > maxX) {
             this.explorerFocusOn.x = this.mapSize.width / 2;
@@ -2117,13 +2280,16 @@ export class CameraManager extends Phaser.Events.EventEmitter {
             maxX,
             minY,
             maxY,
+            topOverscanWorld: bounds.topOverscanWorld,
             changed: beforeX !== this.explorerFocusOn.x || beforeY !== this.explorerFocusOn.y,
         });
     }
 
     private applyMapBoundsWithSlack(): void {
-        const slack = this.CAMERA_BOUNDARY_SLACK_WORLD;
-        this.camera.setBounds(-slack, -slack, this.mapSize.width + slack * 2, this.mapSize.height + slack * 2, false);
+        const bounds = this.getMapBoundsWithSlack();
+        this.camera.setBounds(bounds.x, bounds.y, bounds.width, bounds.height, false);
+        this.lastAppliedMapBoundsSignature = this.buildMapBoundsSignature();
+        this.logSeamDebug("bounds:applied", bounds);
     }
 
     private applyZoomAnchor(): void {

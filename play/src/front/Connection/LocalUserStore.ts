@@ -27,6 +27,7 @@ const decreaseAudioPlayerVolumeWhileTalking = "decreaseAudioPlayerVolumeWhileTal
 const disableAnimations = "disableAnimations";
 const lastRoomUrl = "lastRoomUrl";
 const lastRoomPositionKey = "lastRoomPosition";
+const lastRoomPositionMapVersionKey = "lastRoomPositionMapVersion";
 const authToken = "authToken";
 const notification = "notificationPermission";
 const allowPictureInPicture = "allowPictureInPicture";
@@ -283,6 +284,47 @@ class LocalUserStore {
         } catch (error) {
             console.warn("Error while reading last room position:", error);
             return undefined;
+        }
+    }
+
+    clearLastRoomPosition(roomKey: string): void {
+        try {
+            const raw = localStorage.getItem(lastRoomPositionKey);
+            if (!raw) {
+                return;
+            }
+            const data = JSON.parse(raw) as Record<string, { x: number; y: number; t: number }>;
+            if (!Object.prototype.hasOwnProperty.call(data, roomKey)) {
+                return;
+            }
+            delete data[roomKey];
+            if (Object.keys(data).length === 0) {
+                localStorage.removeItem(lastRoomPositionKey);
+            } else {
+                localStorage.setItem(lastRoomPositionKey, JSON.stringify(data));
+            }
+        } catch (error) {
+            console.warn("Error while clearing last room position:", error);
+        }
+    }
+
+    clearLastRoomPositionIfMapVersionChanged(roomKey: string, mapVersion: string | undefined): void {
+        if (!mapVersion) {
+            return;
+        }
+        const mapVersionStorageKey = this.getScopedKey(lastRoomPositionMapVersionKey);
+        try {
+            const raw = localStorage.getItem(mapVersionStorageKey);
+            const data = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+            if (data[roomKey] === mapVersion) {
+                return;
+            }
+
+            this.clearLastRoomPosition(roomKey);
+            data[roomKey] = mapVersion;
+            localStorage.setItem(mapVersionStorageKey, JSON.stringify(data));
+        } catch (error) {
+            console.warn("Error while migrating last room position for map version:", error);
         }
     }
 
