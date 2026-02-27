@@ -222,6 +222,7 @@ import { FollowManager } from "./FollowManager";
 import { LocateManager } from "./LocateManager";
 import { WaveManager } from "./WaveManager";
 import { uiWebsiteManager } from "./UI/UIWebsiteManager";
+import { PlayerNameOverlayManager } from "./UI/PlayerNameOverlayManager";
 import { ScriptingVideoManager } from "./ScriptingVideoManager";
 import EVENT_TYPE = Phaser.Scenes.Events;
 import Sprite = Phaser.GameObjects.Sprite;
@@ -333,6 +334,7 @@ export class GameScene extends DirtyScene {
     private mapTransitioning = false; //used to prevent transitions happening at the same time.
     private emoteManager!: EmoteManager;
     private cameraManager!: CameraManager;
+    private playerNameOverlayManager: PlayerNameOverlayManager | undefined;
     private mapEditorModeManager!: MapEditorModeManager;
     private entitiesCollectionsManager!: EntitiesCollectionsManager;
     private pathfindingManager!: PathfindingManager;
@@ -346,6 +348,9 @@ export class GameScene extends DirtyScene {
     private followManager!: FollowManager;
     private locateManager!: LocateManager;
     private hasMovedThisFrame: boolean = false;
+    private readonly renderPlayerNameOverlayCallback = () => {
+        this.playerNameOverlayManager?.update();
+    };
     private gameMapPropertiesListener?: GameMapPropertiesListener;
     private personalAreaHoverTimeoutId: number | undefined;
     private personalAreaHoverOutTimeoutId: number | undefined;
@@ -1049,6 +1054,8 @@ export class GameScene extends DirtyScene {
             { width: this.Map.widthInPixels, height: this.Map.heightInPixels },
             waScaleManager
         );
+        this.playerNameOverlayManager = new PlayerNameOverlayManager(this);
+        this.events.on(Phaser.Scenes.Events.RENDER, this.renderPlayerNameOverlayCallback);
 
         this.activatablesManager = new ActivatablesManager(this.CurrentPlayer);
 
@@ -1415,6 +1422,9 @@ export class GameScene extends DirtyScene {
         this.pinchManager?.destroy();
         this.emoteManager?.destroy();
         this.cameraManager?.destroy();
+        this.events.off(Phaser.Scenes.Events.RENDER, this.renderPlayerNameOverlayCallback);
+        this.playerNameOverlayManager?.destroy();
+        this.playerNameOverlayManager = undefined;
         this.mapEditorModeManager?.destroy();
         this.pathfindingManager?.cleanup();
         this._broadcastService?.destroy().catch((e) => {
@@ -1655,6 +1665,11 @@ export class GameScene extends DirtyScene {
     private updatePlayerNameScalesForZoom(): void {
         const camera = this.cameras?.main;
         if (!camera || !this.cameraManager) {
+            return;
+        }
+
+        if (this.playerNameOverlayManager?.isUsingDomLabels()) {
+            this.lastPlayerNameScaleEffectiveZoom = undefined;
             return;
         }
 

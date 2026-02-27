@@ -37,6 +37,7 @@ export interface FrontConfigurationInterface {
     ZOOM_DISCRETE_LEVEL_COUNT: number;
     ZOOM_WHEEL_STEP: number;
     ZOOM_MAX_STEPS_PER_EVENT: number;
+    ENABLE_DOM_PLAYER_NAMES: boolean;
     FEATURE_FLAG_BROADCAST_AREAS: boolean;
     KLAXOON_ENABLED: boolean;
     KLAXOON_CLIENT_ID: string | undefined;

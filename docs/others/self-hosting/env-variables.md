@@ -90,6 +90,7 @@ Environment variables for the Play service (frontend and pusher).
 | `ZOOM_DISCRETE_LEVEL_COUNT` | No | Number of wheel zoom levels between min and max zoom. Higher is smoother but slower per wheel step. Defaults to 32 |
 | `ZOOM_WHEEL_STEP` | No | Normalized wheel delta required to consume one discrete zoom step. Lower values zoom faster. Defaults to 100 |
 | `ZOOM_MAX_STEPS_PER_EVENT` | No | Maximum discrete zoom steps consumed from a single wheel event burst. Prevents huge jumps on lag spikes. Defaults to 8 |
+| `ENABLE_DOM_PLAYER_NAMES` | No | Enable DOM-based player name labels by default. Defaults to false |
 | `FEATURE_FLAG_BROADCAST_AREAS` | No | Enable broadcast areas feature. Defaults to false |
 | `KLAXOON_ENABLED` | No | Enable Klaxoon embedded application integration. Defaults to false |
 | `KLAXOON_CLIENT_ID` | No | Klaxoon OAuth2 client ID |

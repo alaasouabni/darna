@@ -88,6 +88,7 @@ export const ENABLE_CHAT: boolean = env.ENABLE_CHAT;
 export const ENABLE_CHAT_UPLOAD: boolean = env.ENABLE_CHAT_UPLOAD;
 export const ENABLE_CHAT_ONLINE_LIST: boolean = env.ENABLE_CHAT_ONLINE_LIST;
 export const ENABLE_CHAT_DISCONNECTED_LIST: boolean = env.ENABLE_CHAT_DISCONNECTED_LIST;
+export const ENABLE_DOM_PLAYER_NAMES: boolean = env.ENABLE_DOM_PLAYER_NAMES;
 //export const DEBUG_ERROR_MESSAGES = env.DEBUG_ERROR_MESSAGES;
 
 // If set to the string "true", the /openapi route will return the OpenAPI definition and the swagger-ui/ route will display the documentation
@@ -189,6 +190,7 @@ export const FRONT_ENVIRONMENT_VARIABLES: FrontConfigurationInterface = {
     ZOOM_DISCRETE_LEVEL_COUNT: env.ZOOM_DISCRETE_LEVEL_COUNT,
     ZOOM_WHEEL_STEP: env.ZOOM_WHEEL_STEP,
     ZOOM_MAX_STEPS_PER_EVENT: env.ZOOM_MAX_STEPS_PER_EVENT,
+    ENABLE_DOM_PLAYER_NAMES: env.ENABLE_DOM_PLAYER_NAMES,
     FEATURE_FLAG_BROADCAST_AREAS: env.FEATURE_FLAG_BROADCAST_AREAS,
     KLAXOON_ENABLED: env.KLAXOON_ENABLED,
     KLAXOON_CLIENT_ID: env.KLAXOON_CLIENT_ID,

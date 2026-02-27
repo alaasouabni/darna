@@ -88,6 +88,7 @@ export abstract class Character extends Container implements OutlineableInterfac
     private texturePromise: CancelablePromise<string[] | void> | undefined;
     private destroyed = false;
     private playerNameVisualScale = 1;
+    private playerLabelStackVisible = true;
 
     /**
      * A deferred promise that resolves when the texture of the character is actually displayed.
@@ -206,13 +207,14 @@ export abstract class Character extends Container implements OutlineableInterfac
             });
 
             this.playerNameText.setOrigin(0.5).setDepth(DEPTH_INGAME_TEXT_INDEX);
+            this.playerNameText.setVisible(this.playerLabelStackVisible);
             this.add([this.playerNameText]);
             this.applyPlayerNameScaleForCurrentSceneZoom();
 
             // Reposition status dot and megaphone icon
             this.refreshPlayerNameAccessoriesPosition();
-            this.statusDot.visible = true;
-            this.megaphoneIcon.visible = true;
+            this.statusDot.visible = this.playerLabelStackVisible;
+            this.megaphoneIcon.visible = this.playerLabelStackVisible;
 
             scene.getOutlineManager().add(this.playerNameText, () => {
                 return this.getCurrentOutline();
@@ -449,6 +451,25 @@ export abstract class Character extends Container implements OutlineableInterfac
 
     public getAvailabilityStatus() {
         return this.statusDot.availabilityStatus;
+    }
+
+    public isMegaphoneIconShown(): boolean {
+        return this.megaphoneIcon.isShown();
+    }
+
+    public getPlayerLabelAnchorWorldPosition(): { x: number; y: number } {
+        return { x: this.x, y: this.y + playerNameY };
+    }
+
+    public setPlayerLabelStackVisible(visible: boolean): void {
+        if (this.playerLabelStackVisible === visible) {
+            return;
+        }
+
+        this.playerLabelStackVisible = visible;
+        this.playerNameText?.setVisible(visible);
+        this.statusDot.setVisible(visible);
+        this.megaphoneIcon.setVisible(visible);
     }
 
     public addCompanion(texturePromise: CancelablePromise<string>): void {

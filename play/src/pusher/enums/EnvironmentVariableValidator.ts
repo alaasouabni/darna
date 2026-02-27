@@ -365,6 +365,9 @@ export const EnvironmentVariables = z.object({
         .describe(
             "Maximum discrete zoom steps consumed from a single wheel event burst. Prevents huge jumps on lag spikes. Defaults to 8"
         ),
+    ENABLE_DOM_PLAYER_NAMES: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Enable DOM-based player name labels by default. Defaults to false"),
     FEATURE_FLAG_BROADCAST_AREAS: BoolAsString.optional()
         .transform((val) => toBool(val, false))
         .describe("Enable broadcast areas feature. Defaults to false"),
