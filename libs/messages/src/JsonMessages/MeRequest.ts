@@ -6,6 +6,7 @@ export const MeRequest = z.object({
     "localStorageCharacterTextureIds[]": z.union([z.string(), z.array(z.string())]).optional(),
     localStorageCompanionTextureId: z.string().optional(),
     chatID: z.string().optional(),
+    inviteToken: z.string().optional(),
 });
 
 export type MeRequest = z.infer<typeof MeRequest>;

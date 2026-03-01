@@ -4,6 +4,7 @@ const navItems = [
   { to: "/", label: "Dashboard", description: "Live overview" },
   { to: "/rooms", label: "Rooms", description: "Maps and access" },
   { to: "/members", label: "Members", description: "People and tags" },
+  { to: "/invites", label: "Invites", description: "Links and onboarding" },
   { to: "/moderation", label: "Moderation", description: "Reports and bans" },
   { to: "/integrations", label: "Integrations", description: "Livekit, TURN" },
   { to: "/settings", label: "Settings", description: "World defaults" },

@@ -81,6 +81,21 @@ LoginToken
 - expiresAt (timestamp)
 - createdAt
 
+InviteToken
+- id (uuid)
+- token (string, unique)
+- worldId (fk World)
+- roomId (fk Room, nullable)
+- createdByMemberId (fk Member, nullable)
+- usedByMemberId (fk Member, nullable, last user who consumed)
+- allowedEmail (string, nullable)
+- maxUses (int, nullable for unlimited)
+- useCount (int)
+- expiresAt (timestamp)
+- revokedAt (timestamp, nullable)
+- lastUsedAt (timestamp, nullable)
+- createdAt (timestamp)
+
 WokaCollection
 - id (uuid)
 - name (string)

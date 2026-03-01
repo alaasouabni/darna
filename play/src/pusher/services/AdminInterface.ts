@@ -29,7 +29,8 @@ export interface AdminInterface {
         companionTextureId?: string,
         locale?: string,
         tags?: string[],
-        chatID?: string
+        chatID?: string,
+        inviteToken?: string
     ): Promise<FetchMemberDataByUuidResponse>;
 
     /**

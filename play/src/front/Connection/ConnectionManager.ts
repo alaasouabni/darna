@@ -52,6 +52,16 @@ import { RoomConnection } from "./RoomConnection";
 import { HtmlUtils } from "./../WebRtc/HtmlUtils";
 import { hasCapability } from "./Capabilities";
 
+const INVITE_TOKEN_QUERY_PARAM = "invite";
+const INVITE_TOKEN_SESSION_STORAGE_KEY = "waInviteToken";
+const INVITE_TOKEN_LOCAL_STORAGE_KEY = "waInviteTokenPersistent";
+const INVITE_TOKEN_LOCAL_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
+
+type StoredInviteToken = {
+    token: string;
+    storedAt: number;
+};
+
 class ConnectionManager {
     private localUser!: LocalUser;
 
@@ -59,6 +69,7 @@ class ConnectionManager {
     private reconnectingTimeout: NodeJS.Timeout | null = null;
     private _unloading = false;
     private authToken: string | null = null;
+    private inviteToken: string | null = null;
     private _currentRoom: Room | null = null;
 
     private serviceWorker?: _ServiceWorker;
@@ -111,6 +122,111 @@ class ConnectionManager {
         this.tldrawToolActivated = TLDRAW_ENABLED;
     }
 
+    private getSessionInviteToken(): string | null {
+        try {
+            const value = window.sessionStorage.getItem(INVITE_TOKEN_SESSION_STORAGE_KEY);
+            return value && value.trim().length > 0 ? value.trim() : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private setSessionInviteToken(token: string | null): void {
+        try {
+            if (token && token.trim().length > 0) {
+                window.sessionStorage.setItem(INVITE_TOKEN_SESSION_STORAGE_KEY, token.trim());
+            } else {
+                window.sessionStorage.removeItem(INVITE_TOKEN_SESSION_STORAGE_KEY);
+            }
+        } catch {
+            // Ignore sessionStorage errors.
+        }
+    }
+
+    private getPersistentInviteToken(): string | null {
+        try {
+            const rawValue = window.localStorage.getItem(INVITE_TOKEN_LOCAL_STORAGE_KEY);
+            if (!rawValue) {
+                return null;
+            }
+
+            const parsed = JSON.parse(rawValue) as Partial<StoredInviteToken>;
+            if (typeof parsed.token !== "string" || parsed.token.trim().length === 0) {
+                window.localStorage.removeItem(INVITE_TOKEN_LOCAL_STORAGE_KEY);
+                return null;
+            }
+
+            const storedAt = typeof parsed.storedAt === "number" ? parsed.storedAt : NaN;
+            if (!Number.isFinite(storedAt) || Date.now() - storedAt > INVITE_TOKEN_LOCAL_STORAGE_TTL_MS) {
+                window.localStorage.removeItem(INVITE_TOKEN_LOCAL_STORAGE_KEY);
+                return null;
+            }
+
+            return parsed.token.trim();
+        } catch {
+            try {
+                window.localStorage.removeItem(INVITE_TOKEN_LOCAL_STORAGE_KEY);
+            } catch {
+                // Ignore localStorage cleanup errors.
+            }
+            return null;
+        }
+    }
+
+    private setPersistentInviteToken(token: string | null): void {
+        try {
+            if (token && token.trim().length > 0) {
+                const payload: StoredInviteToken = {
+                    token: token.trim(),
+                    storedAt: Date.now(),
+                };
+                window.localStorage.setItem(INVITE_TOKEN_LOCAL_STORAGE_KEY, JSON.stringify(payload));
+            } else {
+                window.localStorage.removeItem(INVITE_TOKEN_LOCAL_STORAGE_KEY);
+            }
+        } catch {
+            // Ignore localStorage errors.
+        }
+    }
+
+    private getStoredInviteToken(): string | null {
+        const sessionToken = this.getSessionInviteToken();
+        if (sessionToken) {
+            return sessionToken;
+        }
+
+        const persistentToken = this.getPersistentInviteToken();
+        if (!persistentToken) {
+            return null;
+        }
+
+        // Rehydrate session storage so same-tab navigations keep using the invite.
+        this.setSessionInviteToken(persistentToken);
+        return persistentToken;
+    }
+
+    private setStoredInviteToken(token: string | null): void {
+        this.setSessionInviteToken(token);
+        this.setPersistentInviteToken(token);
+    }
+
+    private captureInviteTokenFromUrl(urlParams: URLSearchParams): void {
+        const inviteFromUrl = urlParams.get(INVITE_TOKEN_QUERY_PARAM);
+        if (inviteFromUrl && inviteFromUrl.trim().length > 0) {
+            this.inviteToken = inviteFromUrl.trim();
+            this.setStoredInviteToken(this.inviteToken);
+            urlParams.delete(INVITE_TOKEN_QUERY_PARAM);
+            return;
+        }
+
+        this.inviteToken = this.getStoredInviteToken();
+    }
+
+    private clearInviteToken(): void {
+        this.inviteToken = null;
+        this.setStoredInviteToken(null);
+    }
+
     /**
      * TODO fix me to be move in game manager
      *
@@ -152,6 +268,7 @@ class ConnectionManager {
         const tokenTmp = localUserStore.getAuthToken();
         //remove token in localstorage
         localUserStore.setAuthToken(null);
+        this.clearInviteToken();
         //user logout, set connected store for menu at false (actually don't do it because we are going to redirect and
         // it shortly displays the "sign in" button before redirect happens)
         //userIsConnected.set(false);
@@ -197,6 +314,7 @@ class ConnectionManager {
         let nextScene: "selectCharacterScene" | "selectCompanionScene" | "gameScene" = "gameScene";
 
         const urlParams = new URLSearchParams(window.location.search);
+        this.captureInviteTokenFromUrl(urlParams);
         let token = urlParams.get("token");
         // get token injected by post method from pusher
         if (token == undefined) {
@@ -225,6 +343,14 @@ class ConnectionManager {
             localUserStore.setMatrixLoginToken(matrixLoginToken);
             //clean token of url
             urlParams.delete("matrixLoginToken");
+        }
+
+        const cleanedSearch = urlParams.toString();
+        const cleanedUrl =
+            window.location.pathname + (cleanedSearch ? `?${cleanedSearch}` : "") + window.location.hash;
+        const currentUrl = window.location.pathname + window.location.search + window.location.hash;
+        if (cleanedUrl !== currentUrl) {
+            history.replaceState({}, "", cleanedUrl);
         }
 
         if (this.connexionType === GameConnexionTypes.login) {
@@ -663,6 +789,7 @@ class ConnectionManager {
                 params: {
                     token,
                     playUri,
+                    inviteToken: this.inviteToken ?? undefined,
                     localStorageCharacterTextureIds: localUserStore.isLogged()
                         ? undefined
                         : localUserStore.getCharacterTextures() ?? undefined,
@@ -683,6 +810,10 @@ class ConnectionManager {
 
         if (response.status === "error") {
             return response;
+        }
+
+        if (this.inviteToken) {
+            this.clearInviteToken();
         }
 
         const { authToken, userUuid, email, username, locale, visitCardUrl, matrixUserId, matrixServerUrl } = response;

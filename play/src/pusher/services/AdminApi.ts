@@ -362,7 +362,8 @@ class AdminApi implements AdminInterface {
         companionTextureId?: string,
         locale?: string,
         tags?: string[],
-        chatID?: string
+        chatID?: string,
+        inviteToken?: string
     ): Promise<FetchMemberDataByUuidResponse> {
         try {
             /**
@@ -429,6 +430,7 @@ class AdminApi implements AdminInterface {
                     accessToken,
                     isLogged: accessToken ? "1" : "0", // deprecated, use accessToken instead,
                     chatID,
+                    inviteToken,
                 },
                 headers: { Authorization: `${ADMIN_API_TOKEN}`, "Accept-Language": locale ?? "en" },
             });
@@ -459,6 +461,10 @@ class AdminApi implements AdminInterface {
                 if (status === 401) {
                     // Treat authentication failures as token expiry to force re-login.
                     throw new JsonWebTokenError("Invalid token");
+                }
+                const adminError = ErrorApiData.safeParse(err.response?.data);
+                if (adminError.success) {
+                    return adminError.data;
                 }
                 Sentry.captureException(err);
                 console.error(

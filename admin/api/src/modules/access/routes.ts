@@ -16,6 +16,7 @@ const querySchema = z.object({
     characterTextureIds: z.union([z.string(), z.array(z.string())]).optional(),
     companionTextureId: z.string().optional(),
     chatID: z.string().optional(),
+    inviteToken: z.string().optional(),
 });
 
 function normalizeArray(value?: string | string[]): string[] {
@@ -31,6 +32,148 @@ function extractMapStorageSlug(path: string): string | null {
         return null;
     }
     return segments[1] ?? null;
+}
+
+type InviteConsumeResult =
+    | { ok: true; inviteId: string }
+    | {
+          ok: false;
+          code:
+              | "INVITE_INVALID"
+              | "INVITE_REVOKED"
+              | "INVITE_EXPIRED"
+              | "INVITE_LIMIT_REACHED"
+              | "INVITE_EMAIL_MISMATCH"
+              | "INVITE_SCOPE_MISMATCH";
+          details: string;
+      };
+
+function normalizeEmail(email?: string | null): string | null {
+    if (!email) {
+        return null;
+    }
+    const value = email.trim().toLowerCase();
+    return value.length > 0 ? value : null;
+}
+
+async function consumeInviteForOnboarding(args: {
+    app: FastifyInstance;
+    inviteToken: string;
+    expectedWorldId: string;
+    expectedRoomId: string | null;
+    requesterEmail: string;
+}): Promise<InviteConsumeResult> {
+    const { app, inviteToken, expectedWorldId, expectedRoomId, requesterEmail } = args;
+    const token = inviteToken.trim();
+    if (!token) {
+        return {
+            ok: false,
+            code: "INVITE_INVALID",
+            details: "The invitation token is missing or invalid.",
+        };
+    }
+
+    const normalizedRequesterEmail = normalizeEmail(requesterEmail);
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        const invite = await app.db.inviteToken.findUnique({
+            where: { token },
+            select: {
+                id: true,
+                worldId: true,
+                roomId: true,
+                allowedEmail: true,
+                maxUses: true,
+                useCount: true,
+                expiresAt: true,
+                revokedAt: true,
+            },
+        });
+
+        if (!invite) {
+            return {
+                ok: false,
+                code: "INVITE_INVALID",
+                details: "This invitation link is invalid.",
+            };
+        }
+
+        if (invite.revokedAt) {
+            return {
+                ok: false,
+                code: "INVITE_REVOKED",
+                details: "This invitation link has been revoked.",
+            };
+        }
+
+        if (invite.expiresAt <= new Date()) {
+            return {
+                ok: false,
+                code: "INVITE_EXPIRED",
+                details: "This invitation link has expired.",
+            };
+        }
+
+        if (invite.worldId !== expectedWorldId) {
+            return {
+                ok: false,
+                code: "INVITE_SCOPE_MISMATCH",
+                details: "This invitation link is not valid for this world.",
+            };
+        }
+
+        if (invite.roomId && invite.roomId !== expectedRoomId) {
+            return {
+                ok: false,
+                code: "INVITE_SCOPE_MISMATCH",
+                details: "This invitation link is not valid for this room.",
+            };
+        }
+
+        const normalizedAllowedEmail = normalizeEmail(invite.allowedEmail);
+        if (normalizedAllowedEmail && normalizedRequesterEmail !== normalizedAllowedEmail) {
+            return {
+                ok: false,
+                code: "INVITE_EMAIL_MISMATCH",
+                details: "This invitation link is not assigned to this account.",
+            };
+        }
+
+        if (invite.maxUses !== null && invite.useCount >= invite.maxUses) {
+            return {
+                ok: false,
+                code: "INVITE_LIMIT_REACHED",
+                details: "This invitation link reached its maximum number of uses.",
+            };
+        }
+
+        const now = new Date();
+        const updateResult = await app.db.inviteToken.updateMany({
+            where: {
+                id: invite.id,
+                revokedAt: null,
+                expiresAt: { gt: now },
+                useCount: invite.useCount,
+            },
+            data: {
+                useCount: { increment: 1 },
+                lastUsedAt: now,
+            },
+        });
+
+        if (updateResult.count === 1) {
+            return {
+                ok: true,
+                inviteId: invite.id,
+            };
+        }
+    }
+
+    return {
+        ok: false,
+        code: "INVITE_INVALID",
+        details: "This invitation link could not be consumed. Please request a new invite.",
+    };
 }
 
 export async function accessRoutes(app: FastifyInstance) {
@@ -130,6 +273,72 @@ export async function accessRoutes(app: FastifyInstance) {
         }
 
         const existingMember = await app.db.member.findUnique({ where: { externalId } });
+        let consumedInviteId: string | null = null;
+
+        if (!existingMember && config.INVITE_ONLY_ONBOARDING) {
+            const expectedWorldId = room?.worldId ?? mapStorageWorld?.id ?? null;
+            const expectedRoomId = room?.id ?? null;
+
+            if (!expectedWorldId) {
+                reply.code(403).send(
+                    errorData(
+                        "INVITE_REQUIRED",
+                        "Invite required",
+                        "This world is invite-only",
+                        "Unable to resolve world scope for invite validation."
+                    )
+                );
+                return;
+            }
+
+            const requesterEmail = tokenUser?.email ?? identifierEmail;
+            if (!requesterEmail) {
+                reply.code(401).send(
+                    errorData(
+                        "INVITE_AUTH_REQUIRED",
+                        "Authentication required",
+                        "Please sign in to continue",
+                        "Invite onboarding requires an authenticated account."
+                    )
+                );
+                return;
+            }
+
+            if (!query.inviteToken) {
+                reply.code(403).send(
+                    errorData(
+                        "INVITE_REQUIRED",
+                        "Invite required",
+                        "This world is invite-only",
+                        "You need a valid invitation link to access this world."
+                    )
+                );
+                return;
+            }
+
+            const inviteResult = await consumeInviteForOnboarding({
+                app,
+                inviteToken: query.inviteToken,
+                expectedWorldId,
+                expectedRoomId,
+                requesterEmail,
+            });
+
+            if (!inviteResult.ok) {
+                reply.code(403).send(
+                    errorData(
+                        inviteResult.code,
+                        "Invalid invitation",
+                        "Unable to validate invitation",
+                        inviteResult.details
+                    )
+                );
+                return;
+            }
+
+            consumedInviteId = inviteResult.inviteId;
+        }
+
         const displayNameFromToken = tokenUser?.name ?? tokenUser?.preferredUsername ?? null;
 
         const updateData: Record<string, unknown> = {
@@ -158,6 +367,15 @@ export async function accessRoutes(app: FastifyInstance) {
                       lastRoomUrl: room?.roomUrl ?? roomPath,
                   },
               });
+
+        if (consumedInviteId) {
+            await app.db.inviteToken
+                .update({
+                    where: { id: consumedInviteId },
+                    data: { usedByMemberId: member.id },
+                })
+                .catch(() => undefined);
+        }
 
         if (tokenUser?.tags.length) {
             await app.db.memberTag.createMany({

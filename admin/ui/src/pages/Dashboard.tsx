@@ -34,6 +34,16 @@ type LiveUsersStatsResponse = {
   domainsFailed: number;
 };
 
+type InviteCreateResponse = {
+  token: string;
+  inviteUrl: string;
+  expiresAt: string;
+  maxUses: number | null;
+  roomUrl: string;
+  worldSlug: string;
+  worldName: string;
+};
+
 export function DashboardPage() {
   const { context } = useAdminContext();
   const queryClient = useQueryClient();
@@ -316,9 +326,23 @@ export function DashboardPage() {
       window.alert("Set a Play URL in the context card first.");
       return;
     }
-    const copied = await copyText(context.playUri);
+    let inviteUrl = "";
+    try {
+      const response = await apiRequest<InviteCreateResponse>("/invites", {
+        method: "POST",
+        body: JSON.stringify({
+          playUri: context.playUri,
+        }),
+      });
+      inviteUrl = response.inviteUrl;
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unable to generate invite.");
+      return;
+    }
+
+    const copied = await copyText(inviteUrl);
     if (!copied) {
-      window.prompt("Copy invite link", context.playUri);
+      window.prompt("Copy invite link", inviteUrl);
       return;
     }
     setInviteCopied(true);

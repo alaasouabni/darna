@@ -187,7 +187,7 @@ export class AuthenticateController extends BaseHttpController {
             if (query === undefined) {
                 return;
             }
-            const { token, playUri, localStorageCompanionTextureId, chatID } = query;
+            const { token, playUri, localStorageCompanionTextureId, chatID, inviteToken } = query;
             let localStorageCharacterTextureIds = query["localStorageCharacterTextureIds[]"];
             if (typeof localStorageCharacterTextureIds === "string") {
                 localStorageCharacterTextureIds = [localStorageCharacterTextureIds];
@@ -258,7 +258,8 @@ export class AuthenticateController extends BaseHttpController {
                         localStorageCompanionTextureId,
                         req.header("accept-language"),
                         authTokenData.tags,
-                        chatID
+                        chatID,
+                        inviteToken
                     );
                 } catch (err) {
                     if (err instanceof JsonWebTokenError && refreshToken) {
@@ -275,7 +276,8 @@ export class AuthenticateController extends BaseHttpController {
                             localStorageCompanionTextureId,
                             req.header("accept-language"),
                             authTokenData.tags,
-                            chatID
+                            chatID,
+                            inviteToken
                         );
                     } else {
                         throw err;

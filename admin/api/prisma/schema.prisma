@@ -26,6 +26,7 @@ model World {
   iceConfig     IceConfig?
   reports       Report[]
   bans          Ban[]
+  inviteTokens  InviteToken[]
 }
 
 model Room {
@@ -45,6 +46,7 @@ model Room {
   defaultForWorlds World[] @relation("WorldDefaultRoom")
   tagsTable RoomTag[]
   loginTokens LoginToken[]
+  inviteTokens InviteToken[]
 }
 
 model Member {
@@ -66,6 +68,8 @@ model Member {
   reportsSent     Report[] @relation("ReporterMember")
   bansCreated     Ban[]
   loginTokens     LoginToken[]
+  createdInviteTokens InviteToken[] @relation("InviteTokenCreatedByMember")
+  usedInviteTokens    InviteToken[] @relation("InviteTokenUsedByMember")
 }
 
 model MemberTag {
@@ -135,6 +139,27 @@ model LoginToken {
 
   member    Member   @relation(fields: [memberId], references: [id])
   room      Room     @relation(fields: [roomId], references: [id])
+}
+
+model InviteToken {
+  id               String   @id @default(uuid())
+  token            String   @unique
+  worldId          String
+  roomId           String?
+  createdByMemberId String?
+  usedByMemberId   String?
+  allowedEmail     String?
+  maxUses          Int?
+  useCount         Int      @default(0)
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastUsedAt       DateTime?
+  createdAt        DateTime @default(now())
+
+  world            World    @relation(fields: [worldId], references: [id])
+  room             Room?    @relation(fields: [roomId], references: [id])
+  createdByMember  Member?  @relation("InviteTokenCreatedByMember", fields: [createdByMemberId], references: [id])
+  usedByMember     Member?  @relation("InviteTokenUsedByMember", fields: [usedByMemberId], references: [id])
 }
 
 model WokaCollection {

@@ -6,12 +6,13 @@ type RequestOptions = RequestInit & { parseJson?: boolean };
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { parseJson = true, headers, ...rest } = options;
+  const hasRequestBody = rest.body !== undefined && rest.body !== null;
   await ensureFreshToken();
   const token = getAccessToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...rest,
     headers: {
-      "Content-Type": "application/json",
+      ...(hasRequestBody ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(headers || {}),
     },

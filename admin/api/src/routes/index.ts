@@ -19,6 +19,7 @@ import { whiteLabelRoutes } from "../modules/white-label/routes";
 import { oauthRoutes } from "../modules/oauth/routes";
 import { adminSocketsRoutes } from "../modules/admin-sockets/routes";
 import { saveRoutes } from "../modules/save/routes";
+import { inviteRoutes } from "../modules/invite/routes";
 
 export async function registerRoutes(app: FastifyInstance) {
     app.register(healthRoutes, { prefix: "/healthz" });
@@ -38,6 +39,7 @@ export async function registerRoutes(app: FastifyInstance) {
     app.register(iceRoutes, { prefix: "/api" });
     app.register(roomApiRoutes, { prefix: "/api" });
     app.register(loginRoutes, { prefix: "/api" });
+    app.register(inviteRoutes, { prefix: "/api" });
     app.register(saveRoutes, { prefix: "/api" });
     app.register(adminSocketsRoutes, { prefix: "/api/admin-sockets" });
 
