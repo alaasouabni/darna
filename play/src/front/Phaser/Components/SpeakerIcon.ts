@@ -1,4 +1,5 @@
 import { Easing } from "../../types";
+import { getVoiceIndicatorDebugControls } from "../../Utils/VoiceIndicatorDebugControls";
 
 export class SpeakerIcon extends Phaser.GameObjects.Image {
     private shown: boolean;
@@ -28,6 +29,22 @@ export class SpeakerIcon extends Phaser.GameObjects.Image {
     }
 
     private showAnimation(show = true, forceClose = false) {
+        if (!this.scene) {
+            // In case the SpeakerIcon is destroyed because the underlying character was destroyed.
+            return;
+        }
+
+        const controls = getVoiceIndicatorDebugControls();
+        if (controls.enabled && controls.disableTween) {
+            this.showAnimationTween?.stop();
+            this.showAnimationTween = undefined;
+            this.shown = show;
+            this.y = this.defaultPosition.y;
+            this.scale = this.defaultScale;
+            this.alpha = show ? 1 : 0;
+            return;
+        }
+
         if (forceClose && !show) {
             this.showAnimationTween?.stop();
         } else if (this.showAnimationTween?.isPlaying()) {

@@ -38,6 +38,14 @@ export interface FrontConfigurationInterface {
     ZOOM_WHEEL_STEP: number;
     ZOOM_MAX_STEPS_PER_EVENT: number;
     ENABLE_DOM_PLAYER_NAMES: boolean;
+    VOICE_INDICATOR_PERF_ENABLED: boolean;
+    VOICE_INDICATOR_DISABLE_TWEEN: boolean;
+    VOICE_INDICATOR_USE_HYSTERESIS: boolean;
+    VOICE_INDICATOR_ON_THRESHOLD: number;
+    VOICE_INDICATOR_OFF_THRESHOLD: number;
+    VOICE_INDICATOR_MIN_ON_MS: number;
+    VOICE_INDICATOR_MIN_OFF_MS: number;
+    VOICE_INDICATOR_DEBUG_LOGS: boolean;
     FEATURE_FLAG_BROADCAST_AREAS: boolean;
     KLAXOON_ENABLED: boolean;
     KLAXOON_CLIENT_ID: string | undefined;

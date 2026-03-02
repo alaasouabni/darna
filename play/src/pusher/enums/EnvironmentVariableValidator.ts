@@ -10,6 +10,10 @@ import {
     toNumber,
 } from "@workadventure/shared-utils/src/EnvironmentVariables/EnvironmentVariableUtils";
 
+const NonNegativeNumberAsString = z
+    .string()
+    .regex(/^\d*(?:\.\d+)?$/, { message: "Must be a non-negative number" });
+
 export const EnvironmentVariables = z.object({
     // Pusher related environment variables
     SECRET_KEY: z
@@ -368,6 +372,30 @@ export const EnvironmentVariables = z.object({
     ENABLE_DOM_PLAYER_NAMES: BoolAsString.optional()
         .transform((val) => toBool(val, false))
         .describe("Enable DOM-based player name labels by default. Defaults to false"),
+    VOICE_INDICATOR_PERF_ENABLED: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Enable voice-indicator performance mode by default. Defaults to false"),
+    VOICE_INDICATOR_DISABLE_TWEEN: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Disable talk/speaker icon tweens when performance mode is enabled. Defaults to false"),
+    VOICE_INDICATOR_USE_HYSTERESIS: BoolAsString.optional()
+        .transform((val) => toBool(val, true))
+        .describe("Use hysteresis (different on/off thresholds) for talk indicator. Defaults to true"),
+    VOICE_INDICATOR_ON_THRESHOLD: NonNegativeNumberAsString.optional()
+        .transform((val) => toNumber(val, 12))
+        .describe("Volume threshold to turn the talk indicator on. Defaults to 12"),
+    VOICE_INDICATOR_OFF_THRESHOLD: NonNegativeNumberAsString.optional()
+        .transform((val) => toNumber(val, 8))
+        .describe("Volume threshold to turn the talk indicator off. Defaults to 8"),
+    VOICE_INDICATOR_MIN_ON_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 400))
+        .describe("Minimum time in ms to keep the talk indicator on before allowing off. Defaults to 400"),
+    VOICE_INDICATOR_MIN_OFF_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 250))
+        .describe("Minimum time in ms to keep the talk indicator off before allowing on. Defaults to 250"),
+    VOICE_INDICATOR_DEBUG_LOGS: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Enable debug logs for talk indicator state changes. Defaults to false"),
     FEATURE_FLAG_BROADCAST_AREAS: BoolAsString.optional()
         .transform((val) => toBool(val, false))
         .describe("Enable broadcast areas feature. Defaults to false"),

@@ -21,6 +21,10 @@ import { MediaStreamConstraintsError } from "./Errors/MediaStreamConstraintsErro
 import { BrowserTooOldError } from "./Errors/BrowserTooOldError";
 import { errorStore, warningMessageStore } from "./ErrorStore";
 import { WebviewOnOldIOS } from "./Errors/WebviewOnOldIOS";
+import {
+    getLegacyTalkIconVolumeThreshold,
+    getVoiceIndicatorDebugControls,
+} from "../Utils/VoiceIndicatorDebugControls";
 
 import { createSilentStore } from "./SilentStore";
 import { privacyShutdownStore } from "./PrivacyShutdownStore";
@@ -1046,23 +1050,77 @@ export const localVolumeStore = derived<typeof localStreamStore, number[] | unde
     undefined
 );
 
-const talkIconVolumeThreshold = 10;
+export const localVoiceIndicatorStore = readable<boolean>(false, (set) => {
+    let isTalking = false;
+    let lastStateChangeAt = 0;
+    let smoothedVolume = 0;
+    let hasSmoothedVolume = false;
 
-export const localVoiceIndicatorStore = derived<Readable<number[] | undefined>, boolean>(
-    localVolumeStore,
-    ($localVolumeStore) => {
+    return localVolumeStore.subscribe(($localVolumeStore) => {
+        const controls = getVoiceIndicatorDebugControls();
+
         if ($localVolumeStore === undefined) {
-            return false;
+            if (isTalking) {
+                isTalking = false;
+                lastStateChangeAt = Date.now();
+            }
+            hasSmoothedVolume = false;
+            set(false);
+            return;
         }
-        const volume = $localVolumeStore;
-        if (volume === undefined) {
-            return false;
+
+        const rawVolume = $localVolumeStore.reduce((a, b) => a + b, 0);
+        if (!hasSmoothedVolume) {
+            smoothedVolume = rawVolume;
+            hasSmoothedVolume = true;
+        } else {
+            // A light EMA damps short spikes before threshold checks.
+            smoothedVolume += (rawVolume - smoothedVolume) * 0.35;
         }
-        const averageVolume = volume.reduce((a, b) => a + b, 0);
-        return averageVolume > talkIconVolumeThreshold;
-    },
-    false
-);
+
+        if (!controls.enabled) {
+            const nextLegacyState = rawVolume > getLegacyTalkIconVolumeThreshold();
+            if (nextLegacyState !== isTalking) {
+                isTalking = nextLegacyState;
+                lastStateChangeAt = Date.now();
+            }
+            set(isTalking);
+            return;
+        }
+
+        const now = Date.now();
+        const signalVolume = smoothedVolume;
+        const offThreshold = controls.useHysteresis ? controls.offThreshold : controls.onThreshold;
+        let nextState = isTalking;
+
+        if (isTalking) {
+            const canTurnOff = now - lastStateChangeAt >= controls.minOnMs;
+            if (canTurnOff && signalVolume < offThreshold) {
+                nextState = false;
+            }
+        } else {
+            const canTurnOn = now - lastStateChangeAt >= controls.minOffMs;
+            if (canTurnOn && signalVolume > controls.onThreshold) {
+                nextState = true;
+            }
+        }
+
+        if (nextState !== isTalking) {
+            isTalking = nextState;
+            lastStateChangeAt = now;
+            if (controls.debugLogs) {
+                console.log("[VoiceIndicatorPerf] state change", {
+                    isTalking,
+                    rawVolume,
+                    signalVolume,
+                    controls,
+                });
+            }
+        }
+
+        set(isTalking);
+    });
+});
 
 /**
  * Device list
