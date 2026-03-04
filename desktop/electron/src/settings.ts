@@ -51,16 +51,15 @@ async function init() {
     if (Object.keys(_settings).length === 0) {
         _settings = defaultSettings;
     }
+    const parsedSettings = _settings as Partial<SettingsData>;
     settings = {
         ...defaultSettings,
-        ...(_settings as Partial<SettingsData>),
+        ...parsedSettings,
         shortcuts: {
             ...defaultSettings.shortcuts,
-            ...(((_settings as Partial<SettingsData>).shortcuts || {}) as Partial<SettingsData["shortcuts"]>),
+            ...(parsedSettings.shortcuts || {}),
         },
-        servers: Array.isArray((_settings as Partial<SettingsData>).servers)
-            ? (((_settings as Partial<SettingsData>).servers || []) as Server[])
-            : defaultSettings.servers,
+        servers: Array.isArray(parsedSettings.servers) ? parsedSettings.servers || [] : defaultSettings.servers,
     };
     applyLockedServerMode();
 }

@@ -5,6 +5,7 @@ import { createAndShowNotification } from "./notification";
 import { Server } from "./preload-local-app/types";
 import settings, { SettingsData } from "./settings";
 import { loadShortcuts, setShortcutsEnabled } from "./shortcuts";
+import type { AppViewInsets } from "./window";
 import { getAppView, hideAppView, setAppViewInsets, showAppView } from "./window";
 import runtimeConfig from "./runtime-config";
 
@@ -35,6 +36,25 @@ function toResultFromOpenPathResult(result: string) {
         return new Error(result);
     }
     return true;
+}
+
+function parseAppViewInsets(value: unknown): Partial<AppViewInsets> {
+    if (!value || typeof value !== "object") {
+        return {};
+    }
+
+    const input = value as Record<string, unknown>;
+    const insets: Partial<AppViewInsets> = {};
+    const entries: Array<keyof AppViewInsets> = ["top", "right", "bottom", "left"];
+
+    for (const key of entries) {
+        const rawValue = input[key];
+        if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+            insets[key] = rawValue;
+        }
+    }
+
+    return insets;
 }
 
 export default () => {
@@ -71,8 +91,8 @@ export default () => {
         return true;
     });
 
-    ipcMain.handle("local-app:setAppViewInsets", (_event, insets) => {
-        setAppViewInsets(insets || {});
+    ipcMain.handle("local-app:setAppViewInsets", (_event, insets: unknown) => {
+        setAppViewInsets(parseAppViewInsets(insets));
     });
 
     ipcMain.handle("local-app:openDesktopConfigFile", async () => {

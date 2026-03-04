@@ -98,7 +98,7 @@ Environment variables for the Play service (frontend and pusher).
 | `VOICE_INDICATOR_OFF_THRESHOLD` | No | Volume threshold to turn the talk indicator off. Defaults to 8 |
 | `VOICE_INDICATOR_MIN_ON_MS` | No | Minimum time in ms to keep the talk indicator on before allowing off. Defaults to 400 |
 | `VOICE_INDICATOR_MIN_OFF_MS` | No | Minimum time in ms to keep the talk indicator off before allowing on. Defaults to 250 |
-| `VOICE_INDICATOR_DEBUG_LOGS` | No | Enable browser debug logs for talk indicator state changes. Defaults to false |
+| `VOICE_INDICATOR_DEBUG_LOGS` | No | Enable debug logs for talk indicator state changes. Defaults to false |
 | `FEATURE_FLAG_BROADCAST_AREAS` | No | Enable broadcast areas feature. Defaults to false |
 | `KLAXOON_ENABLED` | No | Enable Klaxoon embedded application integration. Defaults to false |
 | `KLAXOON_CLIENT_ID` | No | Klaxoon OAuth2 client ID |

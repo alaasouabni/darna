@@ -11,7 +11,7 @@ let appViewUrl = "";
 let appViewAttached = false;
 let lastAppViewBounds: { x: number; y: number; width: number; height: number } | undefined;
 
-type AppViewInsets = {
+export type AppViewInsets = {
     top: number;
     right: number;
     bottom: number;
