@@ -1,4 +1,4 @@
-import { app, dialog } from "electron";
+import { app, dialog, type MessageBoxOptions } from "electron";
 import { autoUpdater } from "electron-updater";
 import log from "electron-log";
 import * as isDev from "electron-is-dev";
@@ -45,7 +45,7 @@ async function init() {
         "update-downloaded",
         ({ releaseNotes, releaseName }: { releaseNotes: string; releaseName: string }) => {
             void (async () => {
-                const dialogOpts = {
+                const dialogOpts: MessageBoxOptions = {
                     type: "question",
                     buttons: ["Install and Restart", "Install Later"],
                     defaultId: 0,

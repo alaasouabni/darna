@@ -10,9 +10,7 @@ import {
     toNumber,
 } from "@workadventure/shared-utils/src/EnvironmentVariables/EnvironmentVariableUtils";
 
-const NonNegativeNumberAsString = z
-    .string()
-    .regex(/^\d*(?:\.\d+)?$/, { message: "Must be a non-negative number" });
+const NonNegativeNumberAsString = z.string().regex(/^\d*(?:\.\d+)?$/, { message: "Must be a non-negative number" });
 
 export const EnvironmentVariables = z.object({
     // Pusher related environment variables

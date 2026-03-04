@@ -2096,7 +2096,10 @@ export class CameraManager extends Phaser.Events.EventEmitter {
     }
 
     private readMapFitExcludeTopWorldFromMap(): number {
-        const rawValue = PropertyUtils.findProperty(this.CAMERA_FIT_EXCLUDE_TOP_PROPERTY, this.scene.mapFile?.properties);
+        const rawValue = PropertyUtils.findProperty(
+            this.CAMERA_FIT_EXCLUDE_TOP_PROPERTY,
+            this.scene.mapFile?.properties
+        );
         if (rawValue === undefined) {
             return 0;
         }

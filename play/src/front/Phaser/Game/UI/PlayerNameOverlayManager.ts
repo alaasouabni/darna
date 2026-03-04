@@ -94,12 +94,7 @@ export class PlayerNameOverlayManager {
 
         const rect = canvas.getBoundingClientRect();
         const projectionBounds = this.getProjectionBounds(camera);
-        if (
-            rect.width <= 0 ||
-            rect.height <= 0 ||
-            projectionBounds.width <= 0 ||
-            projectionBounds.height <= 0
-        ) {
+        if (rect.width <= 0 || rect.height <= 0 || projectionBounds.width <= 0 || projectionBounds.height <= 0) {
             this.hideAllLabels();
             this.setDomModeActive(true);
             return;
@@ -108,7 +103,9 @@ export class PlayerNameOverlayManager {
         this.setDomModeActive(true);
 
         const effectiveZoom = (camera.zoom || 1) * (this.scene.scale.zoom || 1);
-        const normalizedDiscreteLevel = this.scene.getCameraManager().captureZoomStateSnapshot().normalizedDiscreteLevel;
+        const normalizedDiscreteLevel = this.scene
+            .getCameraManager()
+            .captureZoomStateSnapshot().normalizedDiscreteLevel;
         const nameScale = this.computeNameScreenScale(effectiveZoom, normalizedDiscreteLevel);
 
         const presentPlayerIds = new Set<string>();

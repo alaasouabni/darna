@@ -93,11 +93,11 @@ Environment variables for the Play service (frontend and pusher).
 | `ENABLE_DOM_PLAYER_NAMES` | No | Enable DOM-based player name labels by default. Defaults to false |
 | `VOICE_INDICATOR_PERF_ENABLED` | No | Enable voice-indicator performance mode by default. Defaults to false |
 | `VOICE_INDICATOR_DISABLE_TWEEN` | No | Disable talk/speaker icon tweens when performance mode is enabled. Defaults to false |
-| `VOICE_INDICATOR_USE_HYSTERESIS` | No | Use separate ON/OFF thresholds for talk indicator. Defaults to true |
+| `VOICE_INDICATOR_USE_HYSTERESIS` | No | Use hysteresis (different on/off thresholds) for talk indicator. Defaults to true |
 | `VOICE_INDICATOR_ON_THRESHOLD` | No | Volume threshold to turn the talk indicator on. Defaults to 12 |
 | `VOICE_INDICATOR_OFF_THRESHOLD` | No | Volume threshold to turn the talk indicator off. Defaults to 8 |
-| `VOICE_INDICATOR_MIN_ON_MS` | No | Minimum ON duration (ms) before indicator can turn off. Defaults to 400 |
-| `VOICE_INDICATOR_MIN_OFF_MS` | No | Minimum OFF duration (ms) before indicator can turn on. Defaults to 250 |
+| `VOICE_INDICATOR_MIN_ON_MS` | No | Minimum time in ms to keep the talk indicator on before allowing off. Defaults to 400 |
+| `VOICE_INDICATOR_MIN_OFF_MS` | No | Minimum time in ms to keep the talk indicator off before allowing on. Defaults to 250 |
 | `VOICE_INDICATOR_DEBUG_LOGS` | No | Enable browser debug logs for talk indicator state changes. Defaults to false |
 | `FEATURE_FLAG_BROADCAST_AREAS` | No | Enable broadcast areas feature. Defaults to false |
 | `KLAXOON_ENABLED` | No | Enable Klaxoon embedded application integration. Defaults to false |

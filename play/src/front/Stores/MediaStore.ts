@@ -1,8 +1,9 @@
-import type { Readable, Writable } from "svelte/store";
+import type { Writable } from "svelte/store";
 import { derived, get, readable, writable } from "svelte/store";
 import deepEqual from "fast-deep-equal";
 import { AvailabilityStatus } from "@workadventure/messages";
 import * as Sentry from "@sentry/svelte";
+import { getLegacyTalkIconVolumeThreshold, getVoiceIndicatorDebugControls } from "../Utils/VoiceIndicatorDebugControls";
 import { localUserStore } from "../Connection/LocalUserStore";
 import { isAndroid, isIOS, isSafari } from "../WebRtc/DeviceUtils";
 import type { ObtainedMediaStreamConstraints } from "../WebRtc/P2PMessages/ConstraintMessage";
@@ -21,10 +22,6 @@ import { MediaStreamConstraintsError } from "./Errors/MediaStreamConstraintsErro
 import { BrowserTooOldError } from "./Errors/BrowserTooOldError";
 import { errorStore, warningMessageStore } from "./ErrorStore";
 import { WebviewOnOldIOS } from "./Errors/WebviewOnOldIOS";
-import {
-    getLegacyTalkIconVolumeThreshold,
-    getVoiceIndicatorDebugControls,
-} from "../Utils/VoiceIndicatorDebugControls";
 
 import { createSilentStore } from "./SilentStore";
 import { privacyShutdownStore } from "./PrivacyShutdownStore";

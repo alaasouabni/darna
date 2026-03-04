@@ -1,6 +1,6 @@
-import Jwt from "jsonwebtoken";
-import Debug from "debug";
 import { randomBytes } from "crypto";
+import Debug from "debug";
+import Jwt from "jsonwebtoken";
 import {
     AvailabilityStatus,
     FilterType,

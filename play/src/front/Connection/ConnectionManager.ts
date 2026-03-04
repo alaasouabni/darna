@@ -346,8 +346,7 @@ class ConnectionManager {
         }
 
         const cleanedSearch = urlParams.toString();
-        const cleanedUrl =
-            window.location.pathname + (cleanedSearch ? `?${cleanedSearch}` : "") + window.location.hash;
+        const cleanedUrl = window.location.pathname + (cleanedSearch ? `?${cleanedSearch}` : "") + window.location.hash;
         const currentUrl = window.location.pathname + window.location.search + window.location.hash;
         if (cleanedUrl !== currentUrl) {
             history.replaceState({}, "", cleanedUrl);

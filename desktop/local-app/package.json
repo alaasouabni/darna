@@ -10,8 +10,8 @@
         "check": "svelte-check --tsconfig ./tsconfig.json",
         "lint": "exit 0",
         "test": "exit 0",
-        "pretty": "yarn prettier --write 'src/**/*.{ts,tsx,svelte}'",
-        "pretty-check": "yarn prettier --check 'src/**/*.{ts,tsx}'"
+        "pretty": "yarn prettier --write \"src/**/*.{ts,tsx,svelte}\"",
+        "pretty-check": "yarn prettier --check \"src/**/*.{ts,tsx}\""
     },
     "devDependencies": {
         "@sveltejs/vite-plugin-svelte": "^1.0.0-next.30",

@@ -13,12 +13,7 @@
 </script>
 
 <label for={id} class="toggle-wrap">
-    <input
-        {id}
-        type="checkbox"
-        checked={value}
-        on:change={handleChange}
-    />
+    <input {id} type="checkbox" checked={value} on:change={handleChange} />
     <span class="toggle-track" aria-hidden="true">
         <span class="toggle-thumb" />
     </span>

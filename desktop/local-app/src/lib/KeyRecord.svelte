@@ -122,11 +122,18 @@
     }
 </script>
 
-<div class="key-record" class:is-recording={recording} on:keyup={keyUp} on:click={startRecording} tabindex="0" role="button">
+<div
+    class="key-record"
+    class:is-recording={recording}
+    on:keyup={keyUp}
+    on:click={startRecording}
+    tabindex="0"
+    role="button"
+>
     <input {id} type="text" disabled {value} aria-label="Shortcut" />
 
     {#if value.length > 0}
-        <button class="clear" type="button" title="Clear shortcut" on:click|stopPropagation={resetRecording}>×</button>
+        <button class="clear" type="button" title="Clear shortcut" on:click|stopPropagation={resetRecording}>ï¿½</button>
     {/if}
 
     <button class="record" type="button" on:click|stopPropagation={recording ? stopRecording : startRecording}>

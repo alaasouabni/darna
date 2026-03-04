@@ -15,8 +15,8 @@
         "test": "exit 0",
         "lint": "yarn eslint src/ . --ext .ts",
         "fix": "yarn eslint --fix src/ . --ext .ts",
-        "pretty": "yarn prettier --write 'src/**/*.{ts,tsx}'",
-        "pretty-check": "yarn prettier --check 'src/**/*.{ts,tsx}'"
+        "pretty": "yarn prettier --write \"src/**/*.{ts,tsx}\"",
+        "pretty-check": "yarn prettier --check \"src/**/*.{ts,tsx}\""
     },
     "dependencies": {
         "auto-launch": "^5.0.5",

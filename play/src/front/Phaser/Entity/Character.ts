@@ -46,9 +46,9 @@ const NAME_LABEL_SCALE_MAX = 1.8;
 // Desired on-screen size multiplier (relative to the default label size).
 // We only boost labels when zoomed out; zoomed-in stays at baseline size.
 const NAME_LABEL_SCREEN_SCALE_BASE = 1.0;
-const NAME_LABEL_SCREEN_SCALE_MAX = 1.20; // zoomed-out
+const NAME_LABEL_SCREEN_SCALE_MAX = 1.2; // zoomed-out
 // For super zoom-in, reduce label growth only slightly vs default world scaling.
-const NAME_LABEL_ZOOM_IN_WORLD_SCALE_MIN = 0.90;
+const NAME_LABEL_ZOOM_IN_WORLD_SCALE_MIN = 0.9;
 const NAME_LABEL_ZOOM_IN_SHRINK_START = 1.25;
 const NAME_LABEL_ZOOM_IN_SHRINK_RANGE = 1.75;
 const NAME_LABEL_SCALE_STEP = 0.01;
@@ -557,11 +557,7 @@ export abstract class Character extends Container implements OutlineableInterfac
                 1
             );
             const easedShrinkT = Math.pow(shrinkT, NAME_LABEL_ZOOM_IN_SHRINK_EXPONENT);
-            worldScale = Phaser.Math.Linear(
-                1,
-                NAME_LABEL_ZOOM_IN_WORLD_SCALE_MIN,
-                easedShrinkT
-            );
+            worldScale = Phaser.Math.Linear(1, NAME_LABEL_ZOOM_IN_WORLD_SCALE_MIN, easedShrinkT);
         }
         const clamped = Phaser.Math.Clamp(worldScale, NAME_LABEL_SCALE_MIN, NAME_LABEL_SCALE_MAX);
         const quantized = Math.round(clamped / NAME_LABEL_SCALE_STEP) * NAME_LABEL_SCALE_STEP;
@@ -571,7 +567,7 @@ export abstract class Character extends Container implements OutlineableInterfac
     private applyPlayerNameScaleForCurrentSceneZoom(): void {
         const cameraZoom = this.scene.cameras.main?.zoom || 1;
         const cameraManager =
-            typeof this.scene.getCameraManager === "function" ? (this.scene.getCameraManager() as GameScene["cameraManager"]) : undefined;
+            typeof this.scene.getCameraManager === "function" ? this.scene.getCameraManager() : undefined;
 
         if (cameraManager && typeof cameraManager.captureZoomStateSnapshot === "function") {
             const { normalizedDiscreteLevel } = cameraManager.captureZoomStateSnapshot();

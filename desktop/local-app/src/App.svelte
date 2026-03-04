@@ -81,7 +81,9 @@
                 statusDetail = "Connection failed";
                 errorMessage =
                     appViewStatus.errorDescription && appViewStatus.errorDescription.length > 0
-                        ? `${appViewStatus.errorDescription}${typeof appViewStatus.errorCode === "number" ? ` (${appViewStatus.errorCode})` : ""}`
+                        ? `${appViewStatus.errorDescription}${
+                              typeof appViewStatus.errorCode === "number" ? ` (${appViewStatus.errorCode})` : ""
+                          }`
                         : "Unable to connect";
                 busy = false;
                 break;
@@ -270,7 +272,8 @@
 
             <div class="actions">
                 {#if settingsOpen}
-                    <button class="secondary" type="button" on:click={closeSettings} disabled={busy}>Back to App</button>
+                    <button class="secondary" type="button" on:click={closeSettings} disabled={busy}>Back to App</button
+                    >
                 {:else}
                     <button class="secondary" type="button" on:click={connectToConfiguredServer} disabled={busy}>
                         {busy ? "Connecting..." : status === "error" ? "Retry" : "Reconnect"}
@@ -294,7 +297,9 @@
                     <div class="panel-grid">
                         <div class="card">
                             <h2>Shortcuts</h2>
-                            <p class="muted">Global shortcuts are disabled while this screen is open to avoid accidental triggers.</p>
+                            <p class="muted">
+                                Global shortcuts are disabled while this screen is open to avoid accidental triggers.
+                            </p>
 
                             {#if settings}
                                 <div class="field">
@@ -337,7 +342,10 @@
 
                         <div class="card wide">
                             <h2>Managed Server</h2>
-                            <p class="muted">This client runs in locked server mode. Edit the config file to change the target server.</p>
+                            <p class="muted">
+                                This client runs in locked server mode. Edit the config file to change the target
+                                server.
+                            </p>
 
                             <div class="kv-list">
                                 <div class="kv-item">
@@ -355,7 +363,9 @@
                             </div>
 
                             <div class="inline-actions">
-                                <button type="button" class="secondary" on:click={openConfigFile}>Open Config File</button>
+                                <button type="button" class="secondary" on:click={openConfigFile}
+                                    >Open Config File</button
+                                >
                                 <button type="button" class="secondary" on:click={openConfigFolder}>Open Folder</button>
                             </div>
 
@@ -370,7 +380,10 @@
                     <div class="hero">
                         <p class="hero-label">Single-server desktop client</p>
                         <h1>{config?.server.name || "Configured Server"}</h1>
-                        <p class="hero-copy">The embedded app loads below this header. Use Settings for local shortcuts and startup behavior.</p>
+                        <p class="hero-copy">
+                            The embedded app loads below this header. Use Settings for local shortcuts and startup
+                            behavior.
+                        </p>
                     </div>
 
                     <div class="status-grid">
