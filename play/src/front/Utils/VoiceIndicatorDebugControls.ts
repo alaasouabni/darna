@@ -1,13 +1,4 @@
-import {
-    VOICE_INDICATOR_DEBUG_LOGS,
-    VOICE_INDICATOR_DISABLE_TWEEN,
-    VOICE_INDICATOR_MIN_OFF_MS,
-    VOICE_INDICATOR_MIN_ON_MS,
-    VOICE_INDICATOR_OFF_THRESHOLD,
-    VOICE_INDICATOR_ON_THRESHOLD,
-    VOICE_INDICATOR_PERF_ENABLED,
-    VOICE_INDICATOR_USE_HYSTERESIS,
-} from "../Enum/EnvironmentVariable";
+import * as Env from "../Enum/EnvironmentVariable";
 
 const LEGACY_TALK_ICON_VOLUME_THRESHOLD = 10;
 
@@ -22,15 +13,25 @@ export type WaVoiceIndicatorDebugControls = {
     debugLogs: boolean;
 };
 
+function readEnvValue<T>(key: string, fallback: T): T {
+    try {
+        const value = (Env as unknown as Record<string, unknown>)[key];
+        return (value as T | undefined) ?? fallback;
+    } catch {
+        // Some tests partially mock EnvironmentVariable exports.
+        return fallback;
+    }
+}
+
 const DEFAULT_VOICE_INDICATOR_DEBUG_CONTROLS: WaVoiceIndicatorDebugControls = {
-    enabled: VOICE_INDICATOR_PERF_ENABLED,
-    disableTween: VOICE_INDICATOR_DISABLE_TWEEN,
-    useHysteresis: VOICE_INDICATOR_USE_HYSTERESIS,
-    onThreshold: VOICE_INDICATOR_ON_THRESHOLD,
-    offThreshold: VOICE_INDICATOR_OFF_THRESHOLD,
-    minOnMs: VOICE_INDICATOR_MIN_ON_MS,
-    minOffMs: VOICE_INDICATOR_MIN_OFF_MS,
-    debugLogs: VOICE_INDICATOR_DEBUG_LOGS,
+    enabled: readEnvValue("VOICE_INDICATOR_PERF_ENABLED", false),
+    disableTween: readEnvValue("VOICE_INDICATOR_DISABLE_TWEEN", false),
+    useHysteresis: readEnvValue("VOICE_INDICATOR_USE_HYSTERESIS", true),
+    onThreshold: readEnvValue("VOICE_INDICATOR_ON_THRESHOLD", 12),
+    offThreshold: readEnvValue("VOICE_INDICATOR_OFF_THRESHOLD", 8),
+    minOnMs: readEnvValue("VOICE_INDICATOR_MIN_ON_MS", 400),
+    minOffMs: readEnvValue("VOICE_INDICATOR_MIN_OFF_MS", 250),
+    debugLogs: readEnvValue("VOICE_INDICATOR_DEBUG_LOGS", false),
 };
 
 type VoiceIndicatorDebugWindow = Window & {
