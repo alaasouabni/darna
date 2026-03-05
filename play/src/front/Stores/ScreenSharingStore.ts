@@ -29,11 +29,15 @@ function createRequestedScreenSharingState() {
 export const requestedScreenSharingState = createRequestedScreenSharingState();
 
 let currentStream: MediaStream | undefined = undefined;
+let detachCurrentStreamListeners: (() => void) | undefined;
 
 /**
  * Stops the screen sharing (both video and audio tracks)
  */
 function stopScreenSharing(): void {
+    detachCurrentStreamListeners?.();
+    detachCurrentStreamListeners = undefined;
+
     if (currentStream) {
         // Stop all tracks (video and audio)
         for (const track of currentStream.getTracks()) {
@@ -45,6 +49,75 @@ function stopScreenSharing(): void {
 
 let previousComputedVideoConstraint: boolean | MediaTrackConstraints = false;
 let previousComputedAudioConstraint: boolean | MediaTrackConstraints = false;
+
+function getScreenShareAudioConstraints(): true | MediaTrackConstraints {
+    const supportedConstraints = navigator.mediaDevices?.getSupportedConstraints?.();
+    const audioConstraints: MediaTrackConstraints = {};
+
+    if (supportedConstraints?.echoCancellation) {
+        audioConstraints.echoCancellation = false;
+    }
+    if (supportedConstraints?.noiseSuppression) {
+        audioConstraints.noiseSuppression = false;
+    }
+    if (supportedConstraints?.autoGainControl) {
+        audioConstraints.autoGainControl = false;
+    }
+    if (supportedConstraints?.channelCount) {
+        audioConstraints.channelCount = { ideal: 2 };
+    }
+
+    return Object.keys(audioConstraints).length > 0 ? audioConstraints : true;
+}
+
+type DisplayMediaRequestConstraints = {
+    video: boolean | MediaTrackConstraints;
+    audio: boolean | MediaTrackConstraints;
+};
+
+function shouldRetryWithPlainAudio(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    // Constraint-related errors are safe to retry with simpler audio settings.
+    return (
+        error.name === "TypeError" ||
+        error.name === "OverconstrainedError" ||
+        error.name === "ConstraintError"
+    );
+}
+
+function buildDisplayMediaConstraints(
+    constraints: MediaStreamConstraints,
+    useBestEffortAudioConstraints: boolean
+): DisplayMediaRequestConstraints {
+    const wantsAudio = constraints.audio !== false;
+
+    return {
+        video: constraints.video !== false,
+        audio: wantsAudio ? (useBestEffortAudioConstraints ? getScreenShareAudioConstraints() : true) : false,
+    };
+}
+
+async function getDisplayMediaWithAudioFallback(constraints: MediaStreamConstraints): Promise<MediaStream> {
+    const bestEffortConstraints = buildDisplayMediaConstraints(constraints, true);
+
+    try {
+        return await navigator.mediaDevices.getDisplayMedia(bestEffortConstraints);
+    } catch (error) {
+        const wantsAudio = constraints.audio !== false;
+        if (!wantsAudio || !shouldRetryWithPlainAudio(error)) {
+            throw error;
+        }
+
+        console.info(
+            "Screen-share audio constraints were rejected, retrying with plain audio capture.",
+            error
+        );
+        return navigator.mediaDevices.getDisplayMedia(buildDisplayMediaConstraints(constraints, false));
+    }
+}
 
 function createScreenShareBandwidthStore() {
     const { subscribe, set } = writable<number | "unlimited">(localUserStore.getScreenShareBandwidth());
@@ -192,17 +265,7 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
         // Audio is only available for certain display surfaces (mainly browser tabs)
         // See: https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia
         if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-            // Build constraints according to MDN specification
-            // video can be boolean or MediaTrackConstraints, default is true
-            // audio can be boolean or MediaTrackConstraints, default is false
-            const displayMediaConstraints: {
-                video: boolean | MediaTrackConstraints;
-                audio: boolean | MediaTrackConstraints;
-            } = {
-                video: !!constraints.video,
-                audio: !!constraints.audio,
-            };
-            currentStreamPromise = navigator.mediaDevices.getDisplayMedia(displayMediaConstraints);
+            currentStreamPromise = getDisplayMediaWithAudioFallback(constraints);
         } else if (window.WAD?.getDesktopCapturerSources) {
             currentStreamPromise = getDesktopCapturerSources();
         } else {
@@ -218,6 +281,53 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
             try {
                 stopScreenSharing();
                 currentStream = await currentStreamPromise;
+                const videoTrack = currentStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    try {
+                        videoTrack.contentHint = "detail";
+                    } catch (error) {
+                        console.info("Could not set screen-share video contentHint.", error);
+                    }
+                }
+
+                const audioTrack = currentStream.getAudioTracks()[0];
+                if (audioTrack) {
+                    try {
+                        audioTrack.contentHint = "music";
+                    } catch (error) {
+                        console.info("Could not set screen-share audio contentHint.", error);
+                    }
+
+                    const bestEffortAudioConstraints = getScreenShareAudioConstraints();
+                    if (bestEffortAudioConstraints !== true) {
+                        audioTrack.applyConstraints(bestEffortAudioConstraints).catch((error) => {
+                            console.info("Could not apply screen-share audio constraints.", error);
+                        });
+                    }
+                }
+
+                const stream = currentStream;
+                const emitCurrentStream = () => {
+                    // Ignore late events from a previous stream instance.
+                    if (stream !== currentStream) {
+                        return;
+                    }
+                    set({
+                        type: "success",
+                        stream: currentStream,
+                    });
+                };
+
+                const handleTrackChanged = () => {
+                    emitCurrentStream();
+                };
+
+                stream.addEventListener("addtrack", handleTrackChanged);
+                stream.addEventListener("removetrack", handleTrackChanged);
+                detachCurrentStreamListeners = () => {
+                    stream.removeEventListener("addtrack", handleTrackChanged);
+                    stream.removeEventListener("removetrack", handleTrackChanged);
+                };
 
                 // If stream ends (for instance if user clicks the stop screen sharing button in the browser), let's close the view
                 for (const track of currentStream.getTracks()) {
@@ -233,13 +343,12 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
                     };
                 }
 
-                set({
-                    type: "success",
-                    stream: currentStream,
-                });
+                emitCurrentStream();
                 return;
             } catch (e) {
                 currentStream = undefined;
+                detachCurrentStreamListeners?.();
+                detachCurrentStreamListeners = undefined;
                 requestedScreenSharingState.disableScreenSharing();
                 console.info("Error. Unable to share screen.", e);
                 set({

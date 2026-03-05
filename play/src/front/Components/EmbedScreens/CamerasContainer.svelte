@@ -74,6 +74,9 @@
 
     // The minimum width of a media box in pixels
     const minMediaBoxWidth = 160;
+    const minMediaBoxHeight = Math.ceil((minMediaBoxWidth * 9) / 16);
+    let minContainerHeight = minMediaBoxHeight;
+    $: minContainerHeight = Math.max(minMediaBoxHeight, maxContainerHeight ? maxContainerHeight * 0.1 : 0);
 
     const gameScene = gameManager.getCurrentGameScene();
 
@@ -410,7 +413,7 @@
     </div>
     {#if !isOnOneLine}
         <ResizeHandle
-            minHeight={maxContainerHeight * 0.1}
+            minHeight={minContainerHeight}
             maxHeight={maxContainerHeight * 0.9}
             onResize={onResizeHandler}
             onResizeEnd={() => {

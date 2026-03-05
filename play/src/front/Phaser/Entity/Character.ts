@@ -46,7 +46,7 @@ const NAME_LABEL_SCALE_MAX = 1.8;
 // Desired on-screen size multiplier (relative to the default label size).
 // We only boost labels when zoomed out; zoomed-in stays at baseline size.
 const NAME_LABEL_SCREEN_SCALE_BASE = 1.0;
-const NAME_LABEL_SCREEN_SCALE_MAX = 1.2; // zoomed-out
+const NAME_LABEL_SCREEN_SCALE_MAX = 1.1; // zoomed-out
 // For super zoom-in, reduce label growth only slightly vs default world scaling.
 const NAME_LABEL_ZOOM_IN_WORLD_SCALE_MIN = 0.9;
 const NAME_LABEL_ZOOM_IN_SHRINK_START = 1.25;

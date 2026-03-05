@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MapStore } from "@workadventure/store-utils";
 import type { Participant, LocalParticipant } from "livekit-client";
-import { VideoPresets, Room, RoomEvent, LocalVideoTrack, LocalAudioTrack, Track } from "livekit-client";
+import { AudioPresets, VideoPresets, Room, RoomEvent, LocalVideoTrack, LocalAudioTrack, Track } from "livekit-client";
 import type { Readable, Unsubscriber } from "svelte/store";
 import { get } from "svelte/store";
 import * as Sentry from "@sentry/svelte";
@@ -340,6 +340,10 @@ export class LiveKitRoom implements LiveKitRoomInterface {
                             this.localParticipant
                                 .publishTrack(this.localScreenSharingAudioTrack, {
                                     source: Track.Source.ScreenShareAudio,
+                                    audioPreset: AudioPresets.musicHighQualityStereo,
+                                    forceStereo: true,
+                                    dtx: false,
+                                    red: true,
                                 })
                                 .catch((err) => {
                                     console.error("An error occurred while publishing screen share audio track", err);

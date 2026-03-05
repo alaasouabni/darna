@@ -81,6 +81,7 @@ import type {
     OnConnectInterface,
     PositionInterface,
     RoomJoinedMessageInterface,
+    ViewportInterface,
 } from "../../Connection/ConnexionModels";
 import type { RoomConnection } from "../../Connection/RoomConnection";
 import type { ActionableItem } from "../Items/ActionableItem";
@@ -254,6 +255,7 @@ interface GroupUsersUpdatedEventInterface {
 
 const WORLD_SPACE_NAME = "allWorldUser";
 const PERSONAL_AREA_OWNER_CACHE_TTL_MS = 15_000;
+const REMOTE_PLAYERS_VIEWPORT_MARGIN = 300;
 const debug = Debug("GameScene");
 
 type SeamExperimentControls = {
@@ -397,6 +399,7 @@ export class GameScene extends DirtyScene {
     private playersDebugLogAlreadyDisplayed = false;
     private hideTimeout: ReturnType<typeof setTimeout> | undefined;
     private lastPlayerNameScaleEffectiveZoom: number | undefined;
+    private lastViewportSyncSnapshot: ViewportInterface | undefined;
     // The promise that will resolve to the current player textures. This will be available only after connection is established.
     private currentPlayerTexturesResolve!: (value: string[]) => void;
     private currentPlayerTexturesReject!: (reason: unknown) => void;
@@ -1659,6 +1662,7 @@ export class GameScene extends DirtyScene {
             }
         }
         this.updatePlayerNameScalesForZoom();
+        this.syncViewportToServerIfCameraChanged();
         this.hasMovedThisFrame = false;
     }
 
@@ -1815,28 +1819,107 @@ export class GameScene extends DirtyScene {
         });
     }
 
-    public sendViewportToServer(margin = 300): void {
+    public sendViewportToServer(margin = REMOTE_PLAYERS_VIEWPORT_MARGIN): void {
         const camera = this.cameras.main;
         if (!camera) {
             return;
         }
 
-        // We detect NaN values here for obscure reasons (Phaser bug)
-        const left = Math.max(0, camera.scrollX - margin);
-        const top = Math.max(0, camera.scrollY - margin);
-        const right = camera.scrollX + camera.width + margin;
-        const bottom = camera.scrollY + camera.height + margin;
-        if (Number.isNaN(left) || Number.isNaN(top) || Number.isNaN(right) || Number.isNaN(bottom)) {
-            console.error("NaN detected in viewport calculation", { left, top, right, bottom, camera });
+        const viewport = this.getWorldViewportFromCamera(camera, margin);
+        if (!viewport) {
             return;
         }
 
-        this.connection?.setViewport({
-            left: left,
-            top: top,
-            right: right,
-            bottom: bottom,
+        this.lastViewportSyncSnapshot = {
+            left: Math.round(viewport.left),
+            top: Math.round(viewport.top),
+            right: Math.round(viewport.right),
+            bottom: Math.round(viewport.bottom),
+        };
+        this.logViewportDebug("setViewport", {
+            margin,
+            viewport,
+            snapshot: this.lastViewportSyncSnapshot,
+            cameraScrollX: camera.scrollX,
+            cameraScrollY: camera.scrollY,
+            cameraZoomX: camera.zoomX,
+            cameraZoomY: camera.zoomY,
+            worldViewX: camera.worldView.x,
+            worldViewY: camera.worldView.y,
+            worldViewWidth: camera.worldView.width,
+            worldViewHeight: camera.worldView.height,
         });
+        this.connection?.setViewport(viewport);
+    }
+
+    private syncViewportToServerIfCameraChanged(): void {
+        if (!this.connection) {
+            return;
+        }
+
+        const camera = this.cameras.main;
+        if (!camera) {
+            return;
+        }
+
+        const viewport = this.getWorldViewportFromCamera(camera, REMOTE_PLAYERS_VIEWPORT_MARGIN);
+        if (!viewport) {
+            return;
+        }
+
+        const roundedViewport = {
+            left: Math.round(viewport.left),
+            top: Math.round(viewport.top),
+            right: Math.round(viewport.right),
+            bottom: Math.round(viewport.bottom),
+        };
+
+        const previousViewport = this.lastViewportSyncSnapshot;
+        const viewportChanged =
+            !previousViewport ||
+            previousViewport.left !== roundedViewport.left ||
+            previousViewport.top !== roundedViewport.top ||
+            previousViewport.right !== roundedViewport.right ||
+            previousViewport.bottom !== roundedViewport.bottom;
+
+        if (!viewportChanged) {
+            return;
+        }
+
+        this.logViewportDebug("cameraViewportChanged", {
+            previousViewport,
+            nextViewport: roundedViewport,
+            cameraScrollX: camera.scrollX,
+            cameraScrollY: camera.scrollY,
+            cameraZoomX: camera.zoomX,
+            cameraZoomY: camera.zoomY,
+            worldViewX: camera.worldView.x,
+            worldViewY: camera.worldView.y,
+            worldViewWidth: camera.worldView.width,
+            worldViewHeight: camera.worldView.height,
+        });
+        this.throttledSendViewportToServer();
+    }
+
+    private isViewportDebugEnabled(): boolean {
+        const debugWindow = window as unknown as { __waViewportDebug?: boolean };
+        if (debugWindow.__waViewportDebug === true) {
+            return true;
+        }
+
+        try {
+            return localStorage.getItem("waViewportDebug") === "1";
+        } catch {
+            return false;
+        }
+    }
+
+    private logViewportDebug(message: string, payload: Record<string, unknown>): void {
+        if (!this.isViewportDebugEnabled()) {
+            return;
+        }
+
+        console.log(`[ViewportDebug] ${message}`, payload);
     }
 
     public reposition(instant = false): void {
@@ -2418,6 +2501,12 @@ export class GameScene extends DirtyScene {
      */
     private connect(): void {
         const camera = this.cameraManager.getCamera();
+        const initialViewport = this.getWorldViewportFromCamera(camera, REMOTE_PLAYERS_VIEWPORT_MARGIN) ?? {
+            left: camera.scrollX,
+            top: camera.scrollY,
+            right: camera.scrollX + camera.width,
+            bottom: camera.scrollY + camera.height,
+        };
 
         connectionManager
             .connectToRoomSocket(
@@ -2427,18 +2516,16 @@ export class GameScene extends DirtyScene {
                 {
                     ...this.startPositionCalculator.startPosition,
                 },
-                {
-                    left: camera.scrollX,
-                    top: camera.scrollY,
-                    right: camera.scrollX + camera.width,
-                    bottom: camera.scrollY + camera.height,
-                },
+                initialViewport,
                 gameManager.getCompanionTextureId(),
                 get(availabilityStatusStore),
                 this.getGameMap().getLastCommandId()
             )
             .then(async (onConnect: OnConnectInterface) => {
                 this.connection = onConnect.connection;
+                this.sendViewportToServer();
+                this.time.delayedCall(0, () => this.sendViewportToServer());
+                this.time.delayedCall(150, () => this.sendViewportToServer());
 
                 // Initialize TURN credentials manager
                 iceServersManager.init(this.connection, this.abortController.signal);
@@ -4443,7 +4530,7 @@ ${escapedMessage}
         this.lastMoveEventSent = event;
         this.lastSentTick = this.currentTick;
         const camera = this.cameras.main;
-        let viewport = {
+        let viewport = this.getWorldViewportFromCamera(camera, REMOTE_PLAYERS_VIEWPORT_MARGIN) ?? {
             left: camera.scrollX,
             top: camera.scrollY,
             right: camera.scrollX + camera.width,
@@ -4460,14 +4547,89 @@ ${escapedMessage}
                 bottom: event.y + 3_000,
             };
         }
+        this.logViewportDebug("sharePosition", {
+            eventX: event.x,
+            eventY: event.y,
+            moving: event.moving,
+            direction: event.direction,
+            viewport,
+            cameraScrollX: camera.scrollX,
+            cameraScrollY: camera.scrollY,
+            cameraZoomX: camera.zoomX,
+            cameraZoomY: camera.zoomY,
+        });
         this.connection?.sharePosition(event.x, event.y, event.direction, event.moving, viewport);
         iframeListener.hasPlayerMoved(event);
+    }
+
+    private getWorldViewportFromCamera(
+        camera: Phaser.Cameras.Scene2D.Camera,
+        margin = 0
+    ): ViewportInterface | undefined {
+        const worldView = camera.worldView;
+        const worldViewLooksUsable =
+            Number.isFinite(worldView.x) &&
+            Number.isFinite(worldView.y) &&
+            Number.isFinite(worldView.width) &&
+            Number.isFinite(worldView.height) &&
+            worldView.width > 0 &&
+            worldView.height > 0;
+
+        const zoomX = camera.zoomX || 1;
+        const zoomY = camera.zoomY || 1;
+        const viewportWidth = camera.width / zoomX;
+        const viewportHeight = camera.height / zoomY;
+
+        const baseLeft = worldViewLooksUsable ? worldView.x : camera.scrollX;
+        const baseTop = worldViewLooksUsable ? worldView.y : camera.scrollY;
+        const baseRight = worldViewLooksUsable ? worldView.x + worldView.width : camera.scrollX + viewportWidth;
+        const baseBottom = worldViewLooksUsable ? worldView.y + worldView.height : camera.scrollY + viewportHeight;
+
+        const left = Math.max(0, baseLeft - margin);
+        const top = Math.max(0, baseTop - margin);
+        const right = baseRight + margin;
+        const bottom = baseBottom + margin;
+
+        if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right) || !Number.isFinite(bottom)) {
+            console.error("Invalid world viewport calculated", {
+                left,
+                top,
+                right,
+                bottom,
+                worldViewX: worldView.x,
+                worldViewY: worldView.y,
+                worldViewW: worldView.width,
+                worldViewH: worldView.height,
+                worldViewLooksUsable,
+                scrollX: camera.scrollX,
+                scrollY: camera.scrollY,
+                zoomX,
+                zoomY,
+                cameraWidth: camera.width,
+                cameraHeight: camera.height,
+                margin,
+            });
+            return undefined;
+        }
+
+        return {
+            left,
+            top,
+            right,
+            bottom,
+        };
     }
 
     private doAddPlayer(addPlayerData: AddPlayerInterface): void {
         //check if exist player, if exist, move position
         // Can this really happen? yes..
         if (this.MapPlayersByKey.has(addPlayerData.userId)) {
+            this.logViewportDebug("addPlayer:already_exists", {
+                userId: addPlayerData.userId,
+                userName: addPlayerData.name,
+                playerX: addPlayerData.position.x,
+                playerY: addPlayerData.position.y,
+            });
             console.warn("Got instructed to add a player that already exists: ", addPlayerData.userId);
             console.error(
                 "Players status",
@@ -4525,6 +4687,12 @@ ${escapedMessage}
         }
         this.MapPlayersByKey.set(player.userId, player);
         player.updatePosition(addPlayerData.position);
+        this.logViewportDebug("addPlayer", {
+            userId: addPlayerData.userId,
+            userName: addPlayerData.name,
+            playerX: addPlayerData.position.x,
+            playerY: addPlayerData.position.y,
+        });
 
         player.on(Phaser.Input.Events.POINTER_OVER, () => {
             this.activatablesManager.handlePointerOverActivatableObject(player);
@@ -4590,6 +4758,10 @@ ${escapedMessage}
     }
 
     private doRemovePlayer(userId: number) {
+        this.logViewportDebug("removePlayer", {
+            userId,
+            hasPlayerInScene: this.MapPlayersByKey.has(userId),
+        });
         const player = this.MapPlayersByKey.get(userId);
         if (player === undefined) {
             console.error("Cannot find user with id ", userId);

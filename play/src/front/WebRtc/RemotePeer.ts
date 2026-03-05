@@ -257,7 +257,48 @@ export class RemotePeer extends Peer implements Streamable {
         super(peerConfig);
 
         this.volume = writable(defaultVolume);
-        this._hasAudio = writable<boolean>(type === "video");
+        if (type === "video") {
+            // For camera streams, keep the historical behavior so mute UI stays stable.
+            this._hasAudio = writable<boolean>(true);
+        } else {
+            // For screen-sharing streams, detect audio tracks dynamically.
+            this._hasAudio = derived<typeof this._remoteStreamStore, boolean>(
+                this._remoteStreamStore,
+                ($mediaStream, set) => {
+                    if ($mediaStream === undefined) {
+                        set(false);
+                        return;
+                    }
+
+                    const updateHasAudio = () => {
+                        set($mediaStream.getAudioTracks().length > 0);
+                    };
+
+                    const handleTrackAdded = (event: MediaStreamTrackEvent) => {
+                        if (event.track.kind === "audio") {
+                            updateHasAudio();
+                        }
+                    };
+
+                    const handleTrackRemoved = (event: MediaStreamTrackEvent) => {
+                        if (event.track.kind === "audio") {
+                            updateHasAudio();
+                        }
+                    };
+
+                    $mediaStream.addEventListener("addtrack", handleTrackAdded);
+                    $mediaStream.addEventListener("removetrack", handleTrackRemoved);
+
+                    updateHasAudio();
+
+                    return () => {
+                        $mediaStream.removeEventListener("addtrack", handleTrackAdded);
+                        $mediaStream.removeEventListener("removetrack", handleTrackRemoved);
+                    };
+                },
+                false
+            );
+        }
         this.videoType = type === "video" ? "remote_video" : "remote_screenSharing";
         this.displayMode = type === "video" ? "cover" : "fit";
         this.usePresentationMode = !(type === "video");

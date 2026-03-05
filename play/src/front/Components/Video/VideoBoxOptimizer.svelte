@@ -16,6 +16,8 @@
 
     let isVisible = !intersectionObserver;
     let videoBoxElement: HTMLDivElement | undefined;
+    $: roundedVideoWidth = Math.max(1, Math.round(videoWidth));
+    $: roundedVideoHeight = videoHeight !== undefined ? Math.max(1, Math.round(videoHeight)) : undefined;
 
     const orderStore = videoBox.displayOrder;
 
@@ -76,8 +78,8 @@
 
 <div
     bind:this={videoBoxElement}
-    style={`order: ${$orderStore}; width: ${videoWidth}px; max-width: ${videoWidth}px;${
-        videoHeight ? `height: ${videoHeight}px; max-height: ${videoHeight}px;` : ""
+    style={`order: ${$orderStore}; width: ${roundedVideoWidth}px; max-width: ${roundedVideoWidth}px;${
+        roundedVideoHeight ? `height: ${roundedVideoHeight}px; max-height: ${roundedVideoHeight}px;` : ""
     }`}
     class={` overflow-hidden
     ${
