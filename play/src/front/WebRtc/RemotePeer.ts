@@ -29,6 +29,64 @@ export type PeerStatus = "connecting" | "connected" | "error" | "closed";
 const CONNECTION_TIMEOUT = isFirefox() ? 10000 : 5000; // 10s for Firefox, 5s for others
 
 const debug = Debug("webrtc:RemotePeer");
+const SCREEN_SHARE_OPUS_MAX_AVERAGE_BITRATE = 128000;
+const SCREEN_SHARE_OPUS_PARAMS = [
+    `maxaveragebitrate=${SCREEN_SHARE_OPUS_MAX_AVERAGE_BITRATE}`,
+    "stereo=1",
+    "sprop-stereo=1",
+];
+
+function getSdpLineBreak(sdp: string): string {
+    return sdp.includes("\r\n") ? "\r\n" : "\n";
+}
+
+function getOpusPayloadTypes(sdp: string): string[] {
+    const matches = sdp.matchAll(/^a=rtpmap:(\d+)\s+opus\/48000(?:\/2)?$/gim);
+    return Array.from(new Set(Array.from(matches, (match) => match[1])));
+}
+
+function normalizeFmtpParameterName(parameter: string): string {
+    return parameter.split("=")[0]?.trim().toLowerCase() ?? parameter.trim().toLowerCase();
+}
+
+function upsertOpusFmtpParameters(sdp: string, payloadType: string): string {
+    const fmtpRegex = new RegExp(`^a=fmtp:${payloadType}\\s+(.+)$`, "m");
+    const fmtpMatch = sdp.match(fmtpRegex);
+
+    if (fmtpMatch) {
+        const existingParameters = fmtpMatch[1]
+            .split(";")
+            .map((param) => param.trim())
+            .filter((param) => param.length > 0);
+        const mergedByName = new Map<string, string>();
+
+        for (const parameter of existingParameters) {
+            mergedByName.set(normalizeFmtpParameterName(parameter), parameter);
+        }
+        for (const parameter of SCREEN_SHARE_OPUS_PARAMS) {
+            mergedByName.set(normalizeFmtpParameterName(parameter), parameter);
+        }
+
+        const mergedParameters = Array.from(mergedByName.values()).join(";");
+        return sdp.replace(fmtpRegex, `a=fmtp:${payloadType} ${mergedParameters}`);
+    }
+
+    const lineBreak = getSdpLineBreak(sdp);
+    const rtpmapRegex = new RegExp(`^a=rtpmap:${payloadType}\\s+opus\\/48000(?:\\/2)?$`, "m");
+    return sdp.replace(
+        rtpmapRegex,
+        (rtpmapLine) => `${rtpmapLine}${lineBreak}a=fmtp:${payloadType} ${SCREEN_SHARE_OPUS_PARAMS.join(";")}`
+    );
+}
+
+function applyScreenShareAudioQualitySdpTransform(sdp: string): string {
+    const opusPayloadTypes = getOpusPayloadTypes(sdp);
+    if (opusPayloadTypes.length === 0) {
+        return sdp;
+    }
+
+    return opusPayloadTypes.reduce((nextSdp, payloadType) => upsertOpusFmtpParameters(nextSdp, payloadType), sdp);
+}
 
 /**
  * A peer connection used to transmit video / audio signals between 2 peers.
@@ -237,6 +295,11 @@ export class RemotePeer extends Peer implements Streamable {
         incrementWebRtcConnectionsCount();
         const bandwidth = get(videoBandwidthStore);
         const firefoxBrowser = isFirefox();
+        const baseSdpTransform = getSdpTransform(bandwidth === "unlimited" ? undefined : bandwidth);
+        const sdpTransform =
+            type === "screenSharing"
+                ? (sdp: string) => applyScreenShareAudioQualitySdpTransform(baseSdpTransform(sdp))
+                : baseSdpTransform;
 
         // Firefox-specific configuration
         const peerConfig = {
@@ -250,7 +313,7 @@ export class RemotePeer extends Peer implements Streamable {
                     rtcpMuxPolicy: "require" as RTCRtcpMuxPolicy,
                 }),
             },
-            sdpTransform: getSdpTransform(bandwidth === "unlimited" ? undefined : bandwidth),
+            sdpTransform,
             // Firefox works better with trickle ICE enabled
             ...(firefoxBrowser && { trickle: true }),
         };

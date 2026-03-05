@@ -297,13 +297,6 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
                     } catch (error) {
                         console.info("Could not set screen-share audio contentHint.", error);
                     }
-
-                    const bestEffortAudioConstraints = getScreenShareAudioConstraints();
-                    if (bestEffortAudioConstraints !== true) {
-                        audioTrack.applyConstraints(bestEffortAudioConstraints).catch((error) => {
-                            console.info("Could not apply screen-share audio constraints.", error);
-                        });
-                    }
                 }
 
                 const stream = currentStream;
