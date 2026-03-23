@@ -5,7 +5,7 @@ import { AbortError } from "@workadventure/shared-utils/src/Abort/AbortError";
 import { get } from "svelte/store";
 import type { RoomConnection } from "../Connection/RoomConnection";
 import type { ProximityChatRoom } from "../Chat/Connection/Proximity/ProximityChatRoom";
-import { personalAreaSpaceNameStore } from "../Stores/GameStore";
+import { livekitMeetingRoomSpaceNameStore, personalAreaSpaceNameStore } from "../Stores/GameStore";
 
 const debug = Debug("ProximitySpaceManager");
 
@@ -13,6 +13,7 @@ export class ProximitySpaceManager {
     private joinSpaceRequestMessageSubscription: Subscription;
     private leaveSpaceRequestMessageSubscription: Subscription;
     private personalAreaSubscription: (() => void) | undefined;
+    private livekitMeetingRoomSubscription: (() => void) | undefined;
     private pendingJoinRequest:
         | {
               spaceName: string;
@@ -20,35 +21,23 @@ export class ProximitySpaceManager {
           }
         | undefined;
     private isInPersonalArea = false;
+    private isInLivekitMeetingRoom = false;
     private isResuming = false;
     private isStatusBlocked = false;
 
     public constructor(roomConnection: RoomConnection, private proximityChatRoom: ProximityChatRoom) {
         this.isInPersonalArea = get(personalAreaSpaceNameStore) !== null;
+        this.isInLivekitMeetingRoom = get(livekitMeetingRoomSpaceNameStore) !== null;
         this.personalAreaSubscription = personalAreaSpaceNameStore.subscribe((spaceName) => {
-            const wasInPersonalArea = this.isInPersonalArea;
+            const wasInIsolatedSpace = this.isInIsolatedSpace();
             this.isInPersonalArea = spaceName !== null;
+            this.resumePendingJoinIfNeeded(wasInIsolatedSpace);
+        });
 
-            if (wasInPersonalArea && !this.isInPersonalArea) {
-                const pending = this.pendingJoinRequest;
-                this.pendingJoinRequest = undefined;
-                if (pending) {
-                    this.isResuming = true;
-                    this.proximityChatRoom
-                        .joinSpace(pending.spaceName, pending.propertiesToSync)
-                        .catch((e) => {
-                            if (e instanceof AbortError) {
-                                debug("Join space aborted after personal area", e);
-                                return;
-                            }
-                            console.error(e);
-                            Sentry.captureException(e);
-                        })
-                        .finally(() => {
-                            this.isResuming = false;
-                        });
-                }
-            }
+        this.livekitMeetingRoomSubscription = livekitMeetingRoomSpaceNameStore.subscribe((spaceName) => {
+            const wasInIsolatedSpace = this.isInIsolatedSpace();
+            this.isInLivekitMeetingRoom = spaceName !== null;
+            this.resumePendingJoinIfNeeded(wasInIsolatedSpace);
         });
 
         this.joinSpaceRequestMessageSubscription = roomConnection.joinSpaceRequestMessage.subscribe(
@@ -57,7 +46,7 @@ export class ProximitySpaceManager {
                     this.pendingJoinRequest = undefined;
                     return;
                 }
-                if (this.isInPersonalArea || this.isResuming) {
+                if (this.isInIsolatedSpace() || this.isResuming) {
                     this.pendingJoinRequest = { spaceName, propertiesToSync };
                     return;
                 }
@@ -80,7 +69,7 @@ export class ProximitySpaceManager {
                     }
                     return;
                 }
-                if (this.isInPersonalArea || this.isResuming) {
+                if (this.isInIsolatedSpace() || this.isResuming) {
                     if (this.pendingJoinRequest?.spaceName === spaceName) {
                         this.pendingJoinRequest = undefined;
                     }
@@ -98,6 +87,7 @@ export class ProximitySpaceManager {
         this.joinSpaceRequestMessageSubscription.unsubscribe();
         this.leaveSpaceRequestMessageSubscription.unsubscribe();
         this.personalAreaSubscription?.();
+        this.livekitMeetingRoomSubscription?.();
     }
 
     public setStatusBlocked(blocked: boolean): void {
@@ -105,5 +95,36 @@ export class ProximitySpaceManager {
         if (blocked) {
             this.pendingJoinRequest = undefined;
         }
+    }
+
+    private isInIsolatedSpace(): boolean {
+        return this.isInPersonalArea || this.isInLivekitMeetingRoom;
+    }
+
+    private resumePendingJoinIfNeeded(wasInIsolatedSpace: boolean): void {
+        if (!wasInIsolatedSpace || this.isInIsolatedSpace()) {
+            return;
+        }
+
+        const pending = this.pendingJoinRequest;
+        this.pendingJoinRequest = undefined;
+        if (!pending) {
+            return;
+        }
+
+        this.isResuming = true;
+        this.proximityChatRoom
+            .joinSpace(pending.spaceName, pending.propertiesToSync)
+            .catch((e) => {
+                if (e instanceof AbortError) {
+                    debug("Join space aborted after isolated space", e);
+                    return;
+                }
+                console.error(e);
+                Sentry.captureException(e);
+            })
+            .finally(() => {
+                this.isResuming = false;
+            });
     }
 }

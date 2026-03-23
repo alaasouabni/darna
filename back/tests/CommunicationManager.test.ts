@@ -50,14 +50,22 @@ describe("CommunicationManager", () => {
     };
 
     // Real space implementation (no complex mock)
-    const createSpace = (users: SpaceUser[] = []): ICommunicationSpace => ({
+    const createSpace = (
+        users: SpaceUser[] = [],
+        options?: {
+            usersInFilter?: SpaceUser[];
+            usersToNotify?: SpaceUser[];
+            spaceName?: string;
+            propertiesToSync?: string[];
+        }
+    ): ICommunicationSpace => ({
         getAllUsers: () => users,
-        getUsersInFilter: () => users,
-        getUsersToNotify: () => [],
+        getUsersInFilter: () => options?.usersInFilter ?? users,
+        getUsersToNotify: () => options?.usersToNotify ?? [],
         dispatchPrivateEvent: () => {},
         dispatchPublicEvent: () => {},
-        getSpaceName: () => "test-space",
-        getPropertiesToSync: () => ["cameraState", "microphoneState"],
+        getSpaceName: () => options?.spaceName ?? "test-space",
+        getPropertiesToSync: () => options?.propertiesToSync ?? ["cameraState", "microphoneState"],
     });
 
     // Real policy implementation (simple, testable)
@@ -354,6 +362,138 @@ describe("CommunicationManager", () => {
 
             expect(policy.mocks.shouldTransition).not.toHaveBeenCalled();
         });
+
+        it("should force immediate LiveKit transition when screen sharing is requested in WebRTC", async () => {
+            const space = createSpace();
+            const orchestrator = createOrchestrator();
+            const newState = createState(CommunicationType.LIVEKIT);
+            orchestrator.mocks.executeImmediateTransition.mockResolvedValue(newState);
+
+            const policy = createPolicy(false, null);
+            const state = createState(CommunicationType.WEBRTC);
+            const lifecycleManager = createLifecycleManager(state);
+
+            const manager = new CommunicationManager(space, {
+                policy: policy,
+                orchestrator: orchestrator,
+                lifecycleManager: lifecycleManager,
+            });
+
+            const user = SpaceUser.fromPartial({
+                spaceUserId: "user_1",
+                uuid: "uuid-user_1",
+                name: "User 1",
+                playUri: "http://test.com",
+                screenSharingState: true,
+            });
+
+            await manager.handleUserUpdated(user);
+
+            expect(orchestrator.mocks.executeImmediateTransition).toHaveBeenCalledWith(
+                CommunicationType.LIVEKIT,
+                expect.objectContaining({
+                    space: space,
+                    playUri: user.playUri,
+                })
+            );
+            expect(lifecycleManager.mocks.transitionTo).toHaveBeenCalledWith(newState);
+        });
+
+        it("should try immediate transition to WebRTC when screen sharing is stopped", async () => {
+            const space = createSpace([createSpaceUser("user_1"), createSpaceUser("user_2")]);
+            const policy = createPolicy(true, CommunicationType.WEBRTC);
+            const orchestrator = createOrchestrator();
+            const state = createState(CommunicationType.LIVEKIT);
+            const newState = createState(CommunicationType.WEBRTC);
+            orchestrator.mocks.executeImmediateTransition.mockResolvedValue(newState);
+            const lifecycleManager = createLifecycleManager(state);
+            const userRegistry = new UserRegistry();
+            userRegistry.addUser(
+                SpaceUser.fromPartial({
+                    spaceUserId: "user_1",
+                    uuid: "uuid-user_1",
+                    name: "User 1",
+                    playUri: "http://test.com",
+                    screenSharingState: true,
+                })
+            );
+
+            const manager = new CommunicationManager(space, {
+                policy: policy,
+                orchestrator: orchestrator,
+                lifecycleManager: lifecycleManager,
+                userRegistry: userRegistry,
+            });
+
+            await manager.handleUserUpdated(
+                SpaceUser.fromPartial({
+                    spaceUserId: "user_1",
+                    uuid: "uuid-user_1",
+                    name: "User 1",
+                    playUri: "http://test.com",
+                    screenSharingState: false,
+                })
+            );
+
+            expect(orchestrator.mocks.executeImmediateTransition).toHaveBeenCalledWith(
+                CommunicationType.WEBRTC,
+                expect.objectContaining({
+                    space: space,
+                })
+            );
+            expect(orchestrator.mocks.scheduleDelayedTransition).not.toHaveBeenCalled();
+            expect(lifecycleManager.mocks.transitionTo).toHaveBeenCalledWith(newState);
+        });
+
+        it("should not force transition when already in LiveKit", async () => {
+            const space = createSpace();
+            const orchestrator = createOrchestrator();
+            const state = createState(CommunicationType.LIVEKIT);
+            const lifecycleManager = createLifecycleManager(state);
+
+            const manager = new CommunicationManager(space, {
+                orchestrator: orchestrator,
+                lifecycleManager: lifecycleManager,
+            });
+
+            const user = SpaceUser.fromPartial({
+                spaceUserId: "user_1",
+                uuid: "uuid-user_1",
+                name: "User 1",
+                playUri: "http://test.com",
+                screenSharingState: true,
+            });
+
+            await manager.handleUserUpdated(user);
+
+            expect(orchestrator.mocks.executeImmediateTransition).not.toHaveBeenCalled();
+        });
+
+        it("should cancel pending transition when screen sharing is requested while already in LiveKit", async () => {
+            const space = createSpace();
+            const orchestrator = createOrchestrator();
+            orchestrator.mocks.hasPendingTransition.mockReturnValue(true);
+            const state = createState(CommunicationType.LIVEKIT);
+            const lifecycleManager = createLifecycleManager(state);
+
+            const manager = new CommunicationManager(space, {
+                orchestrator: orchestrator,
+                lifecycleManager: lifecycleManager,
+            });
+
+            const user = SpaceUser.fromPartial({
+                spaceUserId: "user_1",
+                uuid: "uuid-user_1",
+                name: "User 1",
+                playUri: "http://test.com",
+                screenSharingState: true,
+            });
+
+            await manager.handleUserUpdated(user);
+
+            expect(orchestrator.mocks.cancelPendingTransition).toHaveBeenCalled();
+            expect(orchestrator.mocks.executeImmediateTransition).not.toHaveBeenCalled();
+        });
     });
 
     describe("handleUserToNotifyAdded", () => {
@@ -454,6 +594,52 @@ describe("CommunicationManager", () => {
             expect(orchestrator.mocks.scheduleDelayedTransition).not.toHaveBeenCalled();
         });
 
+        it("should not transition to LiveKit when only usersToNotify are present without filtered publishers", async () => {
+            const allUsers = [
+                createSpaceUser("user_1"),
+                createSpaceUser("user_2"),
+                createSpaceUser("user_3"),
+                createSpaceUser("user_4"),
+                createSpaceUser("user_5"),
+                createSpaceUser("user_6"),
+                createSpaceUser("user_7"),
+            ];
+            const usersToNotify = allUsers.slice(0, 5);
+            const space = createSpace(allUsers, {
+                usersInFilter: [],
+                usersToNotify,
+                spaceName: "Darna.darna-megaphone-mymegaphone",
+            });
+
+            const shouldTransition = vi.fn((_currentType: CommunicationType, userCount: number) => userCount > 4);
+            const getNextStateType = vi.fn(() => CommunicationType.LIVEKIT);
+            const policy: ITransitionPolicy & { mocks: Record<string, ReturnType<typeof vi.fn>> } = {
+                shouldTransition,
+                getNextStateType,
+                mocks: {
+                    shouldTransition,
+                    getNextStateType,
+                },
+            };
+
+            const orchestrator = createOrchestrator();
+            const state = createState(CommunicationType.WEBRTC);
+            const lifecycleManager = createLifecycleManager(state);
+
+            const manager = new CommunicationManager(space, {
+                policy,
+                orchestrator,
+                lifecycleManager,
+            });
+
+            const user = createSpaceUser("user_8");
+            await manager.handleUserAdded(user);
+
+            expect(policy.mocks.shouldTransition).toHaveBeenCalledWith(CommunicationType.WEBRTC, 0);
+            expect(orchestrator.mocks.executeImmediateTransition).not.toHaveBeenCalled();
+            expect(orchestrator.mocks.scheduleDelayedTransition).not.toHaveBeenCalled();
+        });
+
         it("should execute immediate transition to LiveKit when policy approves", async () => {
             const users = [
                 createSpaceUser("user_1"),
@@ -508,6 +694,37 @@ describe("CommunicationManager", () => {
                 expect.any(Function),
                 expect.any(Function)
             );
+        });
+
+        it("should not schedule delayed transition to WebRTC while a user is screen sharing", async () => {
+            const space = createSpace([createSpaceUser("user_1")]);
+            const policy = createPolicy(true, CommunicationType.WEBRTC);
+            const orchestrator = createOrchestrator();
+            const state = createState(CommunicationType.LIVEKIT);
+            const lifecycleManager = createLifecycleManager(state);
+            const userRegistry = new UserRegistry();
+            userRegistry.addUser(
+                SpaceUser.fromPartial({
+                    spaceUserId: "screen_sharer",
+                    uuid: "uuid-screen_sharer",
+                    name: "Screen Sharer",
+                    playUri: "http://test.com",
+                    screenSharingState: true,
+                })
+            );
+
+            const manager = new CommunicationManager(space, {
+                policy: policy,
+                orchestrator: orchestrator,
+                lifecycleManager: lifecycleManager,
+                userRegistry: userRegistry,
+            });
+
+            const user = createSpaceUser("user_1");
+            await manager.handleUserDeleted(user);
+
+            expect(orchestrator.mocks.cancelPendingTransition).toHaveBeenCalled();
+            expect(orchestrator.mocks.scheduleDelayedTransition).not.toHaveBeenCalled();
         });
 
         it("should transition to new state when immediate transition succeeds", async () => {

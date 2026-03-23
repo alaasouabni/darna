@@ -43,7 +43,6 @@ import { chatVisibilityStore, chatZoneLiveStore } from "../../../Stores/ChatStor
  */
 import {
     inJitsiStore,
-    inLivekitStore,
     inOpenWebsite,
     isListenerStore,
     isSpeakerStore,
@@ -70,6 +69,7 @@ import type { GameScene } from "../GameScene";
 import { mapEditorAskToClaimPersonalAreaStore } from "../../../Stores/MapEditorStore";
 import {
     canRequestVisitCardsStore,
+    livekitMeetingRoomSpaceNameStore,
     personalAreaSpaceNameStore,
     requestVisitCardsStore,
     selectedChatIDRemotePlayerStore,
@@ -871,11 +871,10 @@ export class AreasPropertiesListener {
         property: LivekitRoomPropertyData,
         abortSignal: AbortSignal
     ): Promise<void> {
-        inLivekitStore.set(true);
-
         const roomID = property.roomName.trim().length === 0 ? property.id : property.roomName;
 
         const roomName = Jitsi.slugifyJitsiRoomName(roomID, this.scene.roomUrl).trim();
+        livekitMeetingRoomSpaceNameStore.set(roomName);
 
         const livekitRoomConfig = property.livekitRoomConfig ?? {
             startWithAudioMuted: false,
@@ -911,26 +910,40 @@ export class AreasPropertiesListener {
         }
 
         //TODO : I18N the displayName
-        if (!property.livekitRoomConfig?.disableChat) {
+        try {
             const proximityRoom = this.scene.proximityChatRoom;
-            proximityRoom.setDisplayName(get(LL).mapEditor.properties.livekitRoomProperty.label());
-            await proximityRoom.joinSpace(
-                roomName,
-                ["cameraState", "microphoneState", "screenShareState"],
-                true,
-                FilterType.ALL_USERS
-            );
-        } else {
-            const spaceRegistry = this.scene.spaceRegistry;
-            await spaceRegistry.joinSpace(
-                roomName,
-                FilterType.ALL_USERS,
-                ["cameraState", "microphoneState", "screenShareState"],
-                abortSignal
-            );
-        }
+            const currentSpaceName = proximityRoom.getCurrentSpaceName();
+            if (currentSpaceName && currentSpaceName !== roomName) {
+                await proximityRoom.leaveSpace(currentSpaceName, true);
+            }
 
-        analyticsClient.enteredMeetingRoom(roomName, this.scene.roomUrl);
+            if (!property.livekitRoomConfig?.disableChat) {
+                proximityRoom.setDisplayName(get(LL).mapEditor.properties.livekitRoomProperty.label());
+                if (currentSpaceName !== roomName) {
+                    await proximityRoom.joinSpace(
+                        roomName,
+                        ["cameraState", "microphoneState", "screenSharingState", "livekitRequired"],
+                        true,
+                        FilterType.ALL_USERS
+                    );
+                }
+            } else {
+                const spaceRegistry = this.scene.spaceRegistry;
+                await spaceRegistry.joinSpace(
+                    roomName,
+                    FilterType.ALL_USERS,
+                    ["cameraState", "microphoneState", "screenSharingState", "livekitRequired"],
+                    abortSignal
+                );
+            }
+
+            analyticsClient.enteredMeetingRoom(roomName, this.scene.roomUrl);
+        } catch (error) {
+            if (get(livekitMeetingRoomSpaceNameStore) === roomName) {
+                livekitMeetingRoomSpaceNameStore.set(null);
+            }
+            throw error;
+        }
     }
 
     private handleMatrixRoomAreaOnEnter(property: MatrixRoomPropertyData) {
@@ -1322,7 +1335,7 @@ export class AreasPropertiesListener {
             proximityRoom.setDisplayName(displayName);
             await proximityRoom.joinSpace(
                 spaceName,
-                ["cameraState", "microphoneState", "screenShareState"],
+                ["cameraState", "microphoneState", "screenSharingState", "livekitRequired"],
                 true,
                 FilterType.ALL_USERS
             );
@@ -1372,6 +1385,9 @@ export class AreasPropertiesListener {
                 await spaceRegistry.leaveSpace(space);
             }
         }
+        if (get(livekitMeetingRoomSpaceNameStore) === roomName) {
+            livekitMeetingRoomSpaceNameStore.set(null);
+        }
 
         this._requestedMicrophoneStateSubscription?.();
         this._requestedCameraStateSubscription?.();
@@ -1385,7 +1401,10 @@ export class AreasPropertiesListener {
 
         this._isVideoActiveBeforeLivekitRoom = false;
         this._isMicrophoneActiveBeforeLivekitRoom = false;
-        inLivekitStore.set(false);
+
+        // Force a fresh proximity evaluation right after leaving the meeting room
+        // so nearby P2P users reconnect without requiring extra movement.
+        this.scene.requestProximityReevaluation();
     }
 
     private handleExtensionModuleAreaPropertyOnLeave(subtype: string, area?: AreaData): void {
@@ -1527,7 +1546,7 @@ export class AreasPropertiesListener {
                 proximityRoom.setDisplayName(property.name);
                 await proximityRoom.joinSpace(
                     uniqRoomName,
-                    ["cameraState", "microphoneState", "screenShareState"],
+                    ["cameraState", "microphoneState", "screenSharingState"],
                     true,
                     FilterType.LIVE_STREAMING_USERS
                 );
@@ -1536,7 +1555,7 @@ export class AreasPropertiesListener {
                 space = await spaceRegistry.joinSpace(
                     uniqRoomName,
                     FilterType.LIVE_STREAMING_USERS,
-                    ["cameraState", "microphoneState", "screenShareState"],
+                    ["cameraState", "microphoneState", "screenSharingState"],
                     abortSignal
                 );
             }
@@ -1590,7 +1609,7 @@ export class AreasPropertiesListener {
                     proximityRoom.setDisplayName(speakerZoneName);
                     await proximityRoom.joinSpace(
                         uniqRoomName,
-                        ["cameraState", "microphoneState", "screenShareState"],
+                        ["cameraState", "microphoneState", "screenSharingState"],
                         true,
                         FilterType.LIVE_STREAMING_USERS
                     );
@@ -1599,7 +1618,7 @@ export class AreasPropertiesListener {
                     space = await spaceRegistry.joinSpace(
                         uniqRoomName,
                         FilterType.LIVE_STREAMING_USERS,
-                        ["cameraState", "microphoneState", "screenShareState"],
+                        ["cameraState", "microphoneState", "screenSharingState"],
                         abortSignal
                     );
                 }

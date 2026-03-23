@@ -140,8 +140,9 @@ export class SimplePeer implements SimplePeerConnectionInterface {
         //receive message start
         this._rxJsUnsubscribers.push(
             this._space.observePrivateEvent("webRtcDisconnectMessage").subscribe((message) => {
+                const disconnectingUserId = message.webRtcDisconnectMessage?.userId ?? message.sender.spaceUserId;
                 const user: UserSimplePeerInterface = {
-                    userId: message.sender.spaceUserId,
+                    userId: disconnectingUserId,
                 };
 
                 this.receiveWebrtcDisconnect(user);

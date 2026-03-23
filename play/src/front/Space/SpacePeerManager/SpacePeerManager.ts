@@ -7,7 +7,7 @@ import * as Sentry from "@sentry/svelte";
 import type { Readable, Unsubscriber } from "svelte/store";
 import type { SpaceInterface } from "../SpaceInterface";
 import type { LocalStreamStoreValue } from "../../Stores/MediaStore";
-import { requestedCameraState, requestedMicrophoneState } from "../../Stores/MediaStore";
+import { inLivekitStore, requestedCameraState, requestedMicrophoneState } from "../../Stores/MediaStore";
 import { screenSharingLocalStreamStore } from "../../Stores/ScreenSharingStore";
 import type { Streamable } from "../../Stores/StreamableCollectionStore";
 import { nbSoundPlayedInBubbleStore } from "../../Stores/ApparentMediaContraintStore";
@@ -117,8 +117,10 @@ export class SpacePeerManager {
                 this._toFinalizeState = this._communicationState;
                 this._toFinalizeState.shutdown();
                 if (message.switchMessage.strategy === CommunicationType.WEBRTC) {
+                    inLivekitStore.set(false);
                     this._communicationState = new WebRTCState(this.space, this._streamableSubjects, blockedUsersStore);
                 } else if (message.switchMessage.strategy === CommunicationType.LIVEKIT) {
+                    inLivekitStore.set(true);
                     this._communicationState = new LivekitState(
                         this.space,
                         this._streamableSubjects,
@@ -209,15 +211,9 @@ export class SpacePeerManager {
 
         this.unsubscribes.push(
             this.screenSharingStateStore.subscribe((state) => {
-                if (state.type === "success" && state.stream) {
-                    this.space.emitUpdateUser({
-                        screenSharingState: true,
-                    });
-                } else {
-                    this.space.emitUpdateUser({
-                        screenSharingState: false,
-                    });
-                }
+                this.space.emitUpdateUser({
+                    screenSharingState: state.type === "success" && !!state.stream,
+                });
             })
         );
     }
@@ -236,6 +232,9 @@ export class SpacePeerManager {
     }
 
     destroy(): void {
+        const wasLivekitActive =
+            this._communicationState instanceof LivekitState || this._toFinalizeState instanceof LivekitState;
+
         if (this._toFinalizeState) {
             this._toFinalizeState.destroy();
         }
@@ -249,6 +248,12 @@ export class SpacePeerManager {
         }
         for (const subscription of this.rxJsUnsubscribers) {
             subscription.unsubscribe();
+        }
+
+        // If we destroy a space while still in LiveKit mode (without receiving an explicit
+        // WEBRTC switch message), reset the global transport flag to avoid "stuck LiveKit" UI/state.
+        if (wasLivekitActive) {
+            inLivekitStore.set(false);
         }
     }
 

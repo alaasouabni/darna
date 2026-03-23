@@ -4427,6 +4427,10 @@ ${escapedMessage}
         });
     }
 
+    public requestProximityReevaluation(): void {
+        this.forceProximityReevaluation();
+    }
+
     private createCollisionWithPlayer() {
         //add collision layer
         for (const phaserLayer of this.gameMapFrontWrapper.phaserLayers) {

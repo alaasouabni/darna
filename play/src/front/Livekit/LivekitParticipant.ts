@@ -6,7 +6,7 @@ import type {
     ConnectionQuality,
     RemoteVideoTrack,
 } from "livekit-client";
-import { Track, ParticipantEvent } from "livekit-client";
+import { Track, ParticipantEvent, VideoQuality } from "livekit-client";
 import type { Readable, Writable } from "svelte/store";
 import { derived, get, writable } from "svelte/store";
 import type { SpaceInterface, SpaceUserExtended } from "../Space/SpaceInterface";
@@ -125,6 +125,8 @@ export class LiveKitParticipant {
             this._videoScreenShareStreamStore.set(track.mediaStream);
 
             this._screenShareRemoteTrack.set(track as RemoteVideoTrack);
+            publication.setVideoQuality(VideoQuality.HIGH);
+            publication.setEnabled(true);
 
             this.updateLivekitScreenShareStreamStore();
         } else if (publication.source === Track.Source.ScreenShareAudio) {

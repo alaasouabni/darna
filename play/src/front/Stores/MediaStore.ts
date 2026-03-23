@@ -26,7 +26,7 @@ import { WebviewOnOldIOS } from "./Errors/WebviewOnOldIOS";
 import { createSilentStore } from "./SilentStore";
 import { privacyShutdownStore } from "./PrivacyShutdownStore";
 import { inExternalServiceStore, myCameraStore, myMicrophoneStore, proximityMeetingStore } from "./MyMediaStore";
-import { userMovingStore } from "./GameStore";
+import { livekitMeetingRoomSpaceNameStore, userMovingStore } from "./GameStore";
 import { hideHelpCameraSettings } from "./HelpSettingsStore";
 import { isLiveStreamingStore } from "./IsStreamingStore";
 
@@ -407,6 +407,7 @@ export const availabilityStatusStore = derived(
         requestedStatusStore,
         inLivekitStore,
         isListenerStore,
+        livekitMeetingRoomSpaceNameStore,
     ],
     ([
         $inJitsiStore,
@@ -418,6 +419,7 @@ export const availabilityStatusStore = derived(
         $requestedStatusStore,
         $inLivekitStore,
         $isListenerStore,
+        $livekitMeetingRoomSpaceNameStore,
     ]) => {
         // Important: Statuses that should not switch to BUSY
         // must be checked BEFORE privacyShutdownStore to prevent switching to BUSY when privacy is enabled.
@@ -426,7 +428,9 @@ export const availabilityStatusStore = derived(
         if (!$proximityMeetingStore) return AvailabilityStatus.DENY_PROXIMITY_MEETING;
         if ($isSpeakerStore) return AvailabilityStatus.SPEAKER;
         if ($silentStore) return AvailabilityStatus.SILENT;
-        if ($inLivekitStore) return AvailabilityStatus.LIVEKIT;
+        // Only expose LIVEKIT status in dedicated meeting rooms.
+        // Personal areas can run on LiveKit transport while keeping normal presence statuses.
+        if ($inLivekitStore && $livekitMeetingRoomSpaceNameStore !== null) return AvailabilityStatus.LIVEKIT;
         if ($isListenerStore) return AvailabilityStatus.LISTENER;
         if ($requestedStatusStore) return $requestedStatusStore;
         if ($privacyShutdownStore) return AvailabilityStatus.AWAY;

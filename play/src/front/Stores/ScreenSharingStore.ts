@@ -1,10 +1,10 @@
-import type { Readable } from "svelte/store";
 import { get, derived, readable, writable } from "svelte/store";
 import type { DesktopCapturerSource } from "../Interfaces/DesktopAppInterfaces";
 import { localUserStore } from "../Connection/LocalUserStore";
 import LL from "../../i18n/i18n-svelte";
-import { isSpeakerStore, type LocalStreamStoreValue } from "./MediaStore";
+import { inLivekitStore, isSpeakerStore, type LocalStreamStoreValue } from "./MediaStore";
 import { inExternalServiceStore, myCameraStore, myMicrophoneStore } from "./MyMediaStore";
+import { livekitMeetingRoomSpaceNameStore, personalAreaSpaceNameStore } from "./GameStore";
 import type {} from "../Api/Desktop";
 import type { Streamable, WebRtcStreamable } from "./StreamableCollectionStore";
 import { screenShareStreamElementsStore } from "./PeerStore";
@@ -30,6 +30,7 @@ export const requestedScreenSharingState = createRequestedScreenSharingState();
 
 let currentStream: MediaStream | undefined = undefined;
 let detachCurrentStreamListeners: (() => void) | undefined;
+let screenShareCaptureGeneration = 0;
 
 /**
  * Stops the screen sharing (both video and audio tracks)
@@ -49,6 +50,27 @@ function stopScreenSharing(): void {
 
 let previousComputedVideoConstraint: boolean | MediaTrackConstraints = false;
 let previousComputedAudioConstraint: boolean | MediaTrackConstraints = false;
+
+const SCREEN_SHARE_ALLOW_P2P_FALLBACK = false;
+const SCREEN_SHARE_CAPTURE_IDEAL_WIDTH = 1920;
+const SCREEN_SHARE_CAPTURE_IDEAL_HEIGHT = 1080;
+const SCREEN_SHARE_CAPTURE_MAX_FPS = 30;
+const SCREEN_SHARE_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+    width: {
+        ideal: SCREEN_SHARE_CAPTURE_IDEAL_WIDTH,
+    },
+    height: {
+        ideal: SCREEN_SHARE_CAPTURE_IDEAL_HEIGHT,
+    },
+    frameRate: {
+        ideal: SCREEN_SHARE_CAPTURE_MAX_FPS,
+        max: SCREEN_SHARE_CAPTURE_MAX_FPS,
+    },
+};
+
+function getScreenShareVideoConstraints(): MediaTrackConstraints {
+    return SCREEN_SHARE_VIDEO_CONSTRAINTS;
+}
 
 function getScreenShareAudioConstraints(): true | MediaTrackConstraints {
     const supportedConstraints = navigator.mediaDevices?.getSupportedConstraints?.();
@@ -92,11 +114,17 @@ function buildDisplayMediaConstraints(
     constraints: MediaStreamConstraints,
     useBestEffortAudioConstraints: boolean
 ): DisplayMediaRequestConstraints {
-    const wantsAudio = constraints.audio !== false;
+    const requestedVideoConstraints = constraints.video === undefined ? true : constraints.video;
+    const requestedAudioConstraints = constraints.audio === undefined ? true : constraints.audio;
+    const wantsAudio = requestedAudioConstraints !== false;
 
     return {
-        video: constraints.video !== false,
-        audio: wantsAudio ? (useBestEffortAudioConstraints ? getScreenShareAudioConstraints() : true) : false,
+        video: requestedVideoConstraints,
+        audio: wantsAudio
+            ? useBestEffortAudioConstraints
+                ? getScreenShareAudioConstraints()
+                : requestedAudioConstraints
+            : false,
     };
 }
 
@@ -138,6 +166,20 @@ export const screenShareBandwidthStore = createScreenShareBandwidthStore();
  */
 export const screenSharingAvailableStore = isLiveStreamingStore;
 
+export function isLivekitActiveForScreenSharing(): boolean {
+    return get(inLivekitStore);
+}
+
+function isLivekitRequiredForCurrentContext(): boolean {
+    return get(personalAreaSpaceNameStore) !== null || get(livekitMeetingRoomSpaceNameStore) !== null;
+}
+
+export function isScreenSharingAllowedForCurrentTransport(): boolean {
+    if (SCREEN_SHARE_ALLOW_P2P_FALLBACK) return true;
+    if (!isLivekitRequiredForCurrentContext()) return true;
+    return isLivekitActiveForScreenSharing();
+}
+
 /**
  * A store containing the media constraints we want to apply.
  */
@@ -147,6 +189,9 @@ export const screenSharingConstraintsStore = derived(
         myCameraStore,
         myMicrophoneStore,
         inExternalServiceStore,
+        inLivekitStore,
+        personalAreaSpaceNameStore,
+        livekitMeetingRoomSpaceNameStore,
         screenSharingAvailableStore,
         screenShareStreamElementsStore,
         isSpeakerStore,
@@ -157,18 +202,30 @@ export const screenSharingConstraintsStore = derived(
             $myCameraStore,
             $myMicrophoneStore,
             $inExternalServiceStore,
+            $inLivekitStore,
+            $personalAreaSpaceNameStore,
+            $livekitMeetingRoomSpaceNameStore,
             $screenSharingAvailableStore,
             $screenShareStreamElementsStore,
             $isSpeakerStore,
         ],
         set
     ) => {
-        let currentVideoConstraint: boolean | MediaTrackConstraints = true;
-        //TODO : passer a true si on veut que le son soit activé par défaut dans le screen sharing
+        let currentVideoConstraint: boolean | MediaTrackConstraints = getScreenShareVideoConstraints();
+        // TODO: set to true if we want audio enabled by default during screen sharing.
         let currentAudioConstraint: boolean | MediaTrackConstraints = true;
 
         // Disable screen sharing if the user requested so
         if (!$requestedScreenSharingState) {
+            currentVideoConstraint = false;
+            currentAudioConstraint = false;
+        }
+
+        // In LiveKit-mandatory contexts (personal areas and meeting rooms), defer capture
+        // until the transport has switched to LiveKit.
+        const livekitRequiredForContext =
+            $personalAreaSpaceNameStore !== null || $livekitMeetingRoomSpaceNameStore !== null;
+        if (livekitRequiredForContext && !SCREEN_SHARE_ALLOW_P2P_FALLBACK && !$inLivekitStore) {
             currentVideoConstraint = false;
             currentAudioConstraint = false;
         }
@@ -187,8 +244,8 @@ export const screenSharingConstraintsStore = derived(
 
         // Let's make the changes only if the new value is different from the old one.
         if (
-            previousComputedVideoConstraint != currentVideoConstraint ||
-            previousComputedAudioConstraint != currentAudioConstraint
+            previousComputedVideoConstraint !== currentVideoConstraint ||
+            previousComputedAudioConstraint !== currentAudioConstraint
         ) {
             previousComputedVideoConstraint = currentVideoConstraint;
             previousComputedAudioConstraint = currentAudioConstraint;
@@ -244,14 +301,27 @@ async function getDesktopCapturerSources() {
 /**
  * A store containing the MediaStream object for ScreenSharing (or undefined if nothing requested, or Error if an error occurred)
  */
-export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstraints>, LocalStreamStoreValue>(
-    screenSharingConstraintsStore,
-    ($screenSharingConstraintsStore, set) => {
+export const screenSharingLocalStreamStore = derived(
+    [screenSharingConstraintsStore, screenSharingAvailableStore],
+    ([$screenSharingConstraintsStore, $screenSharingAvailableStore], set) => {
         const constraints = $screenSharingConstraintsStore;
+        const waitingForLivekitHandover =
+            get(requestedScreenSharingState) &&
+            isLivekitRequiredForCurrentContext() &&
+            !SCREEN_SHARE_ALLOW_P2P_FALLBACK &&
+            !isLivekitActiveForScreenSharing() &&
+            $screenSharingAvailableStore &&
+            // Keep the "pending request" behavior only before first capture.
+            // If we already have a stream and leave the room, we should clear the request
+            // to avoid immediate re-prompts outside the meeting.
+            currentStream === undefined;
 
         if ($screenSharingConstraintsStore.video === false && $screenSharingConstraintsStore.audio === false) {
+            screenShareCaptureGeneration += 1;
             stopScreenSharing();
-            requestedScreenSharingState.disableScreenSharing();
+            if (!waitingForLivekitHandover) {
+                requestedScreenSharingState.disableScreenSharing();
+            }
             set({
                 type: "success",
                 stream: undefined,
@@ -259,6 +329,7 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
             return;
         }
 
+        const captureGeneration = ++screenShareCaptureGeneration;
         let currentStreamPromise: Promise<MediaStream>;
         // Prefer getDisplayMedia over getDesktopCapturerSources to support audio capture
         // According to MDN: audio is optional, default is false
@@ -280,7 +351,15 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
         (async () => {
             try {
                 stopScreenSharing();
-                currentStream = await currentStreamPromise;
+                const newStream = await currentStreamPromise;
+                if (captureGeneration !== screenShareCaptureGeneration) {
+                    for (const track of newStream.getTracks()) {
+                        track.stop();
+                    }
+                    return;
+                }
+
+                currentStream = newStream;
                 const videoTrack = currentStream.getVideoTracks()[0];
                 if (videoTrack) {
                     try {
@@ -302,7 +381,7 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
                 const stream = currentStream;
                 const emitCurrentStream = () => {
                     // Ignore late events from a previous stream instance.
-                    if (stream !== currentStream) {
+                    if (captureGeneration !== screenShareCaptureGeneration || stream !== currentStream) {
                         return;
                     }
                     set({
@@ -325,6 +404,10 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
                 // If stream ends (for instance if user clicks the stop screen sharing button in the browser), let's close the view
                 for (const track of currentStream.getTracks()) {
                     track.onended = () => {
+                        if (captureGeneration !== screenShareCaptureGeneration) {
+                            return;
+                        }
+                        screenShareCaptureGeneration += 1;
                         stopScreenSharing();
                         requestedScreenSharingState.disableScreenSharing();
                         previousComputedVideoConstraint = false;
@@ -339,6 +422,9 @@ export const screenSharingLocalStreamStore = derived<Readable<MediaStreamConstra
                 emitCurrentStream();
                 return;
             } catch (e) {
+                if (captureGeneration !== screenShareCaptureGeneration) {
+                    return;
+                }
                 currentStream = undefined;
                 detachCurrentStreamListeners?.();
                 detachCurrentStreamListeners = undefined;

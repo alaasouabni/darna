@@ -111,6 +111,8 @@ export class Space implements CustomJsonReplacerInterface, ICommunicationSpace {
                 return;
             }
 
+            const wasScreenSharing = user.screenSharingState;
+
             if (this.isPublishing(user)) {
                 this._nbPublishers--;
             }
@@ -186,7 +188,11 @@ export class Space implements CustomJsonReplacerInterface, ICommunicationSpace {
                     },
                 });
 
-                this.communicationManager.handleUserUpdated(user).catch((e) => {
+                this.communicationManager
+                    .handleUserUpdated(user, {
+                        screenSharingStopped: wasScreenSharing && !user.screenSharingState,
+                    })
+                    .catch((e) => {
                     Sentry.captureException(e);
                     console.error(e);
                 });
@@ -203,12 +209,13 @@ export class Space implements CustomJsonReplacerInterface, ICommunicationSpace {
 
     public removeUser(sourceWatcher: SpacesWatcher, spaceUserId: string) {
         let user: SpaceUser | undefined;
+        let wasUserToNotify = false;
         try {
             const usersList = this.usersList(sourceWatcher);
             user = usersList.get(spaceUserId);
 
             const usersToNotifyList = this.usersListToNotify(sourceWatcher);
-            usersToNotifyList.delete(spaceUserId);
+            wasUserToNotify = usersToNotifyList.delete(spaceUserId);
 
             if (!user) {
                 console.error("User not found in this space", spaceUserId);
@@ -240,6 +247,15 @@ export class Space implements CustomJsonReplacerInterface, ICommunicationSpace {
             Sentry.captureException(e);
             debug("Error while removing user", e);
         } finally {
+            if (user && wasUserToNotify) {
+                // A user leaving the space must also be removed from the "users to notify"
+                // communication registry to avoid stale screen-sharing flags blocking downgrades.
+                this.communicationManager.handleUserToNotifyDeleted(user).catch((e) => {
+                    Sentry.captureException(e);
+                    console.error(e);
+                });
+            }
+
             if (user && this.filterOneUser(user)) {
                 this.communicationManager.handleUserDeleted(user).catch((e) => {
                     Sentry.captureException(e);

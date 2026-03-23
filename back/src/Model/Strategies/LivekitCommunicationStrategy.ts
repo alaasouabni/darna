@@ -51,7 +51,8 @@ export class LivekitCommunicationStrategy implements ICommunicationStrategy {
 
     private async deleteUserFromLivekit(user: SpaceUser): Promise<void> {
         try {
-            await this.livekitService.removeParticipant(this.space.getSpaceName(), user.name);
+            // LiveKit participant identity is the spaceUserId (see token generation).
+            await this.livekitService.removeParticipant(this.space.getSpaceName(), user.spaceUserId);
         } catch (error) {
             console.error(`Error removing participant ${user.name} from Livekit:`, error);
             Sentry.captureException(error);
@@ -76,11 +77,7 @@ export class LivekitCommunicationStrategy implements ICommunicationStrategy {
     }
 
     deleteUser(user: SpaceUser): void {
-        const deleted = this.streamingUsers.delete(user.spaceUserId);
-
-        if (!deleted) {
-            console.warn("User to delete not found in streaming users", user.spaceUserId);
-        }
+        this.streamingUsers.delete(user.spaceUserId);
 
         // Let's only disconnect from Livekit if the user is not watching in the room anymore
         if (!this.receivingUsers.has(user.spaceUserId)) {
@@ -171,10 +168,7 @@ export class LivekitCommunicationStrategy implements ICommunicationStrategy {
     }
 
     deleteUserFromNotify(user: SpaceUser): void {
-        const deleted = this.receivingUsers.delete(user.spaceUserId);
-        if (!deleted) {
-            console.warn("User to delete not found in receiving users", user.spaceUserId);
-        }
+        this.receivingUsers.delete(user.spaceUserId);
 
         // Let's only disconnect from Livekit if the user is not streaming in the room anymore
         if (!this.streamingUsers.has(user.spaceUserId)) {

@@ -227,6 +227,36 @@ export class WebRTCCommunicationStrategy implements ICommunicationStrategy {
 
     private sendWebRTCDisconnect(senderId: string, receiverId: string): void {
         this._connections.removeConnection(senderId, receiverId);
+
+        const usersInSpace = this._space.getAllUsers();
+        const senderStillInSpace = usersInSpace.some((user) => user.spaceUserId === senderId);
+        const receiverStillInSpace = usersInSpace.some((user) => user.spaceUserId === receiverId);
+
+        // During leave / transition races, the receiver may already be gone.
+        // In that case, there is nobody to notify.
+        if (!receiverStillInSpace) {
+            return;
+        }
+
+        if (!senderStillInSpace) {
+            // Sender is already gone. Use receiver as sender to satisfy dispatch checks,
+            // and rely on payload.userId on the front to close the right peer.
+            this._space.dispatchPrivateEvent({
+                spaceName: this._space.getSpaceName(),
+                receiverUserId: receiverId,
+                senderUserId: receiverId,
+                spaceEvent: {
+                    event: {
+                        $case: "webRtcDisconnectMessage",
+                        webRtcDisconnectMessage: {
+                            userId: senderId,
+                        },
+                    },
+                },
+            });
+            return;
+        }
+
         this._space.dispatchPrivateEvent({
             spaceName: this._space.getSpaceName(),
             receiverUserId: receiverId,
@@ -268,19 +298,17 @@ export class WebRTCCommunicationStrategy implements ICommunicationStrategy {
 
     cleanup(): void {
         for (const [senderId, receiverId] of this._connections.getAllConnections()) {
-            this._space.dispatchPrivateEvent({
-                spaceName: this._space.getSpaceName(),
-                receiverUserId: receiverId,
-                senderUserId: senderId,
-                spaceEvent: {
-                    event: {
-                        $case: "webRtcDisconnectMessage",
-                        webRtcDisconnectMessage: {
-                            userId: senderId,
-                        },
-                    },
-                },
-            });
+            try {
+                this.sendWebRTCDisconnect(senderId, receiverId);
+            } catch (error) {
+                console.error(
+                    "An error occurred while cleaning up a WebRTC disconnect",
+                    senderId,
+                    receiverId,
+                    error
+                );
+                Sentry.captureException(error);
+            }
         }
         this._connections.clear();
     }

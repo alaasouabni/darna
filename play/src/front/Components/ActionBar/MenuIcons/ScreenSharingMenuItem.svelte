@@ -8,7 +8,12 @@
 
     import ScreenShareIcon from "../../Icons/ScreenShareIcon.svelte";
     import ScreenShareOffIcon from "../../Icons/ScreenShareOffIcon.svelte";
-    import { isScreenSharingSupported, requestedScreenSharingState } from "../../../Stores/ScreenSharingStore";
+    import { warningMessageStore } from "../../../Stores/ErrorStore";
+    import {
+        isScreenSharingAllowedForCurrentTransport,
+        isScreenSharingSupported,
+        requestedScreenSharingState,
+    } from "../../../Stores/ScreenSharingStore";
 
     const dispatch = createEventDispatcher<{
         click: void;
@@ -21,6 +26,15 @@
         if ($requestedScreenSharingState === true) {
             requestedScreenSharingState.disableScreenSharing();
         } else {
+            if (!isScreenSharingAllowedForCurrentTransport()) {
+                warningMessageStore.addWarningMessage(
+                    "Preparing LiveKit for screen sharing. Please wait a moment.",
+                    {
+                        id: "screen-share-requires-livekit",
+                        closable: true,
+                    }
+                );
+            }
             requestedScreenSharingState.enableScreenSharing();
         }
     }

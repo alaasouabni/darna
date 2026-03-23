@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { MapStore } from "@workadventure/store-utils";
-import type { Participant, LocalParticipant } from "livekit-client";
+import type { Participant, LocalParticipant, LocalTrackPublication } from "livekit-client";
 import { AudioPresets, VideoPresets, Room, RoomEvent, LocalVideoTrack, LocalAudioTrack, Track } from "livekit-client";
 import type { Readable, Unsubscriber } from "svelte/store";
 import { get } from "svelte/store";
@@ -21,6 +21,9 @@ const ParticipantMetadataSchema = z.object({
     userId: z.string(),
 });
 
+const SCREEN_SHARE_MAX_BITRATE_BPS = 2_500_000;
+const SCREEN_SHARE_MAX_FPS = 30;
+
 type ParticipantMetadata = z.infer<typeof ParticipantMetadataSchema>;
 
 type LivekitRoomCounter = {
@@ -37,6 +40,10 @@ export class LiveKitRoom implements LiveKitRoomInterface {
     private localCameraTrack: LocalVideoTrack | undefined;
     private localMicrophoneTrack: LocalAudioTrack | undefined;
     private unsubscribers: Unsubscriber[] = [];
+    private readonly participantConnectedHandler = this.handleParticipantConnected.bind(this);
+    private readonly participantDisconnectedHandler = this.handleParticipantDisconnected.bind(this);
+    private readonly activeSpeakersChangedHandler = this.handleActiveSpeakersChanged.bind(this);
+    private readonly localTrackUnpublishedHandler = this.handleLocalTrackUnpublished.bind(this);
 
     constructor(
         private serverUrl: string,
@@ -305,23 +312,7 @@ export class LiveKitRoom implements LiveKitRoomInterface {
                         return;
                     }
 
-                    if (!this.localScreenSharingVideoTrack) {
-                        this.localScreenSharingVideoTrack = new LocalVideoTrack(screenShareVideoTrack);
-
-                        // Publish video track
-                        this.localParticipant
-                            .publishTrack(this.localScreenSharingVideoTrack, {
-                                source: Track.Source.ScreenShare,
-                                videoCodec: "vp8",
-                                simulcast: true,
-                                videoSimulcastLayers: [VideoPresets.h1080, VideoPresets.h360, VideoPresets.h90],
-                            })
-                            .catch((err) => {
-                                console.error("An error occurred while publishing screen share video track", err);
-                                Sentry.captureException(err);
-                            });
-                    } else {
-                        // Replace existing video track
+                    if (this.canReplaceScreenShareTrack(Track.Source.ScreenShare) && this.localScreenSharingVideoTrack) {
                         this.localScreenSharingVideoTrack
                             .replaceTrack(screenShareVideoTrack, {
                                 userProvidedTrack: true,
@@ -329,27 +320,29 @@ export class LiveKitRoom implements LiveKitRoomInterface {
                             .catch((err) => {
                                 console.error("An error occurred while replacing screen share video track", err);
                                 Sentry.captureException(err);
+                                if (!this.canReplaceScreenShareTrack(Track.Source.ScreenShare)) {
+                                    this.publishScreenShareVideoTrack(screenShareVideoTrack).catch((publishErr) => {
+                                        console.error(
+                                            "An error occurred while republishing screen share video track",
+                                            publishErr
+                                        );
+                                        Sentry.captureException(publishErr);
+                                    });
+                                }
                             });
+                    } else {
+                        this.publishScreenShareVideoTrack(screenShareVideoTrack).catch((err) => {
+                            console.error("An error occurred while publishing screen share video track", err);
+                            Sentry.captureException(err);
+                        });
                     }
 
                     // Publish audio track if available
                     if (screenShareAudioTrack) {
-                        if (!this.localScreenSharingAudioTrack) {
-                            this.localScreenSharingAudioTrack = new LocalAudioTrack(screenShareAudioTrack);
-
-                            this.localParticipant
-                                .publishTrack(this.localScreenSharingAudioTrack, {
-                                    source: Track.Source.ScreenShareAudio,
-                                    audioPreset: AudioPresets.musicHighQualityStereo,
-                                    forceStereo: true,
-                                    dtx: false,
-                                    red: true,
-                                })
-                                .catch((err) => {
-                                    console.error("An error occurred while publishing screen share audio track", err);
-                                    Sentry.captureException(err);
-                                });
-                        } else {
+                        if (
+                            this.canReplaceScreenShareTrack(Track.Source.ScreenShareAudio) &&
+                            this.localScreenSharingAudioTrack
+                        ) {
                             this.localScreenSharingAudioTrack
                                 .replaceTrack(screenShareAudioTrack, {
                                     userProvidedTrack: true,
@@ -357,7 +350,23 @@ export class LiveKitRoom implements LiveKitRoomInterface {
                                 .catch((err) => {
                                     console.error("An error occurred while replacing screen share audio track", err);
                                     Sentry.captureException(err);
+                                    if (!this.canReplaceScreenShareTrack(Track.Source.ScreenShareAudio)) {
+                                        this.publishScreenShareAudioTrack(screenShareAudioTrack).catch(
+                                            (publishErr) => {
+                                                console.error(
+                                                    "An error occurred while republishing screen share audio track",
+                                                    publishErr
+                                                );
+                                                Sentry.captureException(publishErr);
+                                            }
+                                        );
+                                    }
                                 });
+                        } else {
+                            this.publishScreenShareAudioTrack(screenShareAudioTrack).catch((err) => {
+                                console.error("An error occurred while publishing screen share audio track", err);
+                                Sentry.captureException(err);
+                            });
                         }
                     } else {
                         // If there is no audio track in the new stream, unpublish the existing one
@@ -382,6 +391,46 @@ export class LiveKitRoom implements LiveKitRoomInterface {
                 });
             })
         );
+    }
+
+    private canReplaceScreenShareTrack(source: Track.Source.ScreenShare | Track.Source.ScreenShareAudio): boolean {
+        if (!this.localParticipant) {
+            return false;
+        }
+        const publication = this.localParticipant.getTrackPublication(source);
+        return Boolean(publication?.track);
+    }
+
+    private async publishScreenShareVideoTrack(screenShareVideoTrack: MediaStreamTrack): Promise<void> {
+        if (!this.localParticipant) {
+            throw new Error("Local participant not found");
+        }
+
+        this.localScreenSharingVideoTrack = new LocalVideoTrack(screenShareVideoTrack);
+        await this.localParticipant.publishTrack(this.localScreenSharingVideoTrack, {
+            source: Track.Source.ScreenShare,
+            videoCodec: "vp8",
+            simulcast: false,
+            videoEncoding: {
+                maxBitrate: SCREEN_SHARE_MAX_BITRATE_BPS,
+                maxFramerate: SCREEN_SHARE_MAX_FPS,
+            },
+        });
+    }
+
+    private async publishScreenShareAudioTrack(screenShareAudioTrack: MediaStreamTrack): Promise<void> {
+        if (!this.localParticipant) {
+            throw new Error("Local participant not found");
+        }
+
+        this.localScreenSharingAudioTrack = new LocalAudioTrack(screenShareAudioTrack);
+        await this.localParticipant.publishTrack(this.localScreenSharingAudioTrack, {
+            source: Track.Source.ScreenShareAudio,
+            audioPreset: AudioPresets.musicHighQualityStereo,
+            forceStereo: true,
+            dtx: false,
+            red: true,
+        });
     }
 
     private async unpublishAllScreenShareTrack() {
@@ -458,9 +507,20 @@ export class LiveKitRoom implements LiveKitRoomInterface {
             return;
         }
 
-        this.room.on(RoomEvent.ParticipantConnected, this.handleParticipantConnected.bind(this));
-        this.room.on(RoomEvent.ParticipantDisconnected, this.handleParticipantDisconnected.bind(this));
-        this.room.on(RoomEvent.ActiveSpeakersChanged, this.handleActiveSpeakersChanged.bind(this));
+        this.room.on(RoomEvent.ParticipantConnected, this.participantConnectedHandler);
+        this.room.on(RoomEvent.ParticipantDisconnected, this.participantDisconnectedHandler);
+        this.room.on(RoomEvent.ActiveSpeakersChanged, this.activeSpeakersChangedHandler);
+        this.room.on(RoomEvent.LocalTrackUnpublished, this.localTrackUnpublishedHandler);
+    }
+
+    private handleLocalTrackUnpublished(publication: LocalTrackPublication): void {
+        if (publication.source === Track.Source.ScreenShare) {
+            this.localScreenSharingVideoTrack = undefined;
+            return;
+        }
+        if (publication.source === Track.Source.ScreenShareAudio) {
+            this.localScreenSharingAudioTrack = undefined;
+        }
     }
 
     private parseParticipantMetadata(participant: Participant): ParticipantMetadata {
@@ -631,9 +691,10 @@ export class LiveKitRoom implements LiveKitRoomInterface {
         try {
             this.unsubscribers.forEach((unsubscriber) => unsubscriber());
             this.participants.forEach((participant) => participant.destroy());
-            this.room?.off(RoomEvent.ParticipantConnected, this.handleParticipantConnected.bind(this));
-            this.room?.off(RoomEvent.ParticipantDisconnected, this.handleParticipantDisconnected.bind(this));
-            this.room?.off(RoomEvent.ActiveSpeakersChanged, this.handleActiveSpeakersChanged.bind(this));
+            this.room?.off(RoomEvent.ParticipantConnected, this.participantConnectedHandler);
+            this.room?.off(RoomEvent.ParticipantDisconnected, this.participantDisconnectedHandler);
+            this.room?.off(RoomEvent.ActiveSpeakersChanged, this.activeSpeakersChangedHandler);
+            this.room?.off(RoomEvent.LocalTrackUnpublished, this.localTrackUnpublishedHandler);
 
             this.leaveRoom();
         } finally {

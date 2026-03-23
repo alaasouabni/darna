@@ -22,3 +22,6 @@ export const selectedChatIDRemotePlayerStore = writable<string | null>(null);
 
 // When set, the user is inside a personal area space and proximity joins should be deferred.
 export const personalAreaSpaceNameStore = writable<string | null>(null);
+
+// When set, the user is inside a meeting room area that should use LiveKit transport.
+export const livekitMeetingRoomSpaceNameStore = writable<string | null>(null);
