@@ -7,6 +7,8 @@ import { SharedAdminApi } from "@workadventure/shared-utils/src/SharedAdminApi";
 import { DebugController } from "./Controller/DebugController";
 import { PrometheusController } from "./Controller/PrometheusController";
 import { roomManager } from "./RoomManager";
+import { AiNotetakerController } from "./Controller/AiNotetakerController";
+import { notetakerDeliveryWorkerService } from "./Model/Notetaker/NotetakerDeliveryWorkerService";
 import {
     HTTP_PORT,
     PROMETHEUS_PORT,
@@ -26,6 +28,7 @@ class App {
     private prometheusController: PrometheusController;
     private debugController: DebugController;
     private pingController: PingController;
+    private aiNotetakerController: AiNotetakerController;
 
     constructor() {
         // Création de l'application principale
@@ -45,6 +48,8 @@ class App {
 
         this.debugController = new DebugController(this.app);
         this.pingController = new PingController(this.app);
+        this.aiNotetakerController = new AiNotetakerController(this.app);
+        notetakerDeliveryWorkerService.start();
     }
 
     public listen(): void {

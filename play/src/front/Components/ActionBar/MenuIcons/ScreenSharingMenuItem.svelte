@@ -27,13 +27,10 @@
             requestedScreenSharingState.disableScreenSharing();
         } else {
             if (!isScreenSharingAllowedForCurrentTransport()) {
-                warningMessageStore.addWarningMessage(
-                    "Preparing LiveKit for screen sharing. Please wait a moment.",
-                    {
-                        id: "screen-share-requires-livekit",
-                        closable: true,
-                    }
-                );
+                warningMessageStore.addWarningMessage("Preparing LiveKit for screen sharing. Please wait a moment.", {
+                    id: "screen-share-requires-livekit",
+                    closable: true,
+                });
             }
             requestedScreenSharingState.enableScreenSharing();
         }

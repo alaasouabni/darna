@@ -77,6 +77,7 @@ const EnvSchema = z.object({
     EXCALIDRAW_ENABLED: z.coerce.boolean().default(false),
     CARDS_ENABLED: z.coerce.boolean().default(false),
     TLDRAW_ENABLED: z.coerce.boolean().default(false),
+    NOTETAKER_API_URL: z.string().url().default("http://back:8080"),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;

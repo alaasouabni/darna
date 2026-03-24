@@ -312,7 +312,10 @@ export class LiveKitRoom implements LiveKitRoomInterface {
                         return;
                     }
 
-                    if (this.canReplaceScreenShareTrack(Track.Source.ScreenShare) && this.localScreenSharingVideoTrack) {
+                    if (
+                        this.canReplaceScreenShareTrack(Track.Source.ScreenShare) &&
+                        this.localScreenSharingVideoTrack
+                    ) {
                         this.localScreenSharingVideoTrack
                             .replaceTrack(screenShareVideoTrack, {
                                 userProvidedTrack: true,
@@ -351,15 +354,13 @@ export class LiveKitRoom implements LiveKitRoomInterface {
                                     console.error("An error occurred while replacing screen share audio track", err);
                                     Sentry.captureException(err);
                                     if (!this.canReplaceScreenShareTrack(Track.Source.ScreenShareAudio)) {
-                                        this.publishScreenShareAudioTrack(screenShareAudioTrack).catch(
-                                            (publishErr) => {
-                                                console.error(
-                                                    "An error occurred while republishing screen share audio track",
-                                                    publishErr
-                                                );
-                                                Sentry.captureException(publishErr);
-                                            }
-                                        );
+                                        this.publishScreenShareAudioTrack(screenShareAudioTrack).catch((publishErr) => {
+                                            console.error(
+                                                "An error occurred while republishing screen share audio track",
+                                                publishErr
+                                            );
+                                            Sentry.captureException(publishErr);
+                                        });
                                     }
                                 });
                         } else {

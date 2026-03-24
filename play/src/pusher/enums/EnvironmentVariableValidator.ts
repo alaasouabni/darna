@@ -335,6 +335,14 @@ export const EnvironmentVariables = z.object({
         .describe("Port for the Room API gRPC server. Defaults to 50051"),
     ROOM_API_SECRET_KEY: z.string().optional().describe("Secret key for Room API authentication"),
 
+    // AI notetaker relay
+    AI_NOTETAKER_ENABLED: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Enable AI notetaker UI and relay endpoints in pusher. Defaults to false"),
+    AI_NOTETAKER_API_URL: AbsoluteOrRelativeUrl.optional()
+        .transform(emptyStringToUndefined)
+        .describe("Base URL to back AI notetaker HTTP API. Example: http://back:8080"),
+
     // Map editor related environment variables
     ENABLE_MAP_EDITOR: BoolAsString.optional()
         .transform((val) => toBool(val, false))

@@ -24,6 +24,7 @@ export interface FrontConfigurationInterface {
     ENABLE_OPENID: boolean;
     OPID_PROFILE_SCREEN_PROVIDER: string | undefined;
     ENABLE_CHAT_UPLOAD: boolean;
+    AI_NOTETAKER_ENABLED: boolean;
     FALLBACK_LOCALE: string | undefined;
     OPID_WOKA_NAME_POLICY: OpidWokaNamePolicy | undefined;
     ENABLE_REPORT_ISSUES_MENU: boolean | undefined;

@@ -109,6 +109,11 @@ function createWarningMessageStore() {
                 return messages;
             });
         },
+        clearWarningMessageById: (id: string): void => {
+            update((messages: WarningMessage[]) => {
+                return messages.filter((message) => message.id !== id);
+            });
+        },
     };
 }
 export const warningMessageStore = createWarningMessageStore();

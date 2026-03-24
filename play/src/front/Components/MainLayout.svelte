@@ -62,6 +62,7 @@
     import PictureInPicture from "./Video/PictureInPicture.svelte";
     import AudioStreamWrapper from "./Video/PictureInPicture/AudioStreamWrapper.svelte";
     import ExplorerMenu from "./ActionsMenu/ExplorerMenu.svelte";
+    import NotetakerStatusBanner from "./Notetaker/NotetakerStatusBanner.svelte";
 
     const handleFocusInEvent = (event: FocusEvent) => {
         if (
@@ -230,6 +231,8 @@
             {#if $warningMessageStore.length > 0}
                 <WarningToast />
             {/if}
+
+            <NotetakerStatusBanner />
 
             <ExternalComponents zone="popup" />
             {#if $requestVisitCardsStore || $wokaMenuStore || $actionsMenuStore}

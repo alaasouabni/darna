@@ -21,6 +21,7 @@
     import CameraMenuItem from "./MenuIcons/CameraMenuItem.svelte";
     import MicrophoneMenuItem from "./MenuIcons/MicrophoneMenuItem.svelte";
     import ScreenSharingMenuItem from "./MenuIcons/ScreenSharingMenuItem.svelte";
+    import AiNotetakerMenuItem from "./MenuIcons/AiNotetakerMenuItem.svelte";
     import ChatMenuItem from "./MenuIcons/ChatMenuItem.svelte";
     import UserListMenuItem from "./MenuIcons/UserListMenuItem.svelte";
     import ResponsiveActionBar from "./ResponsiveActionBar.svelte";
@@ -127,6 +128,7 @@
                                 <PictureInPictureMenuItem />
                             {/if}
                         {/if}
+                        <AiNotetakerMenuItem />
                         <!-- NAV : SCREENSHARING END -->
                     </div>
                 </div>

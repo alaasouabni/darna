@@ -153,6 +153,151 @@ Note that anonymous players don't have any TTL limit because their data is store
         .or(z.string().max(0))
         .transform((val) => toNumber(val, 4))
         .describe("The maximum number of users for WebRTC."),
+    AI_NOTETAKER_ENABLED: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Enable AI notetaker backend endpoints and services. Defaults to false."),
+    AI_NOTETAKER_PERMISSION_POLICY: z
+        .enum(["all_users", "selected_roles"])
+        .optional()
+        .default("all_users")
+        .describe("Who can start/stop AI notetaker: all users or selected roles."),
+    AI_NOTETAKER_ALLOWED_TAGS: z
+        .string()
+        .optional()
+        .transform((value) =>
+            value
+                ? value
+                      .split(",")
+                      .map((tag) => tag.trim())
+                      .filter((tag) => tag.length > 0)
+                : []
+        )
+        .describe("Comma-separated tags authorized when AI_NOTETAKER_PERMISSION_POLICY=selected_roles."),
+    AI_NOTETAKER_EMAIL_DIGEST_ENABLED: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Enable post-session digest job enqueuing for AI notetaker."),
+    AI_NOTETAKER_STARTER_MUST_STAY: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Auto-stop note sessions if the user who started the session leaves the room."),
+    AI_NOTETAKER_ALLOW_ADMIN_READ_ALL: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Allow users with admin tag to read all note sessions (disabled by default)."),
+    AI_NOTETAKER_TRANSCRIPT_RETENTION_DAYS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 90))
+        .describe("Transcript retention in days before transcript segments are purged. Defaults to 90."),
+    AI_NOTETAKER_SUMMARY_RETENTION_DAYS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 180))
+        .describe("Session retention in days before summaries/sessions are deleted. Defaults to 180."),
+    AI_NOTETAKER_SUMMARY_REFRESH_SEGMENTS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 10))
+        .describe("Refresh rolling summary after this many new transcript segments. Defaults to 10."),
+    MISTRAL_API_KEY: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .describe("API key used to access Mistral services."),
+    MISTRAL_BASE_URL: z
+        .string()
+        .url()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .default("https://api.mistral.ai")
+        .describe("Base URL for Mistral API."),
+    MISTRAL_CHAT_MODEL: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .default("mistral-small-latest")
+        .describe("Mistral chat model used for meeting summary generation."),
+    MISTRAL_TRANSCRIPTION_MODEL: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .default("voxtral-mini-latest")
+        .describe("Mistral audio transcription model used for AI notetaker speech chunks."),
+    MISTRAL_SUMMARY_MAX_CHARS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 20000))
+        .describe("Maximum transcript size (in characters) sent to Mistral for summary generation. Defaults to 20000."),
+    AI_NOTETAKER_IDLE_WARNING_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 5 * 60 * 1000))
+        .describe("Silence duration (ms) before entering idle warning state. Defaults to 300000."),
+    AI_NOTETAKER_IDLE_AUTO_STOP_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 2 * 60 * 1000))
+        .describe("Additional silence duration (ms) after warning before auto-stop. Defaults to 120000."),
+    AI_NOTETAKER_PARTICIPANT_TIMEOUT_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 2 * 60 * 1000))
+        .describe("Presence timeout (ms) used to infer room emptiness. Defaults to 120000."),
+    AI_NOTETAKER_MAINTENANCE_INTERVAL_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 15000))
+        .describe("Background maintenance interval (ms) for AI notetaker lifecycle checks. Defaults to 15000."),
+    AI_NOTETAKER_BOT_INGESTION_ENABLED: BoolAsString.optional()
+        .transform((val) => toBool(val, true))
+        .describe("Enable in-process LiveKit bot ingestion for AI notetaker sessions. Defaults to true."),
+    AI_NOTETAKER_BOT_SYNC_INTERVAL_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 10000))
+        .describe("Interval (ms) for syncing participant audio tracks with LiveKit egress streams. Defaults to 10000."),
+    AI_NOTETAKER_BOT_CHUNK_FLUSH_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 4000))
+        .describe("Interval (ms) used to flush buffered bot audio chunks to transcription. Defaults to 4000."),
+    AI_NOTETAKER_BOT_MAX_CHUNK_BYTES: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 256000))
+        .describe("Maximum buffered audio size (bytes) before forcing a transcription flush. Defaults to 256000."),
+    AI_NOTETAKER_BOT_INGESTION_WS_PORT: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 8091))
+        .describe("WebSocket port for receiving LiveKit bot egress audio streams. Defaults to 8091."),
+    AI_NOTETAKER_BOT_INGESTION_WS_HOST: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .default("0.0.0.0")
+        .describe("Host binding for bot ingestion WebSocket server. Defaults to 0.0.0.0."),
+    AI_NOTETAKER_BOT_INGESTION_WS_PUBLIC_URL: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .default("ws://back:8091/ai-notetaker/ingest")
+        .describe("Public WS URL used by LiveKit egress to push track audio for AI notetaker."),
+    AI_NOTETAKER_BOT_INGESTION_TOKEN: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .describe("Optional shared token appended to bot ingestion WS URL and required by ingestion endpoint."),
+    AI_NOTETAKER_BOT_TRACK_MIME_TYPE: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .default("audio/x-raw")
+        .describe("Mime type emitted by LiveKit track websocket egress. Defaults to audio/x-raw (pcm_s16le)."),
+    AI_NOTETAKER_AUDIO_STORAGE_DIR: z
+        .string()
+        .optional()
+        .transform(emptyStringToUndefined)
+        .default("/tmp/ai-notetaker-audio")
+        .describe("Directory where temporary AI notetaker audio artifacts are stored."),
+    AI_NOTETAKER_AUDIO_STORAGE_SOFT_LIMIT_BYTES: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 20 * 1024 * 1024 * 1024))
+        .describe("Soft limit for temporary AI notetaker audio storage in bytes. Defaults to 20GB."),
+    AI_NOTETAKER_AUDIO_STORAGE_HARD_LIMIT_BYTES: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 25 * 1024 * 1024 * 1024))
+        .describe("Hard cap for temporary AI notetaker audio storage in bytes. Defaults to 25GB."),
+    AI_NOTETAKER_AUDIO_RETENTION_SUCCESS_HOURS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 24))
+        .describe("Retention duration in hours for successfully transcribed audio artifacts. Defaults to 24."),
+    AI_NOTETAKER_AUDIO_RETENTION_FAILED_HOURS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 24 * 7))
+        .describe("Retention duration in hours for failed/unprocessed audio artifacts. Defaults to 168 (7 days)."),
+    AI_NOTETAKER_POST_MEETING_TRANSCRIPTION_ENABLED: BoolAsString.optional()
+        .transform((val) => toBool(val, true))
+        .describe("Enable full-artifact post-meeting transcription pass before final summary. Defaults to true."),
+    AI_NOTETAKER_DELIVERY_INTERVAL_MS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 10000))
+        .describe("Delivery queue polling interval (ms) for AI notetaker digest jobs. Defaults to 10000."),
+    AI_NOTETAKER_DELIVERY_MAX_RETRIES: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 5))
+        .describe("Maximum retry attempts before moving AI notetaker digest jobs to dead-letter queue. Defaults to 5."),
+    AI_NOTETAKER_DIGEST_WEBHOOK_URL: AbsoluteOrRelativeUrl.optional()
+        .transform(emptyStringToUndefined)
+        .describe("Optional webhook endpoint receiving finalized AI notetaker digest payloads."),
 });
 
 export type EnvironmentVariables = z.infer<typeof EnvironmentVariables>;

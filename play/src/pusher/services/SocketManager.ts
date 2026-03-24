@@ -406,6 +406,46 @@ export class SocketManager implements ZoneEventListener {
         return sockets;
     }
 
+    public getUserRuntimeContext(userUuid: string): {
+        roomId: string;
+        meetingSpaces: string[];
+        joinedSpaces: string[];
+    } | null {
+        const sockets = this.getSocketsByUserUuid(userUuid);
+        if (sockets.length === 0) {
+            return null;
+        }
+
+        const meetingSpaces = new Set<string>();
+        const joinedSpaces = new Set<string>();
+        let roomId = sockets[0].getUserData().roomId;
+
+        for (const socket of sockets) {
+            const socketData = socket.getUserData();
+            roomId = socketData.roomId || roomId;
+
+            for (const spaceName of socketData.spaces) {
+                joinedSpaces.add(spaceName);
+                const space = this.spaces.get(spaceName);
+                if (!space) {
+                    continue;
+                }
+
+                const isLivekitRequiredSpace = space.getPropertiesToSync().includes("livekitRequired");
+                const isPersonalAreaSpace = spaceName.includes("personal-area-");
+                if (isLivekitRequiredSpace && !isPersonalAreaSpace) {
+                    meetingSpaces.add(spaceName);
+                }
+            }
+        }
+
+        return {
+            roomId,
+            meetingSpaces: [...meetingSpaces],
+            joinedSpaces: [...joinedSpaces],
+        };
+    }
+
     private async emitProfileVariable(socket: Socket, name: string, value: unknown): Promise<void> {
         const socketData = socket.getUserData();
         if (!socketData.backConnection || socketData.disconnecting) {

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import type { SpaceUser } from "@workadventure/messages";
-import type { CreateOptions, EgressInfo } from "livekit-server-sdk";
+import type { CreateOptions, EgressInfo, ParticipantInfo } from "livekit-server-sdk";
 import {
     RoomServiceClient,
     AccessToken,
@@ -141,6 +141,34 @@ export class LiveKitService {
                 `LivekitService.removeParticipant: Error removing participant ${participantName} from room ${roomName}:`,
                 error
             );
+            Sentry.captureException(error);
+        }
+    }
+
+    async listParticipants(roomName: string): Promise<ParticipantInfo[]> {
+        try {
+            const rooms = await this.roomServiceClient.listRooms([this.getHashedRoomName(roomName)]);
+            if (!rooms || rooms.length === 0) {
+                return [];
+            }
+
+            return await this.roomServiceClient.listParticipants(this.getHashedRoomName(roomName));
+        } catch (error) {
+            console.error(`LivekitService.listParticipants: Error listing participants for room ${roomName}:`, error);
+            Sentry.captureException(error);
+            return [];
+        }
+    }
+
+    async startTrackEgressToWebsocket(roomName: string, trackId: string, websocketUrl: string): Promise<EgressInfo> {
+        return await this.egressClient.startTrackEgress(this.getHashedRoomName(roomName), websocketUrl, trackId);
+    }
+
+    async stopEgress(egressId: string): Promise<void> {
+        try {
+            await this.egressClient.stopEgress(egressId);
+        } catch (error) {
+            console.error(`LivekitService.stopEgress: Error stopping egress ${egressId}:`, error);
             Sentry.captureException(error);
         }
     }

@@ -103,11 +103,7 @@ function shouldRetryWithPlainAudio(error: unknown): boolean {
     }
 
     // Constraint-related errors are safe to retry with simpler audio settings.
-    return (
-        error.name === "TypeError" ||
-        error.name === "OverconstrainedError" ||
-        error.name === "ConstraintError"
-    );
+    return error.name === "TypeError" || error.name === "OverconstrainedError" || error.name === "ConstraintError";
 }
 
 function buildDisplayMediaConstraints(
@@ -139,10 +135,7 @@ async function getDisplayMediaWithAudioFallback(constraints: MediaStreamConstrai
             throw error;
         }
 
-        console.info(
-            "Screen-share audio constraints were rejected, retrying with plain audio capture.",
-            error
-        );
+        console.info("Screen-share audio constraints were rejected, retrying with plain audio capture.", error);
         return navigator.mediaDevices.getDisplayMedia(buildDisplayMediaConstraints(constraints, false));
     }
 }

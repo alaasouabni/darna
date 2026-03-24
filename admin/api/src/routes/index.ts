@@ -20,6 +20,7 @@ import { oauthRoutes } from "../modules/oauth/routes";
 import { adminSocketsRoutes } from "../modules/admin-sockets/routes";
 import { saveRoutes } from "../modules/save/routes";
 import { inviteRoutes } from "../modules/invite/routes";
+import { notetakerRoutes } from "../modules/notetaker/routes";
 
 export async function registerRoutes(app: FastifyInstance) {
     app.register(healthRoutes, { prefix: "/healthz" });
@@ -41,6 +42,7 @@ export async function registerRoutes(app: FastifyInstance) {
     app.register(loginRoutes, { prefix: "/api" });
     app.register(inviteRoutes, { prefix: "/api" });
     app.register(saveRoutes, { prefix: "/api" });
+    app.register(notetakerRoutes, { prefix: "/api" });
     app.register(adminSocketsRoutes, { prefix: "/api/admin-sockets" });
 
     app.register(whiteLabelRoutes);
