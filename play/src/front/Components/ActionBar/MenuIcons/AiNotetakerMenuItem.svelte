@@ -3,7 +3,7 @@
     import { openModal } from "svelte-modals";
     import ActionBarButton from "../ActionBarButton.svelte";
     import PenIcon from "../../Icons/PenIcon.svelte";
-    import AiNotetakerPanelModal from "../../Notetaker/AiNotetakerPanelModal.svelte";
+    import AiNotetakerQuickControlModal from "../../Notetaker/AiNotetakerQuickControlModal.svelte";
     import {
         notetakerAvailableStore,
         notetakerCanManageStore,
@@ -31,14 +31,14 @@
     }
 
     function onAiNotetakerClick() {
-        openModal(AiNotetakerPanelModal, {});
+        openModal(AiNotetakerQuickControlModal, {});
     }
 
     $: tooltip = isSessionRunning()
-        ? "Open AI notes (active)"
+        ? "Open AI notes controls (active)"
         : $notetakerCanManageStore
-        ? "Open AI notes"
-        : "Open AI notes (read-only)";
+        ? "Open AI notes controls"
+        : "Open AI notes controls (read-only)";
 
     $: buttonState = $notetakerLoadingStore
         ? "disabled"
@@ -55,12 +55,12 @@
         classList="group/btn-ai-notes"
         tooltipTitle={tooltip}
         tooltipDesc={$notetakerCanManageStore
-            ? "Capture transcript and meeting summary"
-            : "You can read notes but cannot start/stop for this room."}
+            ? "Start or stop AI notes for this meeting room"
+            : "You can view notes but cannot start/stop for this room."}
         state={buttonState}
         dataTestId="aiNotetakerButton"
         media="./static/images/screensharing.mp4"
-        desc="Toggle AI notetaker in this meeting room"
+        desc="Open quick AI notes controls for this meeting room"
     >
         <PenIcon />
     </ActionBarButton>

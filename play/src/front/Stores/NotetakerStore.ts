@@ -619,7 +619,6 @@ function bootstrapNotetaker(): void {
         }
 
         if (!normalizedSpace) {
-            sessionsStoreInternal.set([]);
             currentSessionStore.set(null);
             clearIdleWarningMessage();
             ensureHeartbeat();

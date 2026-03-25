@@ -987,26 +987,38 @@ export class NotetakerSessionService {
 
     private buildTranscriptionContextBias(session: NotetakerSession, artifact: NotetakerAudioArtifact): string[] {
         const entries = new Set<string>();
+        const addEntry = (rawValue?: string): void => {
+            for (const token of this.normalizeTranscriptionContextBiasTokens(rawValue)) {
+                entries.add(token);
+            }
+        };
 
         for (const participant of session.participants) {
-            if (participant.displayName && participant.displayName.trim().length > 0) {
-                entries.add(participant.displayName.trim());
-            }
-
-            if (participant.userId && participant.userId.trim().length > 0) {
-                entries.add(participant.userId.trim());
-            }
+            addEntry(participant.displayName);
+            addEntry(participant.userId);
         }
 
-        if (artifact.speakerLabel && artifact.speakerLabel.trim().length > 0) {
-            entries.add(artifact.speakerLabel.trim());
-        }
-
-        if (artifact.speakerSpaceUserId && artifact.speakerSpaceUserId.trim().length > 0) {
-            entries.add(artifact.speakerSpaceUserId.trim());
-        }
+        addEntry(artifact.speakerLabel);
+        addEntry(artifact.speakerSpaceUserId);
 
         return Array.from(entries).slice(0, 50);
+    }
+
+    private normalizeTranscriptionContextBiasTokens(rawValue?: string): string[] {
+        if (!rawValue) {
+            return [];
+        }
+
+        const trimmed = rawValue.trim();
+        if (trimmed.length === 0) {
+            return [];
+        }
+
+        // Mistral rejects context_bias entries that contain whitespace or commas.
+        return trimmed
+            .split(/[\s,]+/g)
+            .map((token) => token.trim())
+            .filter((token) => token.length > 0);
     }
 
     private prepareArtifactForTranscription(

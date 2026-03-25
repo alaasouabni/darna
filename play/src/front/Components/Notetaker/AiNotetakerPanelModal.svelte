@@ -154,24 +154,6 @@
         return state === "starting" || state === "active" || state === "idle-warning" || state === "stopping";
     }
 
-    function onPrimaryActionClick(): void {
-        if ($notetakerLoadingStore || !$notetakerCanManageStore) {
-            return;
-        }
-
-        if ($notetakerRuntimeStateStore === "idle-warning") {
-            void notetakerControls.keepRunning();
-            return;
-        }
-
-        if (isRunning($notetakerRuntimeStateStore)) {
-            void notetakerControls.stopSession();
-            return;
-        }
-
-        void notetakerControls.startSession(currentMeetingSpace);
-    }
-
     function formatSessionTime(session: NotetakerSession): string {
         const started = new Date(session.startedAt).toLocaleString();
         if (!session.stoppedAt) {
@@ -315,14 +297,6 @@
         return new Date(finalSummary.createdAt).toLocaleString();
     }
 
-    function primaryLabel(state: string): string {
-        if (state === "idle-warning") {
-            return "Keep running";
-        }
-
-        return isRunning(state) ? "Stop AI Notes" : "Start AI Notes";
-    }
-
     function exportDisplayedSession(format: "markdown" | "text"): void {
         if (!displayedSession) {
             return;
@@ -437,48 +411,60 @@
         void notetakerControls.refreshCurrentSession(currentMeetingSpace);
         void notetakerControls.refreshSessions(getSessionsSpaceName());
     }
+
 </script>
 
-<Popup {isOpen}>
-    <h1 slot="title" class="text-2xl font-bold">AI Notes</h1>
-    <div slot="content" class="w-full max-h-[72vh] overflow-y-auto px-1">
-        <div class="rounded-xl bg-dark-500/50 p-4 mb-4">
-            <div class="flex flex-wrap items-center justify-between gap-3">
+<Popup {isOpen} maxWidthClass="sm:max-w-[920px]">
+    <h1 slot="title" class="text-2xl font-bold">AI Notes Library</h1>
+    <div slot="content" class="w-full px-1">
+        <div class="rounded-xl bg-dark-500/50 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <div class="text-sm opacity-80">Current state</div>
-                    <div class="text-lg font-semibold uppercase tracking-wide">{$notetakerRuntimeStateStore}</div>
+                    <div class="text-xs opacity-80 uppercase tracking-wide">Live status</div>
+                    <div class="flex flex-wrap items-center gap-2 mt-1">
+                        <div class="text-base font-semibold uppercase tracking-wide">{$notetakerRuntimeStateStore}</div>
+                        {#if $notetakerSessionStore}
+                            <div
+                                class="inline-flex items-center rounded-full px-2 py-1 text-[11px] {outputStateClasses(computeSessionOutputState($notetakerSessionStore).tone)}"
+                            >
+                                {computeSessionOutputState($notetakerSessionStore).label}
+                            </div>
+                        {/if}
+                    </div>
+                    <div class="text-xs opacity-70 mt-2">
+                        Showing: {panelTab === "current" ? "Current room sessions" : "All discussions"}
+                    </div>
+                    {#if currentMeetingSpace}
+                        <div class="text-xs opacity-70 mt-1">Current room: {currentMeetingSpace}</div>
+                    {/if}
                     {#if $notetakerSessionStore}
-                        <div class="text-xs opacity-75 mt-2">{formatSessionTime($notetakerSessionStore)}</div>
-                        <div
-                            class="inline-flex items-center rounded-full px-2 py-1 text-[11px] mt-2 {outputStateClasses(computeSessionOutputState($notetakerSessionStore).tone)}"
-                        >
-                            {computeSessionOutputState($notetakerSessionStore).label}
-                        </div>
+                        <div class="text-xs opacity-75 mt-1">{formatSessionTime($notetakerSessionStore)}</div>
                     {/if}
                 </div>
                 <button class="btn text-sm" on:click={refreshPanel}>Refresh</button>
             </div>
             {#if !$notetakerCanManageStore}
-                <div class="text-xs text-warning mt-2">You are in read-only mode for AI notes in this meeting.</div>
+                <div class="text-xs text-warning mt-3">You are in read-only mode for AI notes in this meeting.</div>
             {/if}
         </div>
 
-        <div class="space-y-4">
-            <div class="rounded-xl bg-dark-500/50 p-4">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <div class="font-semibold">My notes ({$notetakerSessionsStore.length})</div>
-                        <div class="text-xs opacity-75 mt-1">Browse room notes or your full history.</div>
-                    </div>
-                    <div class="flex gap-2">
+        <div class="grid gap-4 lg:grid-cols-[330px_minmax(0,1fr)] mt-4 lg:h-[54vh] lg:min-h-[380px]">
+            <div class="rounded-xl bg-dark-500/50 p-4 min-h-0 flex flex-col">
+                <div class="shrink-0">
+                    <div class="font-semibold">Sessions ({$notetakerSessionsStore.length})</div>
+                    <div class="text-xs opacity-75 mt-1">Browse current room notes or your full history.</div>
+                    <div class="flex gap-2 mt-3">
                         <button
-                            class="btn text-xs {panelTab === 'current' ? 'bg-secondary' : ''}"
+                            class="btn text-xs flex-1 {panelTab === 'current' ? 'bg-secondary' : ''}"
                             disabled={!currentMeetingSpace}
                             on:click={() => switchPanelTab('current')}
                         >
                             Current room
                         </button>
-                        <button class="btn text-xs {panelTab === 'history' ? 'bg-secondary' : ''}" on:click={() => switchPanelTab('history')}>
+                        <button
+                            class="btn text-xs flex-1 {panelTab === 'history' ? 'bg-secondary' : ''}"
+                            on:click={() => switchPanelTab('history')}
+                        >
                             All discussions
                         </button>
                     </div>
@@ -507,13 +493,13 @@
                     </div>
 
                     {#if selectionMode}
-                        <div class="flex flex-wrap gap-2 mt-3">
+                        <div class="flex flex-wrap gap-2 mt-2 rounded-lg bg-dark-600/50 p-2">
                             <button class="btn text-xs" on:click={selectAllSessions} disabled={$notetakerSessionsStore.length === 0}
                                 >Select all</button
                             >
                             <button class="btn text-xs" on:click={clearSelection} disabled={selectedSessionIds.size === 0}>Clear</button>
                             <button
-                                class="btn text-xs bg-danger/80 hover:bg-danger"
+                                class="btn text-xs bg-danger/80 hover:bg-danger ml-auto"
                                 on:click={deleteSelectedSessions}
                                 disabled={$notetakerLoadingStore || selectedSessionIds.size === 0}
                             >
@@ -528,7 +514,7 @@
                         {panelTab === "current" ? "No sessions found for this room yet." : "No discussions found yet."}
                     </div>
                 {:else}
-                    <div class="space-y-2 max-h-[34vh] overflow-y-auto pr-1 mt-3">
+                    <div class="space-y-2 overflow-y-auto pr-1 mt-3 flex-1 min-h-0">
                         {#each $notetakerSessionsStore as session (session.id)}
                             <button
                                 class="w-full text-left rounded-lg p-3 border border-white/10 hover:bg-dark-600/60 transition-colors {displayedSession?.id ===
@@ -565,128 +551,131 @@
                 {/if}
             </div>
 
-            {#if displayedSession}
-                <div class="rounded-xl bg-dark-500/50 p-4">
-                    <div class="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                            <div class="text-xs opacity-70 uppercase tracking-wide">Selected session</div>
-                            <div class="font-semibold text-base">{displayedSession.spaceName}</div>
-                            <div class="text-xs opacity-75 mt-1">{formatSessionTime(displayedSession)}</div>
-                        </div>
-                        <div
-                            class="inline-flex items-center rounded-full px-2 py-1 text-[11px] {outputStateClasses(computeSessionOutputState(displayedSession).tone)}"
-                        >
-                            {computeSessionOutputState(displayedSession).label}
-                        </div>
-                    </div>
-                    <div class="text-xs opacity-80 mt-3">{computeSessionOutputState(displayedSession).description}</div>
-                    {#if isFinalOutputReady(displayedSession)}
-                        <div class="text-xs opacity-70 mt-1">Finalized at: {getFinalizedAtLabel(displayedSession)}</div>
-                    {:else if !isRunning(displayedSession.status)}
-                        <div class="text-xs opacity-70 mt-1">This panel refreshes automatically while processing.</div>
-                    {/if}
-                </div>
-
-                <details open class="rounded-xl bg-dark-500/50 p-4">
-                    <summary class="font-semibold cursor-pointer">Summary</summary>
-                    <div class="mt-3">
-                        {#if displayedSummary}
-                            {#if !isFinalOutputReady(displayedSession)}
-                                <div class="text-xs opacity-75 mb-2">Draft summary. Final version is still processing.</div>
-                            {/if}
-                            <div class="text-sm whitespace-pre-wrap">{displayedSummary.summaryMarkdown}</div>
-                            {#if displayedSummary.decisions.length}
-                                <div class="font-semibold mt-4 mb-1">Decisions</div>
-                                <ul class="list-disc list-inside text-sm space-y-1">
-                                    {#each displayedSummary.decisions as decision}
-                                        <li>{decision}</li>
-                                    {/each}
-                                </ul>
-                            {/if}
-                            {#if displayedSummary.actionItems.length}
-                                <div class="font-semibold mt-4 mb-1">Action items</div>
-                                <ul class="list-disc list-inside text-sm space-y-1">
-                                    {#each displayedSummary.actionItems as actionItem}
-                                        <li>{actionItem}</li>
-                                    {/each}
-                                </ul>
-                            {/if}
-                        {:else if isRunning(displayedSession.status)}
-                            <div class="text-sm opacity-80">Summary is generated after the meeting ends.</div>
-                        {:else}
-                            <div class="text-sm opacity-80">Summary is being generated. This panel refreshes automatically.</div>
-                        {/if}
-                    </div>
-                </details>
-
-                <details class="rounded-xl bg-dark-500/50 p-4">
-                    <summary class="font-semibold cursor-pointer">Transcript ({displayedSession.segments.length})</summary>
-                    <div class="mt-3">
-                        {#if isRunning(displayedSession.status)}
-                            <div class="text-sm opacity-80">Transcript appears after the meeting is stopped.</div>
-                        {:else if displayedSession.segments.length === 0 && !isFinalOutputReady(displayedSession)}
-                            <div class="text-sm opacity-80">Transcript is still being finalized. This panel refreshes automatically.</div>
-                        {:else if displayedSession.segments.length === 0}
-                            <div class="text-sm opacity-80">No transcript segments yet.</div>
-                        {:else}
-                            {#if !isFinalOutputReady(displayedSession)}
-                                <div class="text-xs opacity-75 mb-2">Partial transcript while processing. Final version will appear when status is Ready.</div>
-                            {/if}
-                            <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
-                                {#each displayedSession.segments as segment (segment.id)}
-                                    <div class="rounded-lg bg-dark-600/60 p-2 text-sm">
-                                        <div class="flex flex-wrap items-center justify-between gap-2">
-                                            <div class="font-semibold">{segment.speakerLabel ?? "Unknown speaker"}</div>
-                                            <div class="text-xs opacity-70">{formatSegmentTimestamp(displayedSession, segment)}</div>
-                                        </div>
-                                        <div class="opacity-90 mt-1">{segment.text}</div>
-                                    </div>
-                                {/each}
+            <div class="rounded-xl bg-dark-500/50 p-4 min-h-0 min-w-0 flex flex-col">
+                {#if displayedSession}
+                    <div class="shrink-0">
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <div class="text-xs opacity-70 uppercase tracking-wide">Selected session</div>
+                                <div class="font-semibold text-base">{displayedSession.spaceName}</div>
+                                <div class="text-xs opacity-75 mt-1">{formatSessionTime(displayedSession)}</div>
                             </div>
-                        {/if}
-                    </div>
-                </details>
-
-                <div class="rounded-xl bg-dark-500/50 p-4">
-                    <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-                        <div class="font-semibold">Export</div>
-                        {#if $notetakerCanManageStore}
-                            <button
-                                class="btn text-xs bg-danger/80 hover:bg-danger disabled:opacity-50"
-                                disabled={!$notetakerCanManageStore}
-                                on:click={deleteDisplayedSession}
+                            <div
+                                class="inline-flex items-center rounded-full px-2 py-1 text-[11px] {outputStateClasses(computeSessionOutputState(displayedSession).tone)}"
                             >
-                                Delete session
-                            </button>
+                                {computeSessionOutputState(displayedSession).label}
+                            </div>
+                        </div>
+                        <div class="text-xs opacity-80 mt-3">{computeSessionOutputState(displayedSession).description}</div>
+                        {#if isFinalOutputReady(displayedSession)}
+                            <div class="text-xs opacity-70 mt-1">Finalized at: {getFinalizedAtLabel(displayedSession)}</div>
+                        {:else if !isRunning(displayedSession.status)}
+                            <div class="text-xs opacity-70 mt-1">This panel refreshes automatically while processing.</div>
                         {/if}
                     </div>
-                    {#if !isFinalOutputReady(displayedSession)}
-                        <div class="text-xs opacity-75 mb-2">Current export is partial until output status becomes Ready.</div>
-                    {/if}
-                    {#if isRunning(displayedSession.status)}
-                        <div class="text-xs opacity-75 mb-2">Recording download is available once the meeting is stopped.</div>
-                    {/if}
-                    <div class="flex flex-wrap gap-2">
-                        <button class="btn text-sm" on:click={() => exportDisplayedSession("markdown")}>Download Markdown</button>
-                        <button class="btn text-sm" on:click={() => exportDisplayedSession("text")}>Download Text</button>
-                        <button class="btn text-sm" disabled={isRunning(displayedSession.status)} on:click={downloadDisplayedRecording}
-                            >Download Recording (WAV)</button
-                        >
+
+                    <div class="space-y-3 mt-4 pr-1 flex-1 min-h-0 overflow-y-auto">
+                    <details open class="rounded-lg bg-dark-600/35 border border-white/10 p-3">
+                        <summary class="font-semibold cursor-pointer">Summary</summary>
+                        <div class="mt-3">
+                            {#if displayedSummary}
+                                {#if !isFinalOutputReady(displayedSession)}
+                                    <div class="text-xs opacity-75 mb-2">Draft summary. Final version is still processing.</div>
+                                {/if}
+                                <div class="text-sm whitespace-pre-wrap">{displayedSummary.summaryMarkdown}</div>
+                                {#if displayedSummary.decisions.length}
+                                    <div class="font-semibold mt-4 mb-1">Decisions</div>
+                                    <ul class="list-disc list-inside text-sm space-y-1">
+                                        {#each displayedSummary.decisions as decision}
+                                            <li>{decision}</li>
+                                        {/each}
+                                    </ul>
+                                {/if}
+                                {#if displayedSummary.actionItems.length}
+                                    <div class="font-semibold mt-4 mb-1">Action items</div>
+                                    <ul class="list-disc list-inside text-sm space-y-1">
+                                        {#each displayedSummary.actionItems as actionItem}
+                                            <li>{actionItem}</li>
+                                        {/each}
+                                    </ul>
+                                {/if}
+                            {:else if isRunning(displayedSession.status)}
+                                <div class="text-sm opacity-80">Summary is generated after the meeting ends.</div>
+                            {:else}
+                                <div class="text-sm opacity-80">Summary is being generated. This panel refreshes automatically.</div>
+                            {/if}
+                        </div>
+                    </details>
+
+                    <details class="rounded-lg bg-dark-600/35 border border-white/10 p-3">
+                        <summary class="font-semibold cursor-pointer">Transcript ({displayedSession.segments.length})</summary>
+                        <div class="mt-3">
+                            {#if isRunning(displayedSession.status)}
+                                <div class="text-sm opacity-80">Transcript appears after the meeting is stopped.</div>
+                            {:else if displayedSession.segments.length === 0 && !isFinalOutputReady(displayedSession)}
+                                <div class="text-sm opacity-80">Transcript is still being finalized. This panel refreshes automatically.</div>
+                            {:else if displayedSession.segments.length === 0}
+                                <div class="text-sm opacity-80">No transcript segments yet.</div>
+                            {:else}
+                                {#if !isFinalOutputReady(displayedSession)}
+                                    <div class="text-xs opacity-75 mb-2">Partial transcript while processing. Final version will appear when status is Ready.</div>
+                                {/if}
+                                <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
+                                    {#each displayedSession.segments as segment (segment.id)}
+                                        <div class="rounded-lg bg-dark-600/60 p-2 text-sm">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <div class="font-semibold">{segment.speakerLabel ?? "Unknown speaker"}</div>
+                                                <div class="text-xs opacity-70">{formatSegmentTimestamp(displayedSession, segment)}</div>
+                                            </div>
+                                            <div class="opacity-90 mt-1">{segment.text}</div>
+                                        </div>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
+                    </details>
+
+                    <div class="rounded-lg bg-dark-600/35 border border-white/10 p-3">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                            <div class="font-semibold">Exports and actions</div>
+                            {#if $notetakerCanManageStore}
+                                <button
+                                    class="btn text-xs bg-danger/80 hover:bg-danger disabled:opacity-50"
+                                    disabled={!$notetakerCanManageStore}
+                                    on:click={deleteDisplayedSession}
+                                >
+                                    Delete session
+                                </button>
+                            {/if}
+                        </div>
+                        {#if !isFinalOutputReady(displayedSession)}
+                            <div class="text-xs opacity-75 mb-2">Current export is partial until output status becomes Ready.</div>
+                        {/if}
+                        {#if isRunning(displayedSession.status)}
+                            <div class="text-xs opacity-75 mb-2">Recording download is available once the meeting is stopped.</div>
+                        {/if}
+                        <div class="grid gap-2 md:grid-cols-2">
+                            <button class="btn text-sm" on:click={() => exportDisplayedSession("markdown")}>Download Markdown</button>
+                            <button class="btn text-sm" on:click={() => exportDisplayedSession("text")}>Download Text</button>
+                            <button
+                                class="btn text-sm md:col-span-2"
+                                disabled={isRunning(displayedSession.status)}
+                                on:click={downloadDisplayedRecording}
+                                >Download Recording (WAV)</button
+                            >
+                        </div>
                     </div>
-                </div>
-            {:else}
-                <div class="rounded-xl bg-dark-500/50 p-4 text-sm opacity-80">No session selected.</div>
-            {/if}
+                    </div>
+                {:else}
+                    <div class="text-sm opacity-80">
+                        Select a session from the left panel to view summary, transcript, and exports.
+                    </div>
+                {/if}
+            </div>
         </div>
     </div>
     <svelte:fragment slot="action">
         <button class="btn flex-1 justify-center" on:click={() => closeModal()}>Close</button>
-        <button
-            class="btn btn-secondary disabled:text-gray-400 disabled:bg-gray-500 bg-secondary flex-1 justify-center"
-            disabled={$notetakerLoadingStore || !$notetakerCanManageStore}
-            on:click={onPrimaryActionClick}
-        >
-            {primaryLabel($notetakerRuntimeStateStore)}
-        </button>
+        <button class="btn flex-1 justify-center" on:click={refreshPanel}>Refresh</button>
     </svelte:fragment>
 </Popup>

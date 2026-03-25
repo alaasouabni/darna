@@ -5,12 +5,13 @@
 
     export let isOpen = false;
     export let withAction = true;
+    export let maxWidthClass = "sm:max-w-[668px]";
 </script>
 
 {#if isOpen}
     <div class="absolute flex items-center justify-center w-full h-full">
         <div
-            class="bg-contrast/75 backdrop-blur-md text-white z-[2001] w-[90%] m-auto left-0 right-0 sm:max-w-[668px] rounded-3xl max-h-full overflow-y-auto pointer-events-auto"
+            class={`bg-contrast/75 backdrop-blur-md text-white z-[2001] w-[90%] m-auto left-0 right-0 ${maxWidthClass} rounded-3xl max-h-full overflow-y-auto pointer-events-auto`}
             transition:fly={{ y: -1000, delay: 0, duration: 300 }}
         >
             <div class="p-8 flex flex-col justify-center items-center">

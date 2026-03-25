@@ -23,6 +23,7 @@
     import { chatVisibilityStore } from "../../../Stores/ChatStore";
     import { userIsAdminStore } from "../../../Stores/GameStore";
     import AdditionalMenuItems from "./AdditionalMenuItems.svelte";
+    import AiNotetakerLibraryMenuItem from "./AiNotetakerLibraryMenuItem.svelte";
     import { IconCalendar, IconCheckList, IconWorldSearch } from "@wa-icons";
 
     // The ActionBarButton component is displayed differently in the menu.
@@ -97,6 +98,8 @@
         <IconCheckList width="20" height="20" />
     </ActionBarButton>
 {/if}
+
+<AiNotetakerLibraryMenuItem />
 
 <!-- External module action bar -->
 <ExternalComponents zone="actionBarAppsMenu" />
