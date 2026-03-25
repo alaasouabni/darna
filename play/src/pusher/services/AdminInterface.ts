@@ -23,6 +23,7 @@ export interface AdminInterface {
     fetchMemberDataByUuid(
         userIdentifier: string,
         accessToken: string | undefined,
+        tokenType: "user" | "guest",
         playUri: string,
         ipAddress: string,
         characterTextureIds: string[],
@@ -30,8 +31,46 @@ export interface AdminInterface {
         locale?: string,
         tags?: string[],
         chatID?: string,
-        inviteToken?: string
+        inviteToken?: string,
+        guestSessionId?: string
     ): Promise<FetchMemberDataByUuidResponse>;
+
+    claimGuestInvite(
+        inviteToken: string,
+        playUri: string,
+        nickname?: string,
+        characterTextureIds?: string[],
+        companionTextureId?: string,
+        continuityToken?: string
+    ): Promise<{
+        userIdentifier: string;
+        username: string | null;
+        guestSessionId: string;
+        refreshToken: string;
+        expiresAt: string;
+    }>;
+
+    refreshGuestSession(
+        guestSessionId: string,
+        refreshToken: string
+    ): Promise<{
+        userIdentifier: string;
+        username: string | null;
+        guestSessionId: string;
+        refreshToken: string;
+        expiresAt: string;
+    }>;
+
+    resolveInviteToken(
+        inviteToken: string,
+        playUri?: string
+    ): Promise<{
+        mode: "member_onboarding" | "guest_access";
+        status: "active" | "expired" | "revoked" | "limit_reached";
+        roomUrl: string | null;
+        worldSlug: string;
+        roomMatches: boolean | null;
+    }>;
 
     /**
      * @var playUri is url of the room

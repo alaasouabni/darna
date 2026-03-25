@@ -26,7 +26,7 @@
         loginScene = undefined;
     }
 
-    let name = gameManager.getPlayerName() || "";
+    let name = connectionManager.getEditablePlayerName(gameManager.getPlayerName() || "");
     let startValidating = false;
     let errorName = "";
 
@@ -78,7 +78,7 @@
     async function submit() {
         startValidating = true;
 
-        let finalName = name.trim();
+        let finalName = connectionManager.getEditablePlayerName(name).trim();
         if (finalName !== "") {
             try {
                 if ($inGameProfileEditStore) {
@@ -103,21 +103,23 @@
     }
 
     async function saveNameInGame(finalName: string): Promise<void> {
-        if (isUserNameTooLong(finalName)) {
+        const editableName = connectionManager.getEditablePlayerName(finalName).trim();
+        if (isUserNameTooLong(editableName)) {
             throw new NameTooLongError();
         }
-        if (!isUserNameValid(finalName)) {
+        if (!isUserNameValid(editableName)) {
             throw new NameNotValidError();
         }
 
         analyticsClient.validationName();
-        await connectionManager.saveName(finalName);
-        gameManager.setPlayerName(finalName);
+        const persistedName = connectionManager.getPersistedPlayerName(editableName);
+        await connectionManager.saveName(editableName);
+        gameManager.setPlayerName(persistedName);
         try {
             const scene = gameManager.getCurrentGameScene();
-            scene.CurrentPlayer?.updatePlayerName(finalName);
-            scene.setProfileVariable(PROFILE_NAME_VARIABLE, finalName);
-            scene.syncLocalUserSpaceProfile({ name: finalName });
+            scene.CurrentPlayer?.updatePlayerName(persistedName);
+            scene.setProfileVariable(PROFILE_NAME_VARIABLE, persistedName);
+            scene.syncLocalUserSpaceProfile({ name: persistedName });
         } catch (e) {
             console.warn("Could not update player name in scene", e);
         }

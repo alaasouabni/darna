@@ -51,15 +51,25 @@ import type { OnConnectInterface, PositionInterface, ViewportInterface } from ".
 import { RoomConnection } from "./RoomConnection";
 import { HtmlUtils } from "./../WebRtc/HtmlUtils";
 import { hasCapability } from "./Capabilities";
+import { appendGuestSuffix, stripGuestSuffix } from "./LocalUserUtils";
 
 const INVITE_TOKEN_QUERY_PARAM = "invite";
 const INVITE_TOKEN_SESSION_STORAGE_KEY = "waInviteToken";
 const INVITE_TOKEN_LOCAL_STORAGE_KEY = "waInviteTokenPersistent";
 const INVITE_TOKEN_LOCAL_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
+const GUEST_CONTINUITY_TOKEN_LOCAL_STORAGE_KEY = "waGuestContinuityToken";
 
 type StoredInviteToken = {
     token: string;
     storedAt: number;
+};
+
+type InviteResolution = {
+    mode: "member_onboarding" | "guest_access";
+    status: "active" | "expired" | "revoked" | "limit_reached";
+    roomUrl: string | null;
+    worldSlug: string;
+    roomMatches: boolean | null;
 };
 
 class ConnectionManager {
@@ -225,6 +235,140 @@ class ConnectionManager {
     private clearInviteToken(): void {
         this.inviteToken = null;
         this.setStoredInviteToken(null);
+    }
+
+    private getGuestContinuityToken(): string | null {
+        try {
+            const token = window.localStorage.getItem(GUEST_CONTINUITY_TOKEN_LOCAL_STORAGE_KEY);
+            if (!token) {
+                return null;
+            }
+            const trimmedToken = token.trim();
+            return trimmedToken.length >= 16 ? trimmedToken : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private setGuestContinuityToken(token: string | null): void {
+        try {
+            if (token && token.trim().length >= 16) {
+                window.localStorage.setItem(GUEST_CONTINUITY_TOKEN_LOCAL_STORAGE_KEY, token.trim());
+            } else {
+                window.localStorage.removeItem(GUEST_CONTINUITY_TOKEN_LOCAL_STORAGE_KEY);
+            }
+        } catch {
+            // Ignore localStorage errors.
+        }
+    }
+
+    private getOrCreateGuestContinuityToken(): string | null {
+        const existingToken = this.getGuestContinuityToken();
+        if (existingToken) {
+            return existingToken;
+        }
+        try {
+            const bytes = new Uint8Array(32);
+            window.crypto.getRandomValues(bytes);
+            const generatedToken = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+            this.setGuestContinuityToken(generatedToken);
+            return generatedToken;
+        } catch {
+            return null;
+        }
+    }
+
+    private getCurrentAuthTokenType(): "user" | "guest" | null {
+        const token = this.authToken ?? localUserStore.getAuthToken();
+        if (!token) {
+            return null;
+        }
+
+        try {
+            const payloadBase64 = token.split(".")[1];
+            if (!payloadBase64) {
+                return null;
+            }
+            const base64 = payloadBase64.replace(/-/g, "+").replace(/_/g, "/");
+            const jsonPayload = decodeURIComponent(
+                window
+                    .atob(base64)
+                    .split("")
+                    .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+                    .join("")
+            );
+            const parsed = JSON.parse(jsonPayload) as { tokenType?: string };
+            if (parsed.tokenType === "guest" || parsed.tokenType === "user") {
+                return parsed.tokenType;
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
+    private canPersistGuestProfile(): boolean {
+        return this.getCurrentAuthTokenType() === "guest";
+    }
+
+    public isCurrentUserGuest(): boolean {
+        return this.getCurrentAuthTokenType() === "guest";
+    }
+
+    public getEditablePlayerName(name: string): string {
+        return stripGuestSuffix(name);
+    }
+
+    public getPersistedPlayerName(name: string): string {
+        const trimmedName = name.trim();
+        if (!this.isCurrentUserGuest()) {
+            return trimmedName;
+        }
+        return appendGuestSuffix(trimmedName);
+    }
+
+    private shouldFallbackToStandardInviteFlow(error: unknown): boolean {
+        if (!isAxiosError(error) || !error.response?.data || typeof error.response.data !== "object") {
+            return false;
+        }
+        const errorCode = (error.response.data as { code?: unknown }).code;
+        return errorCode === "INVITE_MODE_MISMATCH" || errorCode === "GUEST_INVITE_DISABLED";
+    }
+
+    private async resolveInvite(playUri: string): Promise<InviteResolution | null> {
+        if (!this.inviteToken) {
+            return null;
+        }
+
+        try {
+            const response = await axiosToPusher.get("invite/resolve", {
+                params: {
+                    inviteToken: this.inviteToken,
+                    playUri,
+                },
+            });
+
+            const data = response.data as Partial<InviteResolution>;
+            if (
+                (data.mode === "member_onboarding" || data.mode === "guest_access") &&
+                (data.status === "active" ||
+                    data.status === "expired" ||
+                    data.status === "revoked" ||
+                    data.status === "limit_reached")
+            ) {
+                return {
+                    mode: data.mode,
+                    status: data.status,
+                    roomUrl: data.roomUrl ?? null,
+                    worldSlug: typeof data.worldSlug === "string" ? data.worldSlug : "",
+                    roomMatches: typeof data.roomMatches === "boolean" ? data.roomMatches : null,
+                };
+            }
+        } catch (error) {
+            console.warn("Could not resolve invite mode, fallback to compatibility flow.", error);
+        }
+
+        return null;
     }
 
     /**
@@ -439,19 +583,76 @@ class ConnectionManager {
 
             //todo: add here some kind of warning if authToken has expired.
             if (!this.authToken) {
-                if (!this._currentRoom.authenticationMandatory) {
-                    await this.anonymousLogin();
+                let guestClaimError: unknown;
+                const inviteResolution = this.inviteToken ? await this.resolveInvite(this._currentRoom.key) : null;
+                const shouldTryGuestClaim = Boolean(this.inviteToken && inviteResolution?.mode !== "member_onboarding");
+                if (this.inviteToken) {
+                    if (shouldTryGuestClaim) {
+                        try {
+                            const hasClaimedGuestInvite = await this.guestInviteLogin(this._currentRoom.key);
+                            if (hasClaimedGuestInvite && this.authToken) {
+                                const response = await this.checkAuthUserConnexion(this.authToken);
+                                if (response.status === "error") {
+                                    if (response.type === "redirect") {
+                                        return new URL(response.urlToRedirect, window.location.href);
+                                    }
 
-                    const characterTextures = localUserStore.getCharacterTextures();
-                    if (characterTextures === null || characterTextures.length === 0) {
-                        nextScene = "selectCharacterScene";
+                                    return {
+                                        nextScene: "errorScene",
+                                        error: response,
+                                    };
+                                }
+
+                                if (response.isCharacterTexturesValid === false) {
+                                    nextScene = "selectCharacterScene";
+                                } else if (response.isCompanionTextureValid === false) {
+                                    nextScene = "selectCompanionScene";
+                                }
+                            }
+                        } catch (err) {
+                            console.warn("Guest invite claim failed.", err);
+                            if (this.shouldFallbackToStandardInviteFlow(err)) {
+                                console.info("Falling back to standard invite onboarding flow.");
+                            } else {
+                                guestClaimError = err;
+                            }
+                        }
                     }
-                } else {
-                    const redirect = this.loadOpenIDScreen(false);
-                    if (redirect === null) {
-                        throw new Error("Unable to redirect on login page.");
+                }
+
+                if (!this.authToken) {
+                    if (!this._currentRoom.authenticationMandatory) {
+                        await this.anonymousLogin();
+
+                        const characterTextures = localUserStore.getCharacterTextures();
+                        if (characterTextures === null || characterTextures.length === 0) {
+                            nextScene = "selectCharacterScene";
+                        }
+                    } else {
+                        if (guestClaimError) {
+                            if (isAxiosError(guestClaimError) && guestClaimError.response?.data) {
+                                const responseData = guestClaimError.response.data as
+                                    | ErrorApiErrorData
+                                    | ErrorApiRetryData
+                                    | ErrorApiUnauthorizedData;
+                                return {
+                                    nextScene: "errorScene",
+                                    error: responseData,
+                                };
+                            }
+                            if (guestClaimError instanceof Error) {
+                                return {
+                                    nextScene: "errorScene",
+                                    error: guestClaimError,
+                                };
+                            }
+                        }
+                        const redirect = this.loadOpenIDScreen(false);
+                        if (redirect === null) {
+                            throw new Error("Unable to redirect on login page.");
+                        }
+                        return redirect;
                     }
-                    return redirect;
                 }
             } else {
                 try {
@@ -557,6 +758,40 @@ class ConnectionManager {
             localUserStore.setAuthToken(this.authToken);
         }
         this.anonymousMatrixLogin();
+    }
+
+    private async guestInviteLogin(playUri: string): Promise<boolean> {
+        if (!this.inviteToken) {
+            return false;
+        }
+
+        const claimResponse = await axiosToPusher
+            .post("guest/claim", {
+                inviteToken: this.inviteToken,
+                playUri,
+                characterTextureIds: localUserStore.getCharacterTextures() ?? undefined,
+                companionTextureId: localUserStore.getCompanionTextureId() ?? undefined,
+                continuityToken: this.getOrCreateGuestContinuityToken() ?? undefined,
+            })
+            .then((res) => {
+                return res.data as {
+                    authToken?: string;
+                    userUuid?: string;
+                    username?: string | null;
+                };
+            });
+
+        if (!claimResponse.authToken || !claimResponse.userUuid) {
+            throw new Error("Invalid guest claim response.");
+        }
+
+        this.authToken = claimResponse.authToken;
+        localUserStore.setAuthToken(claimResponse.authToken);
+        this.localUser = new LocalUser(claimResponse.userUuid, null);
+        localUserStore.saveUser(this.localUser);
+        const persistedName = typeof claimResponse.username === "string" ? claimResponse.username.trim() : "";
+        gameManager.setPlayerName(persistedName);
+        return true;
     }
 
     private anonymousMatrixLogin() {
@@ -880,15 +1115,17 @@ class ConnectionManager {
     }
 
     async saveName(name: string): Promise<boolean> {
+        const normalizedName = this.getPersistedPlayerName(name);
+        const canPersistProfile = this.currentRoom?.isLogged || this.canPersistGuestProfile() || !this.currentRoom;
         if (
             hasCapability("api/save-name") &&
-            this.authToken !== undefined &&
-            (this.currentRoom?.isLogged || !this.currentRoom)
+            this.authToken !== null &&
+            canPersistProfile
         ) {
             await axiosToPusher.post(
                 "save-name",
                 {
-                    name,
+                    name: normalizedName,
                     roomUrl: this.currentRoom?.key,
                 },
                 {
@@ -904,10 +1141,11 @@ class ConnectionManager {
     }
 
     async saveTextures(textures: string[], textureDescriptors?: { id: string; url: string }[]): Promise<boolean> {
+        const canPersistProfile = this.currentRoom?.isLogged || this.canPersistGuestProfile() || !this.currentRoom;
         if (
             hasCapability("api/save-textures") &&
-            this.authToken !== undefined &&
-            (this.currentRoom?.isLogged || !this.currentRoom)
+            this.authToken !== null &&
+            canPersistProfile
         ) {
             await axiosToPusher.post(
                 "save-textures",
@@ -932,10 +1170,11 @@ class ConnectionManager {
         texture: string | null,
         textureDescriptor?: { id: string; url: string } | null
     ): Promise<boolean> {
+        const canPersistProfile = this.currentRoom?.isLogged || this.canPersistGuestProfile() || !this.currentRoom;
         if (
             hasCapability("api/save-textures") &&
-            this.authToken !== undefined &&
-            (this.currentRoom?.isLogged || !this.currentRoom)
+            this.authToken !== null &&
+            canPersistProfile
         ) {
             await axiosToPusher.post(
                 "save-companion-texture",

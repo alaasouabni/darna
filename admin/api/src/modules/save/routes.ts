@@ -4,6 +4,18 @@ import { errorData } from "../../lib/error-response";
 import { getCompanionDetails, getWokaDetails } from "../../lib/catalogs";
 import { requireAdminAuth } from "../../plugins/auth";
 
+const GUEST_NAME_SUFFIX = " (guest)";
+const guestSuffixPattern = /\s*\(guest\)\s*$/i;
+
+function normalizeGuestDisplayName(name: string): string {
+    const sanitized = name.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+    const baseName = sanitized.replace(guestSuffixPattern, "").trim();
+    if (!baseName) {
+        return `Guest${GUEST_NAME_SUFFIX}`;
+    }
+    return `${baseName}${GUEST_NAME_SUFFIX}`;
+}
+
 const saveNameBody = z.object({
     playUri: z.string(),
     userIdentifier: z.string(),
@@ -25,11 +37,17 @@ const saveCompanionBody = z.object({
 export async function saveRoutes(app: FastifyInstance) {
     app.post("/save-name", { preHandler: requireAdminAuth }, async (request, reply) => {
         const body = saveNameBody.parse(request.body);
+        const existingMember = await app.db.member.findUnique({
+            where: { externalId: body.userIdentifier },
+            select: { isGuest: true },
+        });
+        const isGuestMember = existingMember?.isGuest === true || body.userIdentifier.startsWith("guest:");
+        const displayName = isGuestMember ? normalizeGuestDisplayName(body.name) : body.name.trim();
 
         await app.db.member.upsert({
             where: { externalId: body.userIdentifier },
-            update: { displayName: body.name },
-            create: { externalId: body.userIdentifier, displayName: body.name },
+            update: { displayName },
+            create: { externalId: body.userIdentifier, displayName, isGuest: isGuestMember },
         });
 
         reply.code(204).send();

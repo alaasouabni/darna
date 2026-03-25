@@ -214,6 +214,12 @@ export const EnvironmentVariables = z.object({
     DISABLE_ANONYMOUS: BoolAsString.optional()
         .transform((val) => toBool(val, false))
         .describe("If true, anonymous users cannot access the platform. Defaults to false"),
+    INVITE_ONLY_GUEST_ENABLED: BoolAsString.optional()
+        .transform((val) => toBool(val, false))
+        .describe("Enable invite-only guest onboarding without external signup. Defaults to false"),
+    GUEST_ACCESS_TOKEN_TTL_HOURS: PositiveIntAsString.optional()
+        .transform((val) => toNumber(val, 24))
+        .describe("Guest auth token TTL in hours. Defaults to 24"),
     PROMETHEUS_AUTHORIZATION_TOKEN: z.string().optional().describe("The token to access the Prometheus metrics."),
     PROMETHEUS_PORT: PositiveIntAsString.optional()
         .transform((val) => toNumber(val, 0))

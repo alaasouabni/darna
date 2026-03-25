@@ -37,7 +37,7 @@ export async function chatRoutes(app: FastifyInstance) {
             members: members.map((member) => ({
                 uuid: member.externalId,
                 wokaName: member.displayName ?? undefined,
-                email: member.email ?? undefined,
+                email: member.email ?? null,
                 chatId: member.chatId ?? undefined,
                 tags: member.tags.map((tag) => tag.tag),
             })),

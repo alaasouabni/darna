@@ -493,13 +493,16 @@ export class IoSocketController {
                                     userData = await adminService.fetchMemberDataByUuid(
                                         userIdentifier,
                                         tokenData?.accessToken,
+                                        tokenData?.tokenType ?? "user",
                                         roomId,
                                         ipAddress,
                                         characterTextureIds,
                                         companionTextureId,
                                         locale,
                                         tokenData?.tags ?? [],
-                                        chatID
+                                        chatID,
+                                        undefined,
+                                        tokenData?.guestSessionId
                                     );
                                 } catch (err) {
                                     if (err instanceof JsonWebTokenError && tokenData?.refreshToken) {
@@ -520,13 +523,16 @@ export class IoSocketController {
                                         userData = await adminService.fetchMemberDataByUuid(
                                             userIdentifier,
                                             tokenData.accessToken,
+                                            tokenData.tokenType ?? "user",
                                             roomId,
                                             ipAddress,
                                             characterTextureIds,
                                             companionTextureId,
                                             locale,
                                             tokenData?.tags ?? [],
-                                            chatID
+                                            chatID,
+                                            undefined,
+                                            tokenData?.guestSessionId
                                         );
                                     } else {
                                         throw err;

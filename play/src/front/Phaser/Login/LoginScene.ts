@@ -21,7 +21,7 @@ export class LoginScene extends ResizableScene {
         super({
             key: LoginSceneName,
         });
-        this.name = gameManager.getPlayerName() || "";
+        this.name = connectionManager.getEditablePlayerName(gameManager.getPlayerName() || "");
     }
 
     preload() {}
@@ -51,22 +51,23 @@ export class LoginScene extends ResizableScene {
     }
 
     public async login(name: string): Promise<void> {
-        if (isUserNameTooLong(name)) {
+        const editableName = connectionManager.getEditablePlayerName(name).trim();
+        if (isUserNameTooLong(editableName)) {
             throw new NameTooLongError();
         }
-        if (!isUserNameValid(name)) {
+        if (!isUserNameValid(editableName)) {
             throw new NameNotValidError();
         }
 
         analyticsClient.validationName();
-        name = name.trim();
-        const didSaveName = await connectionManager.saveName(name);
-        gameManager.setPlayerName(name);
+        const persistedName = connectionManager.getPersistedPlayerName(editableName);
+        const didSaveName = await connectionManager.saveName(editableName);
+        gameManager.setPlayerName(persistedName);
         if (!didSaveName) {
             // Only save the name if the user is not logged in
             // If the user is logged in, the name will be fetched from the server. No need to save it locally.
             if (!localUserStore.isLogged() || !hasCapability("api/save-name")) {
-                setCurrentPlayerName(name);
+                setCurrentPlayerName(persistedName);
             }
         }
 

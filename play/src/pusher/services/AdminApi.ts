@@ -128,6 +128,30 @@ export type FetchMemberDataByUuidResponse = z.infer<typeof isFetchMemberDataByUu
 
 export type FetchWorldChatMembers = z.infer<typeof isFetchWorldChatMembers>;
 
+const GuestClaimResponseSchema = z.object({
+    userIdentifier: z.string(),
+    username: z.string().nullable().optional(),
+    guestSessionId: z.string().uuid(),
+    refreshToken: z.string(),
+    expiresAt: z.string(),
+});
+
+const GuestRefreshResponseSchema = z.object({
+    userIdentifier: z.string(),
+    username: z.string().nullable().optional(),
+    guestSessionId: z.string().uuid(),
+    refreshToken: z.string(),
+    expiresAt: z.string(),
+});
+
+const InviteResolveResponseSchema = z.object({
+    mode: z.enum(["member_onboarding", "guest_access"]),
+    status: z.enum(["active", "expired", "revoked", "limit_reached"]),
+    roomUrl: z.string().nullable(),
+    worldSlug: z.string(),
+    roomMatches: z.boolean().nullable(),
+});
+
 class AdminApi implements AdminInterface {
     private capabilities: Capabilities = {};
     private capabilitiesDeferred = new Deferred<Capabilities>();
@@ -356,6 +380,7 @@ class AdminApi implements AdminInterface {
     async fetchMemberDataByUuid(
         userIdentifier: string,
         accessToken: string | undefined,
+        tokenType: "user" | "guest",
         playUri: string,
         ipAddress: string,
         characterTextureIds: string[],
@@ -363,7 +388,8 @@ class AdminApi implements AdminInterface {
         locale?: string,
         tags?: string[],
         chatID?: string,
-        inviteToken?: string
+        inviteToken?: string,
+        guestSessionId?: string
     ): Promise<FetchMemberDataByUuidResponse> {
         try {
             /**
@@ -428,6 +454,8 @@ class AdminApi implements AdminInterface {
                     characterTextureIds,
                     companionTextureId,
                     accessToken,
+                    tokenType,
+                    guestSessionId,
                     isLogged: accessToken ? "1" : "0", // deprecated, use accessToken instead,
                     chatID,
                     inviteToken,
@@ -488,6 +516,103 @@ class AdminApi implements AdminInterface {
                 details: message,
             };
         }
+    }
+
+    async claimGuestInvite(
+        inviteToken: string,
+        playUri: string,
+        nickname?: string,
+        characterTextureIds?: string[],
+        companionTextureId?: string,
+        continuityToken?: string
+    ): Promise<{
+        userIdentifier: string;
+        username: string | null;
+        guestSessionId: string;
+        refreshToken: string;
+        expiresAt: string;
+    }> {
+        const encodedToken = encodeURIComponent(inviteToken);
+        const response = await axios.post<unknown>(
+            `${ADMIN_API_URL}/api/invites/${encodedToken}/claim-guest`,
+            {
+                playUri,
+                nickname,
+                characterTextureIds,
+                companionTextureId,
+                continuityToken,
+            },
+            {
+                headers: {
+                    Authorization: `${ADMIN_API_TOKEN}`,
+                },
+            }
+        );
+
+        const parsedResponse = GuestClaimResponseSchema.parse(response.data);
+        return {
+            userIdentifier: parsedResponse.userIdentifier,
+            username: parsedResponse.username ?? null,
+            guestSessionId: parsedResponse.guestSessionId,
+            refreshToken: parsedResponse.refreshToken,
+            expiresAt: parsedResponse.expiresAt,
+        };
+    }
+
+    async refreshGuestSession(
+        guestSessionId: string,
+        refreshToken: string
+    ): Promise<{
+        userIdentifier: string;
+        username: string | null;
+        guestSessionId: string;
+        refreshToken: string;
+        expiresAt: string;
+    }> {
+        const response = await axios.post<unknown>(
+            `${ADMIN_API_URL}/api/guest/refresh`,
+            {
+                guestSessionId,
+                refreshToken,
+            },
+            {
+                headers: {
+                    Authorization: `${ADMIN_API_TOKEN}`,
+                },
+            }
+        );
+
+        const parsedResponse = GuestRefreshResponseSchema.parse(response.data);
+        return {
+            userIdentifier: parsedResponse.userIdentifier,
+            username: parsedResponse.username ?? null,
+            guestSessionId: parsedResponse.guestSessionId,
+            refreshToken: parsedResponse.refreshToken,
+            expiresAt: parsedResponse.expiresAt,
+        };
+    }
+
+    async resolveInviteToken(
+        inviteToken: string,
+        playUri?: string
+    ): Promise<{
+        mode: "member_onboarding" | "guest_access";
+        status: "active" | "expired" | "revoked" | "limit_reached";
+        roomUrl: string | null;
+        worldSlug: string;
+        roomMatches: boolean | null;
+    }> {
+        const encodedToken = encodeURIComponent(inviteToken);
+        const response = await axios.get<unknown>(`${ADMIN_API_URL}/api/invites/${encodedToken}/resolve`, {
+            headers: {
+                Authorization: `${ADMIN_API_TOKEN}`,
+            },
+            params: {
+                playUri,
+            },
+        });
+
+        return InviteResolveResponseSchema.parse(response.data);
     }
 
     async fetchMemberDataByToken(

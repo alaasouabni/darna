@@ -3,7 +3,7 @@ import { v4 } from "uuid";
 import type { MeResponse, RegisterData } from "@workadventure/messages";
 import { MeRequest } from "@workadventure/messages";
 import { z } from "zod";
-import { JsonWebTokenError } from "jsonwebtoken";
+import { JsonWebTokenError, TokenExpiredError } from "jsonwebtoken";
 import Mustache from "mustache";
 import type { Application } from "express";
 import Debug from "debug";
@@ -11,7 +11,14 @@ import type { AuthTokenData } from "../services/JWTTokenManager";
 import type { FetchMemberDataByUuidResponse } from "../services/AdminApi";
 import { jwtTokenManager } from "../services/JWTTokenManager";
 import { openIDClient } from "../services/OpenIDClient";
-import { DISABLE_ANONYMOUS, FRONT_URL, MATRIX_PUBLIC_URI, PUSHER_URL } from "../enums/EnvironmentVariable";
+import {
+    DISABLE_ANONYMOUS,
+    FRONT_URL,
+    GUEST_ACCESS_TOKEN_TTL_HOURS,
+    INVITE_ONLY_GUEST_ENABLED,
+    MATRIX_PUBLIC_URI,
+    PUSHER_URL,
+} from "../enums/EnvironmentVariable";
 import { adminService } from "../services/AdminService";
 import { validateQuery } from "../services/QueryValidator";
 import { VerifyDomainService } from "../services/verifyDomain/VerifyDomainService";
@@ -19,6 +26,20 @@ import { matrixProvider } from "../services/MatrixProvider";
 import { BaseHttpController } from "./BaseHttpController";
 
 const debug = Debug("pusher:requests");
+
+const guestClaimBodySchema = z.object({
+    inviteToken: z.string().min(1),
+    playUri: z.string().url(),
+    nickname: z.string().trim().min(1).max(64).optional(),
+    characterTextureIds: z.array(z.string()).max(32).optional(),
+    companionTextureId: z.string().max(256).optional(),
+    continuityToken: z.string().trim().min(16).max(256).optional(),
+});
+
+const inviteResolveQuerySchema = z.object({
+    inviteToken: z.string().trim().min(1),
+    playUri: z.string().url().optional(),
+});
 
 export class AuthenticateController extends BaseHttpController {
     private readonly redirectToMatrixFile: string;
@@ -61,6 +82,9 @@ export class AuthenticateController extends BaseHttpController {
 
     routes(): void {
         this.openIDLogin();
+        this.inviteResolve();
+        this.guestClaim();
+        this.guestRefresh();
         this.me();
         this.openIDCallback();
         this.matrixCallback();
@@ -69,6 +93,40 @@ export class AuthenticateController extends BaseHttpController {
         this.anonymLogin();
         this.profileCallback();
         this.logoutUser();
+    }
+
+    private inviteResolve(): void {
+        this.app.get("/invite/resolve", async (req, res) => {
+            debug(`AuthenticateController => [${req.method}] ${req.originalUrl} - IP: ${req.ip} - Time: ${Date.now()}`);
+
+            const query = validateQuery(req, res, inviteResolveQuerySchema);
+            if (query === undefined) {
+                return;
+            }
+
+            try {
+                const response = await adminService.resolveInviteToken(query.inviteToken, query.playUri);
+                res.json(response);
+            } catch (error) {
+                const statusCode =
+                    typeof error === "object" && error !== null && "response" in error
+                        ? (error as { response?: { status?: number } }).response?.status ?? 502
+                        : 502;
+                const data =
+                    typeof error === "object" && error !== null && "response" in error
+                        ? (error as { response?: { data?: unknown } }).response?.data
+                        : undefined;
+
+                if (data && typeof data === "object") {
+                    res.status(statusCode).json(data);
+                } else {
+                    res.status(statusCode).json({
+                        message: "Failed to resolve invite.",
+                        details: error instanceof Error ? error.message : "Unknown error",
+                    });
+                }
+            }
+        });
     }
 
     private openIDLogin(): void {
@@ -144,6 +202,161 @@ export class AuthenticateController extends BaseHttpController {
         });
     }
 
+    private guestClaim(): void {
+        this.app.post("/guest/claim", async (req, res) => {
+            debug(`AuthenticateController => [${req.method}] ${req.originalUrl} - IP: ${req.ip} - Time: ${Date.now()}`);
+
+            if (!INVITE_ONLY_GUEST_ENABLED) {
+                res.status(403).json({
+                    message: "Guest invite onboarding is disabled.",
+                });
+                return;
+            }
+
+            const bodyResult = guestClaimBodySchema.safeParse(req.body);
+            if (!bodyResult.success) {
+                res.status(400).json({
+                    message: "Invalid request body.",
+                    details: bodyResult.error.flatten(),
+                });
+                return;
+            }
+
+            try {
+                const claim = await adminService.claimGuestInvite(
+                    bodyResult.data.inviteToken,
+                    bodyResult.data.playUri,
+                    bodyResult.data.nickname,
+                    bodyResult.data.characterTextureIds,
+                    bodyResult.data.companionTextureId,
+                    bodyResult.data.continuityToken
+                );
+
+                const authToken = jwtTokenManager.createAuthToken(
+                    claim.userIdentifier,
+                    undefined,
+                    claim.username ?? undefined,
+                    undefined,
+                    ["guest"],
+                    undefined,
+                    claim.refreshToken,
+                    {
+                        tokenType: "guest",
+                        guestSessionId: claim.guestSessionId,
+                        expiresIn: `${GUEST_ACCESS_TOKEN_TTL_HOURS}h`,
+                    }
+                );
+
+                res.json({
+                    authToken,
+                    userUuid: claim.userIdentifier,
+                    username: claim.username ?? null,
+                    expiresAt: claim.expiresAt,
+                });
+            } catch (error) {
+                const statusCode =
+                    typeof error === "object" && error !== null && "response" in error
+                        ? (error as { response?: { status?: number } }).response?.status ?? 502
+                        : 502;
+                const data =
+                    typeof error === "object" && error !== null && "response" in error
+                        ? (error as { response?: { data?: unknown } }).response?.data
+                        : undefined;
+
+                if (data && typeof data === "object") {
+                    res.status(statusCode).json(data);
+                } else {
+                    res.status(statusCode).json({
+                        message: "Failed to claim guest invite.",
+                        details: error instanceof Error ? error.message : "Unknown error",
+                    });
+                }
+            }
+        });
+    }
+
+    private guestRefresh(): void {
+        this.app.post("/guest/refresh", async (req, res) => {
+            debug(`AuthenticateController => [${req.method}] ${req.originalUrl} - IP: ${req.ip} - Time: ${Date.now()}`);
+
+            if (!INVITE_ONLY_GUEST_ENABLED) {
+                res.status(403).json({
+                    message: "Guest invite onboarding is disabled.",
+                });
+                return;
+            }
+
+            const authHeader = req.header("authorization");
+            if (!authHeader) {
+                res.status(401).send("Missing authorization header");
+                return;
+            }
+
+            let tokenData: AuthTokenData;
+            try {
+                tokenData = jwtTokenManager.verifyJWTToken(authHeader, true);
+            } catch {
+                res.status(401).send("Invalid token");
+                return;
+            }
+
+            if (
+                tokenData.tokenType !== "guest" ||
+                !tokenData.guestSessionId ||
+                !tokenData.refreshToken
+            ) {
+                res.status(401).send("Invalid guest token");
+                return;
+            }
+
+            try {
+                const refreshResponse = await adminService.refreshGuestSession(
+                    tokenData.guestSessionId,
+                    tokenData.refreshToken
+                );
+
+                const authToken = jwtTokenManager.createAuthToken(
+                    refreshResponse.userIdentifier,
+                    undefined,
+                    refreshResponse.username ?? undefined,
+                    tokenData.locale,
+                    tokenData.tags ?? ["guest"],
+                    tokenData.matrixUserId,
+                    refreshResponse.refreshToken,
+                    {
+                        tokenType: "guest",
+                        guestSessionId: refreshResponse.guestSessionId,
+                        expiresIn: `${GUEST_ACCESS_TOKEN_TTL_HOURS}h`,
+                    }
+                );
+
+                res.json({
+                    authToken,
+                    userUuid: refreshResponse.userIdentifier,
+                    username: refreshResponse.username ?? null,
+                    expiresAt: refreshResponse.expiresAt,
+                });
+            } catch (error) {
+                const statusCode =
+                    typeof error === "object" && error !== null && "response" in error
+                        ? (error as { response?: { status?: number } }).response?.status ?? 502
+                        : 502;
+                const data =
+                    typeof error === "object" && error !== null && "response" in error
+                        ? (error as { response?: { data?: unknown } }).response?.data
+                        : undefined;
+                if (data && typeof data === "object") {
+                    res.status(statusCode).json(data);
+                } else {
+                    res.status(statusCode).json({
+                        message: "Failed to refresh guest session.",
+                        details: error instanceof Error ? error.message : "Unknown error",
+                    });
+                }
+            }
+        });
+    }
+
     private me(): void {
         /**
          * @openapi
@@ -193,10 +406,37 @@ export class AuthenticateController extends BaseHttpController {
                 localStorageCharacterTextureIds = [localStorageCharacterTextureIds];
             }
             try {
-                const authTokenData: AuthTokenData = jwtTokenManager.verifyJWTToken(token, false);
-                let accessToken = authTokenData.accessToken;
-                let refreshToken = authTokenData.refreshToken;
+                let authTokenData: AuthTokenData;
                 let refreshedAuthToken = token;
+
+                const buildAuthToken = (
+                    data: AuthTokenData,
+                    overrides?: Partial<AuthTokenData> & { expiresIn?: string | number }
+                ): string => {
+                    const mergedTokenData: AuthTokenData = {
+                        ...data,
+                        ...overrides,
+                        tokenType: (overrides?.tokenType ?? data.tokenType ?? "user") as "user" | "guest",
+                    };
+                    return jwtTokenManager.createAuthToken(
+                        mergedTokenData.identifier,
+                        mergedTokenData.accessToken,
+                        mergedTokenData.username,
+                        mergedTokenData.locale,
+                        mergedTokenData.tags,
+                        mergedTokenData.matrixUserId,
+                        mergedTokenData.refreshToken,
+                        {
+                            tokenType: mergedTokenData.tokenType,
+                            guestSessionId: mergedTokenData.guestSessionId,
+                            expiresIn:
+                                overrides?.expiresIn ??
+                                (mergedTokenData.tokenType === "guest"
+                                    ? `${GUEST_ACCESS_TOKEN_TTL_HOURS}h`
+                                    : undefined),
+                        }
+                    );
+                };
 
                 const isInvalidGrant = (err: unknown): boolean => {
                     if (!err || typeof err !== "object") return false;
@@ -229,21 +469,79 @@ export class AuthenticateController extends BaseHttpController {
                     }
                     const nextAccessToken = refreshed.access_token;
                     const nextRefreshToken = refreshed.refresh_token ?? currentRefreshToken;
-                    const nextAuthToken = jwtTokenManager.createAuthToken(
-                        authTokenData.identifier,
-                        nextAccessToken,
-                        authTokenData.username,
-                        authTokenData.locale,
-                        authTokenData.tags,
-                        authTokenData.matrixUserId,
-                        nextRefreshToken
-                    );
+                    const nextAuthToken = buildAuthToken(authTokenData, {
+                        accessToken: nextAccessToken,
+                        refreshToken: nextRefreshToken,
+                    });
                     return {
                         nextAccessToken,
                         nextRefreshToken,
                         nextAuthToken,
                     };
                 };
+
+                const refreshGuestToken = async (
+                    currentTokenData: AuthTokenData
+                ): Promise<{
+                    nextTokenData: AuthTokenData;
+                    nextAuthToken: string;
+                }> => {
+                    if (
+                        currentTokenData.tokenType !== "guest" ||
+                        !currentTokenData.guestSessionId ||
+                        !currentTokenData.refreshToken
+                    ) {
+                        throw new JsonWebTokenError("Invalid token");
+                    }
+
+                    const refreshedGuestSession = await adminService.refreshGuestSession(
+                        currentTokenData.guestSessionId,
+                        currentTokenData.refreshToken
+                    );
+
+                    const nextTokenData: AuthTokenData = {
+                        ...currentTokenData,
+                        identifier: refreshedGuestSession.userIdentifier,
+                        username: refreshedGuestSession.username ?? currentTokenData.username,
+                        refreshToken: refreshedGuestSession.refreshToken,
+                        guestSessionId: refreshedGuestSession.guestSessionId,
+                        tokenType: "guest",
+                        accessToken: undefined,
+                    };
+
+                    const nextAuthToken = buildAuthToken(nextTokenData, {
+                        expiresIn: `${GUEST_ACCESS_TOKEN_TTL_HOURS}h`,
+                    });
+
+                    return {
+                        nextTokenData,
+                        nextAuthToken,
+                    };
+                };
+
+                try {
+                    authTokenData = jwtTokenManager.verifyJWTToken(token, false);
+                } catch (error) {
+                    if (error instanceof TokenExpiredError) {
+                        const decodedTokenData = jwtTokenManager.verifyJWTToken(token, true);
+                        if (
+                            decodedTokenData.tokenType === "guest" &&
+                            decodedTokenData.guestSessionId &&
+                            decodedTokenData.refreshToken
+                        ) {
+                            const refreshedGuestToken = await refreshGuestToken(decodedTokenData);
+                            authTokenData = refreshedGuestToken.nextTokenData;
+                            refreshedAuthToken = refreshedGuestToken.nextAuthToken;
+                        } else {
+                            throw new JsonWebTokenError("Invalid token");
+                        }
+                    } else {
+                        throw error;
+                    }
+                }
+
+                let accessToken = authTokenData.accessToken;
+                let refreshToken = authTokenData.refreshToken;
 
                 //Get user data from Admin Back Office
                 //This is very important to create User Local in LocalStorage in WorkAdventure
@@ -252,6 +550,7 @@ export class AuthenticateController extends BaseHttpController {
                     resUserData = await adminService.fetchMemberDataByUuid(
                         authTokenData.identifier,
                         accessToken,
+                        authTokenData.tokenType,
                         playUri,
                         IPAddress,
                         localStorageCharacterTextureIds ?? [],
@@ -259,17 +558,33 @@ export class AuthenticateController extends BaseHttpController {
                         req.header("accept-language"),
                         authTokenData.tags,
                         chatID,
-                        inviteToken
+                        inviteToken,
+                        authTokenData.guestSessionId
                     );
                 } catch (err) {
                     if (err instanceof JsonWebTokenError && refreshToken) {
-                        const refreshedTokens = await refreshAccessToken(refreshToken);
-                        accessToken = refreshedTokens.nextAccessToken;
-                        refreshToken = refreshedTokens.nextRefreshToken;
-                        refreshedAuthToken = refreshedTokens.nextAuthToken;
+                        if (authTokenData.tokenType === "guest") {
+                            const refreshedGuestToken = await refreshGuestToken(authTokenData);
+                            authTokenData = refreshedGuestToken.nextTokenData;
+                            accessToken = undefined;
+                            refreshToken = authTokenData.refreshToken;
+                            refreshedAuthToken = refreshedGuestToken.nextAuthToken;
+                        } else {
+                            const refreshedTokens = await refreshAccessToken(refreshToken);
+                            accessToken = refreshedTokens.nextAccessToken;
+                            refreshToken = refreshedTokens.nextRefreshToken;
+                            refreshedAuthToken = refreshedTokens.nextAuthToken;
+                            authTokenData = {
+                                ...authTokenData,
+                                accessToken,
+                                refreshToken,
+                            };
+                        }
+
                         resUserData = await adminService.fetchMemberDataByUuid(
                             authTokenData.identifier,
                             accessToken,
+                            authTokenData.tokenType,
                             playUri,
                             IPAddress,
                             localStorageCharacterTextureIds ?? [],
@@ -277,7 +592,8 @@ export class AuthenticateController extends BaseHttpController {
                             req.header("accept-language"),
                             authTokenData.tags,
                             chatID,
-                            inviteToken
+                            inviteToken,
+                            authTokenData.guestSessionId
                         );
                     } else {
                         throw err;
@@ -295,15 +611,14 @@ export class AuthenticateController extends BaseHttpController {
                     adminUsername && adminUsername.length > 0 ? adminUsername : authTokenData.username;
 
                 if (resolvedUsername !== authTokenData.username) {
-                    refreshedAuthToken = jwtTokenManager.createAuthToken(
-                        authTokenData.identifier,
+                    authTokenData = {
+                        ...authTokenData,
+                        username: resolvedUsername,
+                    };
+                    refreshedAuthToken = buildAuthToken(authTokenData, {
                         accessToken,
-                        resolvedUsername,
-                        authTokenData.locale,
-                        authTokenData.tags,
-                        authTokenData.matrixUserId,
-                        refreshToken
-                    );
+                        refreshToken,
+                    });
                 }
 
                 if (accessToken == undefined) {
@@ -331,6 +646,11 @@ export class AuthenticateController extends BaseHttpController {
                             accessToken = refreshedTokens.nextAccessToken;
                             refreshToken = refreshedTokens.nextRefreshToken;
                             refreshedAuthToken = refreshedTokens.nextAuthToken;
+                            authTokenData = {
+                                ...authTokenData,
+                                accessToken,
+                                refreshToken,
+                            };
                             resCheckTokenAuth = await openIDClient.checkTokenAuth(accessToken);
                         } else {
                             throw err;
@@ -626,7 +946,7 @@ export class AuthenticateController extends BaseHttpController {
     private anonymLogin(): void {
         this.app.post("/anonymLogin", (req, res) => {
             debug(`AuthenticateController => [${req.method}] ${req.originalUrl} — IP: ${req.ip} — Time: ${Date.now()}`);
-            if (DISABLE_ANONYMOUS) {
+            if (DISABLE_ANONYMOUS || INVITE_ONLY_GUEST_ENABLED) {
                 res.status(403).send("");
                 return;
             } else {

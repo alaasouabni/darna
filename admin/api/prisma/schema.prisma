@@ -9,6 +9,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum InviteMode {
+  member_onboarding
+  guest_access
+}
+
+enum InviteUsageCountMode {
+  unique_guest
+  every_claim
+}
+
 model World {
   id            String   @id @default(uuid())
   slug          String   @unique
@@ -58,6 +68,10 @@ model Member {
   chatId       String?
   characterTextureIds String[] @default([])
   companionTextureId  String?
+  isGuest      Boolean  @default(false)
+  guestExpiresAt DateTime?
+  disabledAt   DateTime?
+  inviteTokenId String?
   lastSeenAt  DateTime?
   lastRoomUrl String?
   createdAt    DateTime @default(now())
@@ -70,6 +84,11 @@ model Member {
   loginTokens     LoginToken[]
   createdInviteTokens InviteToken[] @relation("InviteTokenCreatedByMember")
   usedInviteTokens    InviteToken[] @relation("InviteTokenUsedByMember")
+  inviteToken        InviteToken? @relation("GuestInviteToken", fields: [inviteTokenId], references: [id])
+  inviteRedemptions  InviteRedemption[]
+  guestSessions      GuestSession[]
+
+  @@index([isGuest, guestExpiresAt])
 }
 
 model MemberTag {
@@ -148,6 +167,8 @@ model InviteToken {
   roomId           String?
   createdByMemberId String?
   usedByMemberId   String?
+  mode             InviteMode @default(member_onboarding)
+  usageCountMode   InviteUsageCountMode @default(unique_guest)
   allowedEmail     String?
   maxUses          Int?
   useCount         Int      @default(0)
@@ -160,6 +181,46 @@ model InviteToken {
   room             Room?    @relation(fields: [roomId], references: [id])
   createdByMember  Member?  @relation("InviteTokenCreatedByMember", fields: [createdByMemberId], references: [id])
   usedByMember     Member?  @relation("InviteTokenUsedByMember", fields: [usedByMemberId], references: [id])
+  guestMembers     Member[] @relation("GuestInviteToken")
+  inviteRedemptions InviteRedemption[]
+  guestSessions     GuestSession[]
+}
+
+model InviteRedemption {
+  id           String   @id @default(uuid())
+  inviteTokenId String
+  memberId     String
+  continuityHash String?
+  claimedAt    DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+  sourceIp     String?
+  userAgent    String?
+
+  inviteToken  InviteToken @relation(fields: [inviteTokenId], references: [id])
+  member       Member @relation(fields: [memberId], references: [id])
+
+  @@unique([inviteTokenId, memberId])
+  @@unique([inviteTokenId, continuityHash])
+  @@index([inviteTokenId, claimedAt])
+  @@index([memberId])
+}
+
+model GuestSession {
+  id               String   @id @default(uuid())
+  memberId         String
+  inviteTokenId    String?
+  refreshTokenHash String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastSeenAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  member           Member @relation(fields: [memberId], references: [id])
+  inviteToken      InviteToken? @relation(fields: [inviteTokenId], references: [id])
+
+  @@index([memberId, expiresAt])
+  @@index([expiresAt])
 }
 
 model WokaCollection {

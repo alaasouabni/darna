@@ -4,6 +4,8 @@ import { ADMIN_SOCKETS_TOKEN, SECRET_KEY } from "../enums/EnvironmentVariable";
 
 export const AuthTokenData = z.object({
     identifier: z.string(), //will be a email if logged in or an uuid if anonymous
+    tokenType: z.enum(["user", "guest"]).default("user"),
+    guestSessionId: z.string().uuid().optional(),
     accessToken: z.string().optional(),
     refreshToken: z.string().optional(),
     username: z.string().optional(),
@@ -42,11 +44,31 @@ export class JWTTokenManager {
         locale?: string,
         tags?: string[],
         matrixUserId?: string,
-        refreshToken?: string
+        refreshToken?: string,
+        options?: {
+            tokenType?: "user" | "guest";
+            guestSessionId?: string;
+            expiresIn?: string | number;
+        }
     ): string {
-        return Jwt.sign({ identifier, accessToken, refreshToken, username, locale, tags, matrixUserId }, SECRET_KEY, {
-            expiresIn: "30d",
-        });
+        const tokenType = options?.tokenType ?? "user";
+        return Jwt.sign(
+            {
+                identifier,
+                tokenType,
+                guestSessionId: options?.guestSessionId,
+                accessToken,
+                refreshToken,
+                username,
+                locale,
+                tags,
+                matrixUserId,
+            },
+            SECRET_KEY,
+            {
+                expiresIn: options?.expiresIn ?? (tokenType === "guest" ? "24h" : "30d"),
+            }
+        );
     }
 
     public verifyJWTToken(token: string, ignoreExpiration = false): AuthTokenData {

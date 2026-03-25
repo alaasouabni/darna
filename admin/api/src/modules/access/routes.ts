@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { errorData, unauthorizedData } from "../../lib/error-response";
 import { buildApplications } from "../../lib/applications";
-import { getCompanionDetails, getWokaDetails } from "../../lib/catalogs";
+import { getCompanionDetails, getDefaultWokaTextureIds, getWokaDetails } from "../../lib/catalogs";
 import { decodeAccessToken } from "../../lib/jwt";
 import { normalizeRoomPath, parseRoomPath } from "../../lib/room-url";
 import { config } from "../../config/env";
@@ -11,6 +11,8 @@ import { requireAdminAuth } from "../../plugins/auth";
 const querySchema = z.object({
     userIdentifier: z.string(),
     accessToken: z.string().optional(),
+    tokenType: z.enum(["user", "guest"]).optional(),
+    guestSessionId: z.string().uuid().optional(),
     playUri: z.string(),
     ipAddress: z.string(),
     characterTextureIds: z.union([z.string(), z.array(z.string())]).optional(),
@@ -44,7 +46,8 @@ type InviteConsumeResult =
               | "INVITE_EXPIRED"
               | "INVITE_LIMIT_REACHED"
               | "INVITE_EMAIL_MISMATCH"
-              | "INVITE_SCOPE_MISMATCH";
+              | "INVITE_SCOPE_MISMATCH"
+              | "INVITE_MODE_MISMATCH";
           details: string;
       };
 
@@ -82,6 +85,7 @@ async function consumeInviteForOnboarding(args: {
                 id: true,
                 worldId: true,
                 roomId: true,
+                mode: true,
                 allowedEmail: true,
                 maxUses: true,
                 useCount: true,
@@ -119,6 +123,14 @@ async function consumeInviteForOnboarding(args: {
                 ok: false,
                 code: "INVITE_SCOPE_MISMATCH",
                 details: "This invitation link is not valid for this world.",
+            };
+        }
+
+        if (invite.mode !== "member_onboarding") {
+            return {
+                ok: false,
+                code: "INVITE_MODE_MISMATCH",
+                details: "This invitation link cannot be used for member onboarding.",
             };
         }
 
@@ -176,6 +188,170 @@ async function consumeInviteForOnboarding(args: {
     };
 }
 
+type GuestSessionValidationResult =
+    | {
+          ok: true;
+          member: {
+              id: string;
+              externalId: string;
+              displayName: string | null;
+              email: string | null;
+              chatId: string | null;
+              characterTextureIds: string[];
+              companionTextureId: string | null;
+              visitCardUrl: string | null;
+          };
+          inviteTokenId: string | null;
+      }
+    | {
+          ok: false;
+          statusCode: number;
+          code: string;
+          details: string;
+      };
+
+async function validateGuestSessionAccess(args: {
+    app: FastifyInstance;
+    externalId: string;
+    guestSessionId?: string;
+    expectedWorldId: string | null;
+    expectedRoomId: string | null;
+}): Promise<GuestSessionValidationResult> {
+    const { app, externalId, guestSessionId, expectedWorldId, expectedRoomId } = args;
+    const now = new Date();
+
+    if (!guestSessionId) {
+        return {
+            ok: false,
+            statusCode: 401,
+            code: "GUEST_SESSION_REQUIRED",
+            details: "Guest session is required.",
+        };
+    }
+
+    const member = await app.db.member.findUnique({
+        where: { externalId },
+        select: {
+            id: true,
+            externalId: true,
+            displayName: true,
+            email: true,
+            chatId: true,
+            characterTextureIds: true,
+            companionTextureId: true,
+            visitCardUrl: true,
+            isGuest: true,
+            disabledAt: true,
+            guestExpiresAt: true,
+        },
+    });
+
+    if (!member || !member.isGuest) {
+        return {
+            ok: false,
+            statusCode: 401,
+            code: "GUEST_MEMBER_INVALID",
+            details: "Guest account is invalid.",
+        };
+    }
+
+    if (member.disabledAt || (member.guestExpiresAt && member.guestExpiresAt <= now)) {
+        return {
+            ok: false,
+            statusCode: 403,
+            code: "GUEST_MEMBER_EXPIRED",
+            details: "Guest account has expired.",
+        };
+    }
+
+    const session = await app.db.guestSession.findUnique({
+        where: { id: guestSessionId },
+        include: {
+            inviteToken: {
+                select: {
+                    id: true,
+                    worldId: true,
+                    roomId: true,
+                    revokedAt: true,
+                    expiresAt: true,
+                },
+            },
+        },
+    });
+
+    if (!session || session.memberId !== member.id) {
+        return {
+            ok: false,
+            statusCode: 401,
+            code: "GUEST_SESSION_INVALID",
+            details: "Guest session is invalid.",
+        };
+    }
+
+    if (session.revokedAt || session.expiresAt <= now) {
+        return {
+            ok: false,
+            statusCode: 401,
+            code: "GUEST_SESSION_EXPIRED",
+            details: "Guest session has expired.",
+        };
+    }
+
+    if (session.inviteToken) {
+        if (session.inviteToken.revokedAt || session.inviteToken.expiresAt <= now) {
+            return {
+                ok: false,
+                statusCode: 403,
+                code: "INVITE_EXPIRED",
+                details: "Invitation used by this guest has expired or was revoked.",
+            };
+        }
+
+        if (expectedWorldId && session.inviteToken.worldId !== expectedWorldId) {
+            return {
+                ok: false,
+                statusCode: 403,
+                code: "INVITE_SCOPE_MISMATCH",
+                details: "Guest invitation is not valid for this world.",
+            };
+        }
+
+        if (session.inviteToken.roomId && session.inviteToken.roomId !== expectedRoomId) {
+            return {
+                ok: false,
+                statusCode: 403,
+                code: "INVITE_SCOPE_MISMATCH",
+                details: "Guest invitation is not valid for this room.",
+            };
+        }
+    }
+
+    await app.db.guestSession
+        .update({
+            where: { id: session.id },
+            data: { lastSeenAt: now },
+        })
+        .catch(() => undefined);
+
+    if (session.inviteToken?.id) {
+        await app.db.inviteRedemption
+            .updateMany({
+                where: {
+                    inviteTokenId: session.inviteToken.id,
+                    memberId: member.id,
+                },
+                data: { lastSeenAt: now },
+            })
+            .catch(() => undefined);
+    }
+
+    return {
+        ok: true,
+        member,
+        inviteTokenId: session.inviteToken?.id ?? null,
+    };
+}
+
 export async function accessRoutes(app: FastifyInstance) {
     app.get("/room/access", { preHandler: requireAdminAuth }, async (request, reply) => {
         // User-specific response: never cache.
@@ -217,14 +393,16 @@ export async function accessRoutes(app: FastifyInstance) {
             return;
         }
 
-        const tokenUser = query.accessToken ? await decodeAccessToken(query.accessToken) : null;
+        const tokenType = query.tokenType ?? "user";
+        const isGuestToken = tokenType === "guest";
+        const tokenUser = !isGuestToken && query.accessToken ? await decodeAccessToken(query.accessToken) : null;
         const tokenExpiresAt =
             tokenUser?.claims?.exp && Number.isFinite(tokenUser.claims.exp)
                 ? Number(tokenUser.claims.exp)
                 : null;
         const tokenExpired = tokenExpiresAt !== null ? tokenExpiresAt < Math.floor(Date.now() / 1000) : false;
 
-        if (config.DISABLE_ANONYMOUS) {
+        if (config.DISABLE_ANONYMOUS && !isGuestToken) {
             if (!tokenUser || tokenExpired || !tokenUser.email) {
                 reply.code(401).send(
                     unauthorizedData("Authentication required. Please sign in again.")
@@ -233,7 +411,7 @@ export async function accessRoutes(app: FastifyInstance) {
             }
         }
 
-        const externalId = (tokenUser?.email ?? query.userIdentifier).trim();
+        const externalId = (isGuestToken ? query.userIdentifier : tokenUser?.email ?? query.userIdentifier).trim();
         if (!externalId || externalId === "-") {
             reply.code(401).send(
                 unauthorizedData("Authentication required. Please sign in again.")
@@ -241,9 +419,11 @@ export async function accessRoutes(app: FastifyInstance) {
             return;
         }
 
-        const identifierEmail = externalId.includes("@") ? externalId : null;
-
+        const identifierEmail = !isGuestToken && externalId.includes("@") ? externalId : null;
         const now = new Date();
+        const expectedWorldId = room?.worldId ?? mapStorageWorld?.id ?? null;
+        const expectedRoomId = room?.id ?? null;
+
         const banWorldId = room?.worldId ?? mapStorageWorld?.id ?? null;
         const ban = banWorldId
             ? await app.db.ban.findFirst({
@@ -272,119 +452,150 @@ export async function accessRoutes(app: FastifyInstance) {
             return;
         }
 
-        const existingMember = await app.db.member.findUnique({ where: { externalId } });
+        let member:
+            | Awaited<ReturnType<typeof app.db.member.create>>
+            | Awaited<ReturnType<typeof app.db.member.update>>;
         let consumedInviteId: string | null = null;
 
-        if (!existingMember && config.INVITE_ONLY_ONBOARDING) {
-            const expectedWorldId = room?.worldId ?? mapStorageWorld?.id ?? null;
-            const expectedRoomId = room?.id ?? null;
-
-            if (!expectedWorldId) {
-                reply.code(403).send(
-                    errorData(
-                        "INVITE_REQUIRED",
-                        "Invite required",
-                        "This world is invite-only",
-                        "Unable to resolve world scope for invite validation."
-                    )
-                );
-                return;
-            }
-
-            const requesterEmail = tokenUser?.email ?? identifierEmail;
-            if (!requesterEmail) {
-                reply.code(401).send(
-                    errorData(
-                        "INVITE_AUTH_REQUIRED",
-                        "Authentication required",
-                        "Please sign in to continue",
-                        "Invite onboarding requires an authenticated account."
-                    )
-                );
-                return;
-            }
-
-            if (!query.inviteToken) {
-                reply.code(403).send(
-                    errorData(
-                        "INVITE_REQUIRED",
-                        "Invite required",
-                        "This world is invite-only",
-                        "You need a valid invitation link to access this world."
-                    )
-                );
-                return;
-            }
-
-            const inviteResult = await consumeInviteForOnboarding({
+        if (isGuestToken) {
+            const guestValidationResult = await validateGuestSessionAccess({
                 app,
-                inviteToken: query.inviteToken,
+                externalId,
+                guestSessionId: query.guestSessionId,
                 expectedWorldId,
                 expectedRoomId,
-                requesterEmail,
             });
 
-            if (!inviteResult.ok) {
-                reply.code(403).send(
+            if (!guestValidationResult.ok) {
+                reply.code(guestValidationResult.statusCode).send(
                     errorData(
-                        inviteResult.code,
-                        "Invalid invitation",
-                        "Unable to validate invitation",
-                        inviteResult.details
+                        guestValidationResult.code,
+                        "Guest access denied",
+                        "Unable to validate guest session",
+                        guestValidationResult.details
                     )
                 );
                 return;
             }
 
-            consumedInviteId = inviteResult.inviteId;
-        }
-
-        const displayNameFromToken = tokenUser?.name ?? tokenUser?.preferredUsername ?? null;
-
-        const updateData: Record<string, unknown> = {
-            email: tokenUser?.email ?? identifierEmail ?? undefined,
-            chatId: query.chatID ?? undefined,
-            lastSeenAt: new Date(),
-            lastRoomUrl: room?.roomUrl ?? roomPath,
-        };
-
-        if (existingMember?.displayName == null && displayNameFromToken) {
-            updateData.displayName = displayNameFromToken;
-        }
-
-        const member = existingMember
-            ? await app.db.member.update({
-                  where: { externalId },
-                  data: updateData,
-              })
-            : await app.db.member.create({
-                  data: {
-                      externalId,
-                      email: tokenUser?.email ?? identifierEmail,
-                      displayName: displayNameFromToken,
-                      chatId: query.chatID ?? null,
-                      lastSeenAt: new Date(),
-                      lastRoomUrl: room?.roomUrl ?? roomPath,
-                  },
-              });
-
-        if (consumedInviteId) {
-            await app.db.inviteToken
-                .update({
-                    where: { id: consumedInviteId },
-                    data: { usedByMemberId: member.id },
-                })
-                .catch(() => undefined);
-        }
-
-        if (tokenUser?.tags.length) {
-            await app.db.memberTag.createMany({
-                data: tokenUser.tags.map((tag) => ({
-                    memberId: member.id,
-                    tag,
-                })),
-                skipDuplicates: true,
+            member = await app.db.member.update({
+                where: { id: guestValidationResult.member.id },
+                data: {
+                    chatId: query.chatID ?? undefined,
+                    lastSeenAt: now,
+                    lastRoomUrl: room?.roomUrl ?? roomPath,
+                },
             });
+        } else {
+            const existingMember = await app.db.member.findUnique({ where: { externalId } });
+
+            if (!existingMember && config.INVITE_ONLY_ONBOARDING) {
+                if (!expectedWorldId) {
+                    reply.code(403).send(
+                        errorData(
+                            "INVITE_REQUIRED",
+                            "Invite required",
+                            "This world is invite-only",
+                            "Unable to resolve world scope for invite validation."
+                        )
+                    );
+                    return;
+                }
+
+                const requesterEmail = tokenUser?.email ?? identifierEmail;
+                if (!requesterEmail) {
+                    reply.code(401).send(
+                        errorData(
+                            "INVITE_AUTH_REQUIRED",
+                            "Authentication required",
+                            "Please sign in to continue",
+                            "Invite onboarding requires an authenticated account."
+                        )
+                    );
+                    return;
+                }
+
+                if (!query.inviteToken) {
+                    reply.code(403).send(
+                        errorData(
+                            "INVITE_REQUIRED",
+                            "Invite required",
+                            "This world is invite-only",
+                            "You need a valid invitation link to access this world."
+                        )
+                    );
+                    return;
+                }
+
+                const inviteResult = await consumeInviteForOnboarding({
+                    app,
+                    inviteToken: query.inviteToken,
+                    expectedWorldId,
+                    expectedRoomId,
+                    requesterEmail,
+                });
+
+                if (!inviteResult.ok) {
+                    reply.code(403).send(
+                        errorData(
+                            inviteResult.code,
+                            "Invalid invitation",
+                            "Unable to validate invitation",
+                            inviteResult.details
+                        )
+                    );
+                    return;
+                }
+
+                consumedInviteId = inviteResult.inviteId;
+            }
+
+            const displayNameFromToken = tokenUser?.name ?? tokenUser?.preferredUsername ?? null;
+            const updateData: Record<string, unknown> = {
+                email: tokenUser?.email ?? identifierEmail ?? undefined,
+                chatId: query.chatID ?? undefined,
+                lastSeenAt: now,
+                lastRoomUrl: room?.roomUrl ?? roomPath,
+            };
+
+            if (existingMember?.displayName == null && displayNameFromToken) {
+                updateData.displayName = displayNameFromToken;
+            }
+
+            member = existingMember
+                ? await app.db.member.update({
+                      where: { externalId },
+                      data: updateData,
+                  })
+                : await app.db.member.create({
+                      data: {
+                          externalId,
+                          email: tokenUser?.email ?? identifierEmail,
+                          displayName: displayNameFromToken,
+                          chatId: query.chatID ?? null,
+                          lastSeenAt: now,
+                          lastRoomUrl: room?.roomUrl ?? roomPath,
+                      },
+                  });
+
+            if (consumedInviteId) {
+                await app.db.inviteToken
+                    .update({
+                        where: { id: consumedInviteId },
+                        data: { usedByMemberId: member.id },
+                    })
+                    .catch(() => undefined);
+            }
+
+            if (tokenUser?.tags.length) {
+                await app.db.memberTag.createMany({
+                    data: tokenUser.tags.map((tag) => ({
+                        memberId: member.id,
+                        tag,
+                    })),
+                    skipDuplicates: true,
+                });
+            }
         }
 
         const memberTags = await app.db.memberTag.findMany({
@@ -392,10 +603,13 @@ export async function accessRoutes(app: FastifyInstance) {
         });
 
         const tagSet = new Set<string>();
+        if (isGuestToken) {
+            tagSet.add("guest");
+        }
         tokenUser?.tags.forEach((tag) => tagSet.add(tag));
         memberTags.forEach((tag) => tagSet.add(tag.tag));
 
-        if (room) {
+        if (room && !isGuestToken) {
             const roomTags = new Set<string>(room.tags);
             room.tagsTable.forEach((tag) => roomTags.add(tag.tag));
 
@@ -411,6 +625,7 @@ export async function accessRoutes(app: FastifyInstance) {
         }
 
         const canEdit =
+            !isGuestToken &&
             config.ENABLE_MAP_EDITOR &&
             (config.MAP_EDITOR_ALLOW_ALL_USERS ||
                 config.mapEditorAllowedUsers.includes(externalId) ||
@@ -418,34 +633,62 @@ export async function accessRoutes(app: FastifyInstance) {
                 tagSet.has("editor"));
 
         const requestedTextures = normalizeArray(query.characterTextureIds);
-        const resolvedTextures =
-            requestedTextures.length > 0 ? requestedTextures : member.characterTextureIds;
+        let resolvedTextures = isGuestToken
+            ? member.characterTextureIds
+            : requestedTextures.length > 0
+              ? requestedTextures
+              : member.characterTextureIds;
 
         let characterTextures = resolvedTextures.length ? getWokaDetails(resolvedTextures) : undefined;
-        const isCharacterTexturesValid = Boolean(characterTextures && characterTextures.length);
+        if (!characterTextures && !isGuestToken && requestedTextures.length > 0 && member.characterTextureIds.length > 0) {
+            const memberStoredDetails = getWokaDetails(member.characterTextureIds);
+            if (memberStoredDetails) {
+                resolvedTextures = member.characterTextureIds;
+                characterTextures = memberStoredDetails;
+            }
+        }
+
+        let isCharacterTexturesValid = Boolean(characterTextures && characterTextures.length);
+        if (isGuestToken && member.characterTextureIds.length > 0 && !isCharacterTexturesValid) {
+            const fallbackTextures = getDefaultWokaTextureIds();
+            const fallbackDetails = fallbackTextures.length > 0 ? getWokaDetails(fallbackTextures) : undefined;
+            if (fallbackDetails && fallbackDetails.length > 0) {
+                resolvedTextures = fallbackTextures;
+                characterTextures = fallbackDetails;
+                isCharacterTexturesValid = true;
+                await app.db.member
+                    .update({
+                        where: { id: member.id },
+                        data: { characterTextureIds: fallbackTextures },
+                    })
+                    .catch(() => undefined);
+            }
+        }
         if (!characterTextures) {
             characterTextures = [];
         }
 
-        const requestedCompanion = query.companionTextureId ?? member.companionTextureId ?? undefined;
+        const requestedCompanion = isGuestToken
+            ? member.companionTextureId ?? undefined
+            : query.companionTextureId ?? member.companionTextureId ?? undefined;
         const companionTexture = requestedCompanion ? getCompanionDetails(requestedCompanion) : undefined;
         const isCompanionTextureValid = requestedCompanion ? Boolean(companionTexture) : true;
 
-        if (requestedTextures.length > 0 && isCharacterTexturesValid) {
+        if (!isGuestToken && requestedTextures.length > 0 && isCharacterTexturesValid) {
             await app.db.member.update({
                 where: { id: member.id },
                 data: { characterTextureIds: requestedTextures },
             });
         }
 
-        if (requestedCompanion && isCompanionTextureValid) {
+        if (!isGuestToken && query.companionTextureId && isCompanionTextureValid) {
             await app.db.member.update({
                 where: { id: member.id },
                 data: { companionTextureId: requestedCompanion },
             });
         }
 
-        const fallbackEmail = externalId.includes("@") ? externalId : null;
+        const fallbackEmail = !isGuestToken && externalId.includes("@") ? externalId : null;
 
         reply.send({
             status: "ok",

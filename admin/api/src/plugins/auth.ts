@@ -105,10 +105,18 @@ export const authPlugin: FastifyPluginAsync = fp(async (app) => {
     });
 });
 
-export function requireServiceAuth(request: FastifyRequest, reply: FastifyReply) {
+export function requireServiceAuth(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    done?: (err?: Error) => void
+) {
     if (request.adminAuth.kind !== "service") {
         reply.code(401).send(unauthorizedData("Service token required."));
         return;
+    }
+
+    if (done) {
+        done();
     }
 }
 
@@ -116,7 +124,11 @@ function isAdminUser(user?: TokenUser): boolean {
     return Boolean(user && user.tags.includes("admin"));
 }
 
-export function requireUserAuth(request: FastifyRequest, reply: FastifyReply) {
+export function requireUserAuth(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    done?: (err?: Error) => void
+) {
     if (request.adminAuth.kind !== "user") {
         reply.code(401).send(unauthorizedData("User token required."));
         return;
@@ -126,6 +138,10 @@ export function requireUserAuth(request: FastifyRequest, reply: FastifyReply) {
         const details = request.adminAuth.error ?? "Invalid user token.";
         reply.code(401).send(unauthorizedData(details));
         return;
+    }
+
+    if (done) {
+        done();
     }
 }
 

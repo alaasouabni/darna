@@ -4,6 +4,8 @@ import { jwtTokenManager } from "../services/JWTTokenManager";
 
 export type ResponseWithUserIdentifier = Response & {
     userIdentifier?: string;
+    tokenType?: "user" | "guest";
+    guestSessionId?: string;
     isLogged?: boolean;
     accessToken?: string;
     username?: string;
@@ -21,7 +23,9 @@ export function authenticated(req: Request, res: ResponseWithUserIdentifier, nex
         const jwtData = jwtTokenManager.verifyJWTToken(token);
         // Let's set the "uuid" param
         res.userIdentifier = jwtData.identifier;
-        res.isLogged = !!jwtData.accessToken;
+        res.tokenType = jwtData.tokenType;
+        res.guestSessionId = jwtData.guestSessionId;
+        res.isLogged = jwtData.tokenType === "guest" || !!jwtData.accessToken;
         res.accessToken = jwtData.accessToken;
         res.username = jwtData.username;
         res.tags = jwtData.tags ?? [];

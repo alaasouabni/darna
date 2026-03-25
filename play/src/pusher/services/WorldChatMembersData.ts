@@ -6,6 +6,7 @@ const ChatMemberData = z.object({
     email: z
         .string()
         .nullable()
+        .optional()
         .transform((value) => (value === null ? undefined : value)),
     chatId: z.string().optional(),
     tags: z.string().array(),

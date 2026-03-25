@@ -497,6 +497,161 @@ a {
   border: 1px solid rgba(26, 22, 18, 0.08);
 }
 
+.invite-create-modal {
+  width: min(640px, 100%);
+  overflow: visible;
+}
+
+.invite-mode-summary {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(15, 118, 110, 0.08);
+  border: 1px solid rgba(15, 118, 110, 0.25);
+}
+
+.invite-mode-summary-title {
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.invite-mode-summary-text {
+  color: var(--ink-2);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.invite-advanced {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid rgba(26, 22, 18, 0.08);
+  display: grid;
+  gap: 0.9rem;
+}
+
+.invite-create-modal .modal-actions {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(26, 22, 18, 0.08);
+}
+
+.wa-datepicker-popper {
+  z-index: 60;
+}
+
+.wa-datepicker {
+  width: 100%;
+}
+
+.wa-datepicker.react-datepicker {
+  border: 1px solid rgba(26, 22, 18, 0.14);
+  border-radius: 14px;
+  background: #ffffff;
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
+  opacity: 1;
+}
+
+.wa-datepicker .react-datepicker__header {
+  background: rgba(15, 118, 110, 0.12);
+  border-bottom: 1px solid rgba(26, 22, 18, 0.14);
+}
+
+.wa-datepicker .react-datepicker__current-month,
+.wa-datepicker .react-datepicker-time__header,
+.wa-datepicker .react-datepicker-year-header {
+  color: var(--ink-1);
+}
+
+.wa-datepicker .react-datepicker__day-name,
+.wa-datepicker .react-datepicker__day,
+.wa-datepicker .react-datepicker__time-name {
+  color: var(--ink-1);
+}
+
+.wa-datepicker .react-datepicker__day:hover,
+.wa-datepicker .react-datepicker__time-list-item:hover {
+  background: rgba(15, 118, 110, 0.14);
+  border-radius: 8px;
+}
+
+.wa-datepicker .react-datepicker__day--selected,
+.wa-datepicker .react-datepicker__day--keyboard-selected,
+.wa-datepicker .react-datepicker__time-list-item--selected {
+  background: var(--accent-0) !important;
+  color: #fff !important;
+}
+
+.wa-datepicker .react-datepicker__day--today {
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.6);
+}
+
+.wa-datepicker .react-datepicker__triangle {
+  display: none;
+}
+
+.wa-datepicker .react-datepicker__time-container,
+.wa-datepicker .react-datepicker__time {
+  border-left: 1px solid rgba(26, 22, 18, 0.14);
+  background: #ffffff;
+}
+
+.wa-datepicker .react-datepicker-time__input-container input {
+  border: 1px solid rgba(26, 22, 18, 0.18);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--ink-1);
+  padding: 6px 8px;
+  font-family: var(--font-sans);
+}
+
+.wa-datepicker .react-datepicker__month-dropdown-container select,
+.wa-datepicker .react-datepicker__year-dropdown-container select {
+  border: 1px solid rgba(26, 22, 18, 0.18);
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: #ffffff;
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+}
+
+:root[data-theme="dark"] .wa-datepicker.react-datepicker,
+:root[data-theme="dark"] .wa-datepicker .react-datepicker__time-container,
+:root[data-theme="dark"] .wa-datepicker .react-datepicker__time {
+  background: #101816;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme="dark"] .wa-datepicker .react-datepicker__header {
+  background: rgba(47, 182, 166, 0.14);
+  border-bottom-color: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme="dark"] .wa-datepicker .react-datepicker-time__input-container input {
+  background: #0d1312;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--ink-0);
+}
+
+:root[data-theme="dark"] .wa-datepicker .react-datepicker__month-dropdown-container select,
+:root[data-theme="dark"] .wa-datepicker .react-datepicker__year-dropdown-container select {
+  background: #0d1312;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--ink-0);
+}
+
+@media (max-height: 820px) {
+  .invite-create-modal {
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
+
 .modal-title {
   margin: 0 0 12px;
   font-size: 1.2rem;

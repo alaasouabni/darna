@@ -9,6 +9,17 @@ import { authenticated } from "../middlewares/Authenticated";
 import { BaseHttpController } from "./BaseHttpController";
 
 const debug = Debug("pusher:requests");
+const GUEST_NAME_SUFFIX = " (guest)";
+const guestSuffixPattern = /\s*\(guest\)\s*$/i;
+
+function normalizeGuestDisplayName(name: string): string {
+    const sanitized = name.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+    const baseName = sanitized.replace(guestSuffixPattern, "").trim();
+    if (!baseName) {
+        return `Guest${GUEST_NAME_SUFFIX}`;
+    }
+    return `${baseName}${GUEST_NAME_SUFFIX}`;
+}
 
 export class UserController extends BaseHttpController {
     // Returns a map mapping map name to file name of the map
@@ -79,10 +90,13 @@ export class UserController extends BaseHttpController {
                 return;
             }
 
+            const persistedName =
+                res.tokenType === "guest" ? normalizeGuestDisplayName(body.name) : body.name.trim();
+
             // Not logged? Nothing to save!
             if (res.isLogged) {
-                await adminService.saveName(res.userIdentifier, body.name, body.roomUrl);
-                await socketManager.updateUserProfileName(res.userIdentifier, body.name);
+                await adminService.saveName(res.userIdentifier, persistedName, body.roomUrl);
+                await socketManager.updateUserProfileName(res.userIdentifier, persistedName);
             }
 
             res.status(204).send("");
@@ -172,6 +186,7 @@ export class UserController extends BaseHttpController {
                         const profileData = await adminService.fetchMemberDataByUuid(
                             res.userIdentifier,
                             res.accessToken,
+                            res.tokenType ?? "user",
                             body.roomUrl,
                             req.ip ?? "",
                             body.textures,
@@ -276,6 +291,7 @@ export class UserController extends BaseHttpController {
                             const profileData = await adminService.fetchMemberDataByUuid(
                                 res.userIdentifier,
                                 res.accessToken,
+                                res.tokenType ?? "user",
                                 body.roomUrl,
                                 req.ip ?? "",
                                 [],

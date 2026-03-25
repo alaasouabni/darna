@@ -60,6 +60,7 @@ class LocalAdmin implements AdminInterface {
     async fetchMemberDataByUuid(
         userIdentifier: string,
         accessToken: string | undefined,
+        _tokenType: "user" | "guest",
         playUri: string,
         ipAddress: string,
         characterTextureIds: string[],
@@ -67,7 +68,8 @@ class LocalAdmin implements AdminInterface {
         locale?: string,
         tags?: string[],
         _chatID?: string,
-        _inviteToken?: string
+        _inviteToken?: string,
+        _guestSessionId?: string
     ): Promise<FetchMemberDataByUuidResponse> {
         let canEdit = false;
         const roomUrl = new URL(playUri);
@@ -229,6 +231,55 @@ class LocalAdmin implements AdminInterface {
             canEdit,
             world: "localWorld",
             applications,
+        };
+    }
+
+    async claimGuestInvite(
+        _inviteToken: string,
+        _playUri: string,
+        _nickname?: string,
+        _characterTextureIds?: string[],
+        _companionTextureId?: string,
+        _continuityToken?: string
+    ): Promise<{
+        userIdentifier: string;
+        username: string | null;
+        guestSessionId: string;
+        refreshToken: string;
+        expiresAt: string;
+    }> {
+        throw new Error("Guest invites require an Admin API.");
+    }
+
+    async refreshGuestSession(
+        _guestSessionId: string,
+        _refreshToken: string
+    ): Promise<{
+        userIdentifier: string;
+        username: string | null;
+        guestSessionId: string;
+        refreshToken: string;
+        expiresAt: string;
+    }> {
+        throw new Error("Guest invites require an Admin API.");
+    }
+
+    async resolveInviteToken(
+        _inviteToken: string,
+        _playUri?: string
+    ): Promise<{
+        mode: "member_onboarding" | "guest_access";
+        status: "active" | "expired" | "revoked" | "limit_reached";
+        roomUrl: string | null;
+        worldSlug: string;
+        roomMatches: boolean | null;
+    }> {
+        return {
+            mode: "member_onboarding",
+            status: "active",
+            roomUrl: null,
+            worldSlug: "localWorld",
+            roomMatches: null,
         };
     }
 

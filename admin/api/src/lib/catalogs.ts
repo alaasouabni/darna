@@ -106,6 +106,22 @@ export function getWokaDetails(textureIds: string[]): WokaDetail[] | undefined {
     return details;
 }
 
+export function getDefaultWokaTextureIds(): string[] {
+    const list = getWokaList();
+    const textureIds: string[] = [];
+
+    for (const partName of wokaPartNames) {
+        const part = list[partName];
+        const firstCollection = part?.collections?.[0];
+        const firstTexture = firstCollection?.textures?.[0];
+        if (firstTexture?.id) {
+            textureIds.push(firstTexture.id);
+        }
+    }
+
+    return textureIds;
+}
+
 export function getCompanionList(): CompanionTextureCollection[] {
     if (!cachedCompanionList) {
         cachedCompanionList = buildCompanionList();
