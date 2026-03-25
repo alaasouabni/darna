@@ -12,6 +12,7 @@ import { useAdminContext } from "../context";
 type InviteStatus = "all" | "active" | "expired" | "revoked" | "limit_reached";
 type InviteMode = "member_onboarding" | "guest_access";
 type InviteUsageCountMode = "unique_guest" | "every_claim";
+type GuestSessionPolicy = "24h" | "48h" | "72h" | "168h" | "custom_hours" | "custom_deadline";
 
 type InviteItem = {
   token: string;
@@ -28,6 +29,8 @@ type InviteItem = {
   remainingUses: number | null;
   mode: InviteMode;
   usageCountMode: InviteUsageCountMode;
+  guestSessionTtlHours: number | null;
+  guestSessionDeadlineAt: string | null;
   expiresAt: string;
   revokedAt: string | null;
   createdAt: string;
@@ -132,6 +135,11 @@ export function InvitesPage() {
   const [createMode, setCreateMode] = useState<InviteMode>("guest_access");
   const [createUsageCountMode, setCreateUsageCountMode] = useState<InviteUsageCountMode>("unique_guest");
   const [createMaxUses, setCreateMaxUses] = useState("1");
+  const [createGuestSessionPolicy, setCreateGuestSessionPolicy] = useState<GuestSessionPolicy>("24h");
+  const [createGuestSessionCustomHours, setCreateGuestSessionCustomHours] = useState("");
+  const [createGuestSessionDeadlineAt, setCreateGuestSessionDeadlineAt] = useState(() =>
+    toDateTimeLocalValue(new Date(Date.now() + 24 * 60 * 60 * 1000))
+  );
   const [createExpiresAt, setCreateExpiresAt] = useState(() => toDateTimeLocalValue(new Date(Date.now() + 24 * 60 * 60 * 1000)));
   const [createAllowedEmail, setCreateAllowedEmail] = useState("");
   const [createRevokeExisting, setCreateRevokeExisting] = useState(false);
@@ -156,6 +164,8 @@ export function InvitesPage() {
   const canGenerate = Boolean(context.playUri);
   const isGuestCreateMode = createMode === "guest_access";
   const selectedExpiresAt = parseDateTimeLocalValue(createExpiresAt) ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const selectedGuestSessionDeadlineAt =
+    parseDateTimeLocalValue(createGuestSessionDeadlineAt) ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
 
   const groupedSummary = useMemo(() => {
     const byStatus = {
@@ -180,6 +190,9 @@ export function InvitesPage() {
       return;
     }
     setCreateShowAdvanced(false);
+    setCreateGuestSessionPolicy("24h");
+    setCreateGuestSessionCustomHours("");
+    setCreateGuestSessionDeadlineAt(toDateTimeLocalValue(new Date(Date.now() + 24 * 60 * 60 * 1000)));
     setCreateModalOpen(true);
   };
 
@@ -193,6 +206,34 @@ export function InvitesPage() {
     if (maxUses !== undefined && (Number.isNaN(maxUses) || maxUses < 0)) {
       window.alert("Max uses must be a positive number or 0 for unlimited.");
       return;
+    }
+
+    let guestSessionTtlHours: number | undefined;
+    let guestSessionDeadlineAt: string | undefined;
+    if (createMode === "guest_access") {
+      if (createGuestSessionPolicy === "24h") {
+        guestSessionTtlHours = 24;
+      } else if (createGuestSessionPolicy === "48h") {
+        guestSessionTtlHours = 48;
+      } else if (createGuestSessionPolicy === "72h") {
+        guestSessionTtlHours = 72;
+      } else if (createGuestSessionPolicy === "168h") {
+        guestSessionTtlHours = 168;
+      } else if (createGuestSessionPolicy === "custom_hours") {
+        const value = Number.parseInt(createGuestSessionCustomHours.trim(), 10);
+        if (Number.isNaN(value) || value <= 0 || value > 24 * 30) {
+          window.alert("Custom guest session duration must be between 1 and 720 hours.");
+          return;
+        }
+        guestSessionTtlHours = value;
+      } else if (createGuestSessionPolicy === "custom_deadline") {
+        const deadlineDate = new Date(createGuestSessionDeadlineAt);
+        if (Number.isNaN(deadlineDate.getTime()) || deadlineDate <= new Date()) {
+          window.alert("Please select a future guest session deadline.");
+          return;
+        }
+        guestSessionDeadlineAt = deadlineDate.toISOString();
+      }
     }
 
     const expiresDate = new Date(createExpiresAt);
@@ -211,6 +252,8 @@ export function InvitesPage() {
           maxUses,
           mode: createMode,
           usageCountMode: createUsageCountMode,
+          guestSessionTtlHours: createMode === "guest_access" ? guestSessionTtlHours : undefined,
+          guestSessionDeadlineAt: createMode === "guest_access" ? guestSessionDeadlineAt : undefined,
           allowedEmail: createMode === "member_onboarding" && createAllowedEmail.trim() ? createAllowedEmail.trim() : undefined,
           revokeExisting: createRevokeExisting,
         }),
@@ -343,7 +386,11 @@ export function InvitesPage() {
                   <div>{MODE_LABELS[invite.mode]}</div>
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     {invite.mode === "guest_access"
-                      ? `Counting: ${USAGE_MODE_LABELS[invite.usageCountMode]}`
+                      ? `Counting: ${USAGE_MODE_LABELS[invite.usageCountMode]} | Session: ${
+                          invite.guestSessionDeadlineAt
+                            ? `until ${formatDate(invite.guestSessionDeadlineAt)}`
+                            : `${invite.guestSessionTtlHours ?? "default"}h`
+                        }`
                       : invite.allowedEmail
                         ? `Email lock: ${invite.allowedEmail}`
                         : "Any authenticated user"}
@@ -421,7 +468,7 @@ export function InvitesPage() {
                 <span className="muted">Expires at</span>
                 <DatePicker
                   selected={selectedExpiresAt}
-                  onChange={(date) => {
+                  onChange={(date: Date | null) => {
                     if (date) {
                       setCreateExpiresAt(toDateTimeLocalValue(date));
                     }
@@ -454,6 +501,65 @@ export function InvitesPage() {
                   onChange={(event) => setCreateMaxUses(event.target.value)}
                 />
               </label>
+              {isGuestCreateMode ? (
+                <>
+                  <label className="field">
+                    <span className="muted">Guest session policy</span>
+                    <select
+                      className="input"
+                      value={createGuestSessionPolicy}
+                      onChange={(event) => setCreateGuestSessionPolicy(event.target.value as GuestSessionPolicy)}
+                    >
+                      <option value="24h">24 hours</option>
+                      <option value="48h">48 hours</option>
+                      <option value="72h">72 hours</option>
+                      <option value="168h">7 days</option>
+                      <option value="custom_hours">Custom duration (hours)</option>
+                      <option value="custom_deadline">Custom end date/time</option>
+                    </select>
+                  </label>
+                  {createGuestSessionPolicy === "custom_hours" ? (
+                    <label className="field">
+                      <span className="muted">Custom duration (hours)</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={1}
+                        max={24 * 30}
+                        value={createGuestSessionCustomHours}
+                        onChange={(event) => setCreateGuestSessionCustomHours(event.target.value)}
+                        placeholder="1 - 720"
+                      />
+                    </label>
+                  ) : null}
+                  {createGuestSessionPolicy === "custom_deadline" ? (
+                    <label className="field">
+                      <span className="muted">Guest session end date/time</span>
+                      <DatePicker
+                        selected={selectedGuestSessionDeadlineAt}
+                        onChange={(date: Date | null) => {
+                          if (date) {
+                            setCreateGuestSessionDeadlineAt(toDateTimeLocalValue(date));
+                          }
+                        }}
+                        showMonthDropdown
+                        showYearDropdown
+                        yearItemNumber={30}
+                        dropdownMode="select"
+                        showTimeInput
+                        timeInputLabel="Time"
+                        dateFormat="MM/dd/yyyy h:mm aa"
+                        className="input"
+                        calendarClassName="wa-datepicker"
+                        popperClassName="wa-datepicker-popper"
+                        popperPlacement="bottom-start"
+                        popperProps={{ strategy: "fixed" }}
+                        showPopperArrow={false}
+                      />
+                    </label>
+                  ) : null}
+                </>
+              ) : null}
               {createMode === "member_onboarding" ? (
                 <label className="field">
                   <span className="muted">Allowed email (optional)</span>

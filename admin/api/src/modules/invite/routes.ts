@@ -15,6 +15,8 @@ const createInviteBody = z.object({
     ttlHours: z.coerce.number().int().positive().max(24 * 30).optional(),
     expiresAt: z.string().datetime().optional(),
     maxUses: z.coerce.number().int().min(0).max(10000).optional(),
+    guestSessionTtlHours: z.coerce.number().int().positive().max(24 * 30).optional(),
+    guestSessionDeadlineAt: z.string().datetime().optional(),
     mode: inviteModeSchema.optional(),
     usageCountMode: inviteUsageCountModeSchema.optional(),
     allowedEmail: z.string().email().optional(),
@@ -126,6 +128,21 @@ function addHours(date: Date, hours: number): Date {
     return new Date(date.getTime() + hours * 60 * 60 * 1000);
 }
 
+function resolveGuestSessionTtlHours(guestSessionTtlHours?: number | null): number {
+    return guestSessionTtlHours ?? config.GUEST_SESSION_TTL_HOURS;
+}
+
+function resolveGuestSessionExpiresAt(args: {
+    now: Date;
+    guestSessionTtlHours?: number | null;
+    guestSessionDeadlineAt?: Date | null;
+}): Date {
+    if (args.guestSessionDeadlineAt) {
+        return args.guestSessionDeadlineAt;
+    }
+    return addHours(args.now, resolveGuestSessionTtlHours(args.guestSessionTtlHours));
+}
+
 type GuestClaimResult =
     | {
           ok: true;
@@ -137,6 +154,7 @@ type GuestClaimResult =
               inviteTokenId: string;
               worldSlug: string;
               roomUrl: string | null;
+              expiresAt: string;
           };
       }
     | {
@@ -190,7 +208,6 @@ async function claimGuestInvite(args: {
     const parsed = parseRoomPath(payload.playUri);
     const expectedRoomPath = parsed.path;
     const now = new Date();
-    const guestExpiresAt = addHours(now, config.GUEST_SESSION_TTL_HOURS);
     const normalizedNickname = payload.nickname ? normalizeNickname(payload.nickname) : null;
     const continuityToken = payload.continuityToken?.trim();
     const continuityHash = continuityToken ? hashToken(continuityToken) : null;
@@ -245,6 +262,20 @@ async function claimGuestInvite(args: {
             if (invite.room?.roomUrl && invite.room.roomUrl !== expectedRoomPath) {
                 return inviteError(403, "INVITE_SCOPE_MISMATCH", "This invitation link is not valid for this room.");
             }
+
+            if (invite.guestSessionDeadlineAt && invite.guestSessionDeadlineAt <= now) {
+                return inviteError(
+                    403,
+                    "GUEST_SESSION_WINDOW_EXPIRED",
+                    "This invitation no longer allows new guest sessions."
+                );
+            }
+
+            const guestExpiresAt = resolveGuestSessionExpiresAt({
+                now,
+                guestSessionTtlHours: invite.guestSessionTtlHours,
+                guestSessionDeadlineAt: invite.guestSessionDeadlineAt,
+            });
 
             if (invite.usageCountMode === "unique_guest" && continuityHash) {
                 const existingRedemption = await app.db.inviteRedemption.findUnique({
@@ -337,6 +368,7 @@ async function claimGuestInvite(args: {
                             inviteTokenId: invite.id,
                             worldSlug: invite.world.slug,
                             roomUrl: invite.room?.roomUrl ?? null,
+                            expiresAt: guestExpiresAt.toISOString(),
                         },
                     };
                 }
@@ -437,6 +469,7 @@ async function claimGuestInvite(args: {
                     inviteTokenId: invite.id,
                     worldSlug: invite.world.slug,
                     roomUrl: invite.room?.roomUrl ?? null,
+                    expiresAt: guestExpiresAt.toISOString(),
                 },
             };
         } catch (error) {
@@ -606,6 +639,8 @@ export async function inviteRoutes(app: FastifyInstance) {
                     invite.maxUses === null ? null : Math.max(invite.maxUses - invite.useCount, 0),
                 mode: invite.mode,
                 usageCountMode: invite.usageCountMode,
+                guestSessionTtlHours: invite.guestSessionTtlHours,
+                guestSessionDeadlineAt: invite.guestSessionDeadlineAt?.toISOString() ?? null,
                 expiresAt: invite.expiresAt.toISOString(),
                 revokedAt: invite.revokedAt?.toISOString() ?? null,
                 createdAt: invite.createdAt.toISOString(),
@@ -675,6 +710,38 @@ export async function inviteRoutes(app: FastifyInstance) {
         }
         const mode = body.mode ?? "member_onboarding";
         const usageCountMode = body.usageCountMode ?? config.INVITE_DEFAULT_USAGE_COUNT_MODE;
+        const guestSessionDeadlineAtRaw =
+            mode === "guest_access" && body.guestSessionDeadlineAt ? new Date(body.guestSessionDeadlineAt) : null;
+        if (
+            guestSessionDeadlineAtRaw &&
+            (!Number.isFinite(guestSessionDeadlineAtRaw.getTime()) || guestSessionDeadlineAtRaw <= new Date())
+        ) {
+            reply.code(400).send(
+                errorData(
+                    "INVITE_INVALID_GUEST_SESSION_DEADLINE",
+                    "Invalid guest session deadline",
+                    "Unable to create invite",
+                    "Guest session deadline must be in the future."
+                )
+            );
+            return;
+        }
+        if (mode === "guest_access" && guestSessionDeadlineAtRaw && body.guestSessionTtlHours !== undefined) {
+            reply.code(400).send(
+                errorData(
+                    "INVITE_INVALID_GUEST_SESSION_POLICY",
+                    "Invalid guest session policy",
+                    "Unable to create invite",
+                    "Set either guest session duration or deadline, not both."
+                )
+            );
+            return;
+        }
+        const guestSessionTtlHours =
+            mode === "guest_access" && !guestSessionDeadlineAtRaw
+                ? body.guestSessionTtlHours ?? config.GUEST_SESSION_TTL_HOURS
+                : null;
+        const guestSessionDeadlineAt = mode === "guest_access" ? guestSessionDeadlineAtRaw : null;
         const allowedEmail = mode === "member_onboarding" ? body.allowedEmail?.trim().toLowerCase() || null : null;
 
         let createdByMemberId: string | null = null;
@@ -712,6 +779,8 @@ export async function inviteRoutes(app: FastifyInstance) {
                   maxUses: number | null;
                   mode: "member_onboarding" | "guest_access";
                   usageCountMode: "unique_guest" | "every_claim";
+                  guestSessionTtlHours: number | null;
+                  guestSessionDeadlineAt: Date | null;
               }
             | null;
 
@@ -728,6 +797,8 @@ export async function inviteRoutes(app: FastifyInstance) {
                         maxUses,
                         mode,
                         usageCountMode,
+                        guestSessionTtlHours,
+                        guestSessionDeadlineAt,
                         expiresAt,
                     },
                     select: {
@@ -736,6 +807,8 @@ export async function inviteRoutes(app: FastifyInstance) {
                         maxUses: true,
                         mode: true,
                         usageCountMode: true,
+                        guestSessionTtlHours: true,
+                        guestSessionDeadlineAt: true,
                     },
                 });
                 break;
@@ -768,6 +841,8 @@ export async function inviteRoutes(app: FastifyInstance) {
             maxUses: invite.maxUses,
             mode: invite.mode,
             usageCountMode: invite.usageCountMode,
+            guestSessionTtlHours: invite.guestSessionTtlHours,
+            guestSessionDeadlineAt: invite.guestSessionDeadlineAt?.toISOString() ?? null,
             roomUrl: room.roomUrl,
             worldSlug: room.world.slug,
             worldName: room.world.name,
@@ -812,6 +887,8 @@ export async function inviteRoutes(app: FastifyInstance) {
             status,
             mode: invite.mode,
             usageCountMode: invite.usageCountMode,
+            guestSessionTtlHours: invite.guestSessionTtlHours,
+            guestSessionDeadlineAt: invite.guestSessionDeadlineAt?.toISOString() ?? null,
             expiresAt: invite.expiresAt.toISOString(),
             maxUses: invite.maxUses,
             useCount: invite.useCount,
@@ -883,7 +960,7 @@ export async function inviteRoutes(app: FastifyInstance) {
             inviteTokenId: claimResult.data.inviteTokenId,
             worldSlug: claimResult.data.worldSlug,
             roomUrl: claimResult.data.roomUrl,
-            expiresAt: addHours(new Date(), config.GUEST_SESSION_TTL_HOURS).toISOString(),
+            expiresAt: claimResult.data.expiresAt,
         });
     });
 
@@ -907,7 +984,38 @@ export async function inviteRoutes(app: FastifyInstance) {
         const nextRefreshToken = generateOpaqueToken();
         const nextRefreshTokenHash = hashToken(nextRefreshToken);
         const currentRefreshTokenHash = hashToken(body.refreshToken);
-        const nextExpiresAt = addHours(now, config.GUEST_SESSION_TTL_HOURS);
+        const sessionTtlSource = await app.db.guestSession.findUnique({
+            where: { id: body.guestSessionId },
+            select: {
+                inviteToken: {
+                    select: {
+                        guestSessionTtlHours: true,
+                        guestSessionDeadlineAt: true,
+                    },
+                },
+            },
+        });
+        if (
+            sessionTtlSource?.inviteToken?.guestSessionDeadlineAt &&
+            sessionTtlSource.inviteToken.guestSessionDeadlineAt <= now
+        ) {
+            reply
+                .code(403)
+                .send(
+                    errorData(
+                        "GUEST_EXPIRED",
+                        "Guest access expired",
+                        "Unable to refresh guest session",
+                        "This guest session can no longer be extended."
+                    )
+                );
+            return;
+        }
+        const nextExpiresAt = resolveGuestSessionExpiresAt({
+            now,
+            guestSessionTtlHours: sessionTtlSource?.inviteToken?.guestSessionTtlHours,
+            guestSessionDeadlineAt: sessionTtlSource?.inviteToken?.guestSessionDeadlineAt,
+        });
 
         const sessionUpdate = await app.db.guestSession.updateMany({
             where: {
@@ -953,6 +1061,7 @@ export async function inviteRoutes(app: FastifyInstance) {
                 inviteToken: {
                     select: {
                         id: true,
+                        guestSessionTtlHours: true,
                     },
                 },
             },

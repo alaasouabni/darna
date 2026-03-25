@@ -169,6 +169,8 @@ model InviteToken {
   usedByMemberId   String?
   mode             InviteMode @default(member_onboarding)
   usageCountMode   InviteUsageCountMode @default(unique_guest)
+  guestSessionTtlHours Int?
+  guestSessionDeadlineAt DateTime?
   allowedEmail     String?
   maxUses          Int?
   useCount         Int      @default(0)

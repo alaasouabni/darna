@@ -273,7 +273,6 @@ async function validateGuestSessionAccess(args: {
                     worldId: true,
                     roomId: true,
                     revokedAt: true,
-                    expiresAt: true,
                 },
             },
         },
@@ -298,12 +297,12 @@ async function validateGuestSessionAccess(args: {
     }
 
     if (session.inviteToken) {
-        if (session.inviteToken.revokedAt || session.inviteToken.expiresAt <= now) {
+        if (session.inviteToken.revokedAt) {
             return {
                 ok: false,
                 statusCode: 403,
-                code: "INVITE_EXPIRED",
-                details: "Invitation used by this guest has expired or was revoked.",
+                code: "INVITE_REVOKED",
+                details: "Invitation used by this guest was revoked.",
             };
         }
 
