@@ -465,6 +465,75 @@ a {
   font-size: 0.9rem;
 }
 
+.field-label-with-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-tip-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.field-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 118, 110, 0.45);
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  user-select: none;
+  cursor: help;
+  transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+.field-tip-wrapper:hover .field-tip,
+.field-tip-wrapper:focus .field-tip,
+.field-tip-wrapper:focus-within .field-tip {
+  transform: translateY(-1px);
+  background: rgba(15, 118, 110, 0.2);
+  border-color: rgba(15, 118, 110, 0.7);
+}
+
+.field-tip-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: max-content;
+  max-width: min(360px, 72vw);
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 118, 110, 0.35);
+  background: var(--modal-card-bg, #0f172a);
+  color: var(--ink-1);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  white-space: pre-line;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
+  z-index: 80;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.field-tip-wrapper:hover .field-tip-tooltip,
+.field-tip-wrapper:focus .field-tip-tooltip,
+.field-tip-wrapper:focus-within .field-tip-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .input {
   border-radius: 12px;
   border: 1px solid rgba(26, 22, 18, 0.15);

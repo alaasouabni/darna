@@ -69,6 +69,17 @@ const MODE_HELP_TEXT: Record<InviteMode, string> = {
   member_onboarding: "Requires normal authenticated onboarding (account/login flow).",
 };
 
+const GUEST_SESSION_POLICY_TOOLTIP =
+  "Defines how long a guest can stay after claiming the invite.\n" +
+  "24/48/72 hours, 7 days: fixed duration from claim time.\n" +
+  "Custom duration: choose an exact number of hours.\n" +
+  "Custom end date/time: all guest sessions from this invite end at the same deadline.";
+
+const EXPIRES_AT_TOOLTIP =
+  "Controls only how long this invitation link can be claimed.\n" +
+  "After this date/time, no new claims are allowed.\n" +
+  "It does not force-disconnect or end already active guest sessions.";
+
 function getUseUnit(mode: InviteMode, usageCountMode: InviteUsageCountMode) {
   if (mode === "member_onboarding") {
     return "onboarding claims";
@@ -465,7 +476,17 @@ export function InvitesPage() {
                 </select>
               </label>
               <label className="field">
-                <span className="muted">Expires at</span>
+                <span className="muted field-label-with-tip">
+                  Expires at
+                  <span className="field-tip-wrapper" tabIndex={0} aria-label={EXPIRES_AT_TOOLTIP}>
+                    <span className="field-tip" aria-hidden="true">
+                      ?
+                    </span>
+                    <span className="field-tip-tooltip" role="tooltip">
+                      {EXPIRES_AT_TOOLTIP}
+                    </span>
+                  </span>
+                </span>
                 <DatePicker
                   selected={selectedExpiresAt}
                   onChange={(date: Date | null) => {
@@ -504,7 +525,17 @@ export function InvitesPage() {
               {isGuestCreateMode ? (
                 <>
                   <label className="field">
-                    <span className="muted">Guest session policy</span>
+                    <span className="muted field-label-with-tip">
+                      Guest session policy
+                      <span className="field-tip-wrapper" tabIndex={0} aria-label={GUEST_SESSION_POLICY_TOOLTIP}>
+                        <span className="field-tip" aria-hidden="true">
+                          ?
+                        </span>
+                        <span className="field-tip-tooltip" role="tooltip">
+                          {GUEST_SESSION_POLICY_TOOLTIP}
+                        </span>
+                      </span>
+                    </span>
                     <select
                       className="input"
                       value={createGuestSessionPolicy}
