@@ -30,6 +30,10 @@ const leaveBodySchema = z.object({
     sessionId: z.string().min(1),
 });
 
+const shareBodySchema = z.object({
+    sessionId: z.string().min(1),
+    userIds: z.array(z.string()).optional().default([]),
+});
 
 const configBodySchema = z.object({
     permissionPolicy: z.enum(["all_users", "selected_roles"]).optional(),
@@ -53,6 +57,10 @@ export class AiNotetakerController extends BaseHttpController {
         this.exportSession();
         this.exportRecording();
         this.listSessions();
+        this.getSessionShareCandidates();
+        this.getSessionShares();
+        this.shareSession();
+        this.removeSelfSessionShare();
         this.deleteSession();
         this.getConfig();
         this.updateConfig();
@@ -97,6 +105,8 @@ export class AiNotetakerController extends BaseHttpController {
                     inMeetingRoom,
                     meetingSpaces: context?.meetingSpaces ?? [],
                     canManage,
+                    viewerUserId: actor.userId,
+                    viewerEmail: actor.email,
                 });
             } catch (error) {
                 res.status(502).json({
@@ -135,7 +145,7 @@ export class AiNotetakerController extends BaseHttpController {
 
                 try {
                     const session = await aiNotetakerApi.getActiveSession(selectedSpace, actor);
-                    res.status(200).json({ session });
+                    res.status(200).json({ session: this.enrichSessionForViewer(session, actor) });
                 } catch (error) {
                     if (this.isNotFoundError(error)) {
                         res.status(404).json({ session: null });
@@ -189,7 +199,8 @@ export class AiNotetakerController extends BaseHttpController {
                     sessionId: session.id,
                     participant: actor,
                 });
-                res.status(200).json({ session });
+                void socketManager.triggerNotetakerAttendanceReconciliation();
+                res.status(200).json({ session: this.enrichSessionForViewer(session, actor) });
             } catch (error) {
                 const statusCode = this.isForbiddenError(error) ? 403 : 502;
                 res.status(statusCode).json({
@@ -238,7 +249,7 @@ export class AiNotetakerController extends BaseHttpController {
                     actor,
                     reason: parsedBody.data.reason,
                 });
-                res.status(200).json({ session });
+                res.status(200).json({ session: this.enrichSessionForViewer(session, actor) });
             } catch (error) {
                 const statusCode = this.isForbiddenError(error) ? 403 : this.isNotFoundError(error) ? 404 : 502;
                 res.status(statusCode).json({
@@ -273,7 +284,7 @@ export class AiNotetakerController extends BaseHttpController {
 
                 try {
                     const session = await aiNotetakerApi.keepRunning(parsedBody.data.sessionId, actor);
-                    res.status(200).json({ session });
+                    res.status(200).json({ session: this.enrichSessionForViewer(session, actor) });
                 } catch (error) {
                     const statusCode = this.isForbiddenError(error) ? 403 : this.isNotFoundError(error) ? 404 : 502;
                     res.status(statusCode).json({
@@ -310,7 +321,7 @@ export class AiNotetakerController extends BaseHttpController {
                     participant: actor,
                     markSpeechDetected: parsedBody.data.markSpeechDetected,
                 });
-                res.status(200).json({ session });
+                res.status(200).json({ session: this.enrichSessionForViewer(session, actor) });
             } catch (error) {
                 const statusCode = this.isNotFoundError(error) ? 404 : 502;
                 res.status(statusCode).json({
@@ -340,10 +351,10 @@ export class AiNotetakerController extends BaseHttpController {
                 return;
             }
 
-            try {
-                const session = await aiNotetakerApi.markParticipantLeft(parsedBody.data.sessionId, actor);
-                res.status(200).json({ session });
-            } catch (error) {
+                try {
+                    const session = await aiNotetakerApi.markParticipantLeft(parsedBody.data.sessionId, actor);
+                    res.status(200).json({ session: this.enrichSessionForViewer(session, actor) });
+                } catch (error) {
                 const statusCode = this.isNotFoundError(error) ? 404 : 502;
                 res.status(statusCode).json({
                     message: "Failed to mark participant as left from AI notes session",
@@ -383,7 +394,7 @@ export class AiNotetakerController extends BaseHttpController {
                         spaceName: normalizedSpace,
                         includeActiveOnly: req.query.includeActiveOnly === "true",
                     });
-                    res.status(200).json({ sessions });
+                    res.status(200).json({ sessions: sessions.map((session) => this.enrichSessionForViewer(session, actor)) });
                 } catch (error) {
                     res.status(502).json({
                         message: "Failed to list AI notetaker sessions",
@@ -467,6 +478,134 @@ export class AiNotetakerController extends BaseHttpController {
                     const statusCode = this.isNotFoundError(error) ? 404 : 502;
                     res.status(statusCode).json({
                         message: "Failed to export AI notes recording",
+                        details: this.extractErrorMessage(error),
+                    });
+                }
+            }
+        );
+    }
+
+    private getSessionShareCandidates(): void {
+        this.app.get(
+            "/notetaker/session/:sessionId/share-candidates",
+            [authenticated],
+            async (req: Request<{ sessionId: string }>, res: ResponseWithUserIdentifier) => {
+                const actor = this.extractActor(res);
+                if (!actor) {
+                    res.status(401).json({ message: "Unauthorized" });
+                    return;
+                }
+
+                if (!aiNotetakerApi.isAvailable()) {
+                    res.status(503).json({ message: "AI notetaker relay is not configured" });
+                    return;
+                }
+
+                try {
+                    await socketManager.triggerNotetakerAttendanceReconciliation();
+                    const candidates = await aiNotetakerApi.getSessionShareCandidates(req.params.sessionId, actor);
+                    res.status(200).json({ candidates });
+                } catch (error) {
+                    const statusCode = this.isForbiddenError(error) ? 403 : this.isNotFoundError(error) ? 404 : 502;
+                    res.status(statusCode).json({
+                        message: "Failed to fetch AI notes share candidates",
+                        details: this.extractErrorMessage(error),
+                    });
+                }
+            }
+        );
+    }
+
+    private getSessionShares(): void {
+        this.app.get(
+            "/notetaker/session/:sessionId/shares",
+            [authenticated],
+            async (req: Request<{ sessionId: string }>, res: ResponseWithUserIdentifier) => {
+                const actor = this.extractActor(res);
+                if (!actor) {
+                    res.status(401).json({ message: "Unauthorized" });
+                    return;
+                }
+
+                if (!aiNotetakerApi.isAvailable()) {
+                    res.status(503).json({ message: "AI notetaker relay is not configured" });
+                    return;
+                }
+
+                try {
+                    await socketManager.triggerNotetakerAttendanceReconciliation();
+                    const sharedWith = await aiNotetakerApi.getSessionShares(req.params.sessionId, actor);
+                    res.status(200).json({ sharedWith });
+                } catch (error) {
+                    const statusCode = this.isForbiddenError(error) ? 403 : this.isNotFoundError(error) ? 404 : 502;
+                    res.status(statusCode).json({
+                        message: "Failed to fetch AI notes share list",
+                        details: this.extractErrorMessage(error),
+                    });
+                }
+            }
+        );
+    }
+
+    private shareSession(): void {
+        this.app.post("/notetaker/share", [authenticated], async (req: Request, res: ResponseWithUserIdentifier) => {
+            const actor = this.extractActor(res);
+            if (!actor) {
+                res.status(401).json({ message: "Unauthorized" });
+                return;
+            }
+
+            if (!aiNotetakerApi.isAvailable()) {
+                res.status(503).json({ message: "AI notetaker relay is not configured" });
+                return;
+            }
+
+            const parsedBody = shareBodySchema.safeParse(req.body ?? {});
+            if (!parsedBody.success) {
+                res.status(400).json({ message: parsedBody.error.errors[0]?.message ?? "Invalid request payload" });
+                return;
+            }
+
+            try {
+                const session = await aiNotetakerApi.shareSession(
+                    parsedBody.data.sessionId,
+                    actor,
+                    parsedBody.data.userIds
+                );
+                res.status(200).json({ session: this.enrichSessionForViewer(session, actor) });
+            } catch (error) {
+                const statusCode = this.isForbiddenError(error) ? 403 : this.isNotFoundError(error) ? 404 : 502;
+                res.status(statusCode).json({
+                    message: "Failed to update AI notes sharing",
+                    details: this.extractErrorMessage(error),
+                });
+            }
+        });
+    }
+
+    private removeSelfSessionShare(): void {
+        this.app.post(
+            "/notetaker/session/:sessionId/remove-self",
+            [authenticated],
+            async (req: Request<{ sessionId: string }>, res: ResponseWithUserIdentifier) => {
+                const actor = this.extractActor(res);
+                if (!actor) {
+                    res.status(401).json({ message: "Unauthorized" });
+                    return;
+                }
+
+                if (!aiNotetakerApi.isAvailable()) {
+                    res.status(503).json({ message: "AI notetaker relay is not configured" });
+                    return;
+                }
+
+                try {
+                    await aiNotetakerApi.removeSelfFromSessionSharing(req.params.sessionId, actor);
+                    res.status(204).send();
+                } catch (error) {
+                    const statusCode = this.isForbiddenError(error) ? 403 : this.isNotFoundError(error) ? 404 : 502;
+                    res.status(statusCode).json({
+                        message: "Failed to remove shared AI notes session from your library",
                         details: this.extractErrorMessage(error),
                     });
                 }
@@ -569,6 +708,72 @@ export class AiNotetakerController extends BaseHttpController {
         }
 
         return meetingSpaces[0];
+    }
+
+    private normalizeUserId(value: string | undefined): string | undefined {
+        if (!value) {
+            return undefined;
+        }
+
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+
+        return trimmed.includes("@") ? trimmed.toLowerCase() : trimmed;
+    }
+
+    private areUserIdsEqual(left: string | undefined, right: string | undefined): boolean {
+        const normalizedLeft = this.normalizeUserId(left);
+        const normalizedRight = this.normalizeUserId(right);
+        return Boolean(normalizedLeft) && Boolean(normalizedRight) && normalizedLeft === normalizedRight;
+    }
+
+    private isOwnerPresentInSession(session: {
+        startedByUserId: string;
+        ownerUserId?: string;
+        participants?: Array<{ userId: string; leftAt?: string; lastSeenAt: string }>;
+    }): boolean {
+        const ownerId = session.ownerUserId ?? session.startedByUserId;
+        const now = Date.now();
+
+        return (session.participants ?? []).some((participant) => {
+            if (!this.areUserIdsEqual(participant.userId, ownerId)) {
+                return false;
+            }
+
+            if (participant.leftAt) {
+                return false;
+            }
+
+            const lastSeenEpoch = new Date(participant.lastSeenAt).getTime();
+            if (!Number.isFinite(lastSeenEpoch)) {
+                return false;
+            }
+
+            return now - lastSeenEpoch <= 90_000;
+        });
+    }
+
+    private enrichSessionForViewer<T extends {
+        status: string;
+        startedByUserId: string;
+        ownerUserId?: string;
+        participants?: Array<{ userId: string; leftAt?: string; lastSeenAt: string }>;
+    }>(session: T, actor: NotetakerActorPayload): T & { viewerIsOwner: boolean; viewerCanStop: boolean } {
+        const ownerId = session.ownerUserId ?? session.startedByUserId;
+        const isOwner =
+            this.areUserIdsEqual(actor.userId, ownerId) ||
+            this.areUserIdsEqual(actor.email, ownerId);
+        const isRunning = ["starting", "active", "idle-warning", "stopping"].includes(session.status);
+        const ownerPresent = this.isOwnerPresentInSession(session);
+        const viewerCanStop = isRunning && (isOwner || !ownerPresent);
+
+        return {
+            ...session,
+            viewerIsOwner: isOwner,
+            viewerCanStop,
+        };
     }
 
     private extractErrorMessage(error: unknown): string {

@@ -76,11 +76,15 @@ import { clientEventsEmitter } from "./ClientEventsEmitter";
 import { gaugeManager } from "./GaugeManager";
 import { apiClientRepository } from "./ApiClientRepository";
 import { adminService } from "./AdminService";
+import { aiNotetakerApi, type NotetakerActorPayload } from "./AiNotetakerApi";
 import type { FetchMemberDataByUuidSuccessResponse } from "./AdminApi";
 import type { ShortMapDescription } from "./ShortMapDescription";
 import { matrixProvider } from "./MatrixProvider";
+import { jwtTokenManager } from "./JWTTokenManager";
 
 const debug = Debug("socket");
+const NOTETAKER_ATTENDANCE_RECONCILIATION_INTERVAL_MS = 20_000;
+const NOTETAKER_ATTENDANCE_LEAVE_GRACE_MS = 30_000;
 
 export type AdminSocket = WebSocket<AdminSocketData>;
 export type Socket = WebSocket<SocketData>;
@@ -99,6 +103,11 @@ export class SocketManager implements ZoneEventListener {
     private rooms: Map<string, PusherRoom> = new Map<string, PusherRoom>();
     private spaces: Map<string, SpaceInterface> = new Map<string, SpaceInterface>();
     private activeSessionsByUserUuid = new Map<string, ActiveUserSession>();
+    private readonly notetakerAttendanceRoster = new Map<
+        string,
+        { spaceName: string; actor: NotetakerActorPayload; lastObservedAtMs: number }
+    >();
+    private notetakerAttendanceReconciliationInFlight = false;
 
     constructor(private _spaceConnection = new SpaceConnection()) {
         clientEventsEmitter.registerToClientJoin((clientUUid: string, roomId: string) => {
@@ -113,6 +122,12 @@ export class SocketManager implements ZoneEventListener {
         clientEventsEmitter.registerToDeleteSpace((spaceName: string) => {
             gaugeManager.decNbSpaces();
         });
+
+        if (aiNotetakerApi.isAvailable()) {
+            setInterval(() => {
+                void this.reconcileNotetakerAttendance();
+            }, NOTETAKER_ATTENDANCE_RECONCILIATION_INTERVAL_MS);
+        }
     }
 
     async handleAdminRoom(client: AdminSocket, roomId: string): Promise<void> {
@@ -446,6 +461,199 @@ export class SocketManager implements ZoneEventListener {
         };
     }
 
+    private isMeetingSpace(spaceName: string): boolean {
+        const isPersonalAreaSpace = spaceName.includes("personal-area-");
+        if (isPersonalAreaSpace) {
+            return false;
+        }
+
+        const space = this.spaces.get(spaceName);
+        if (!space) {
+            return false;
+        }
+
+        return space.getPropertiesToSync().includes("livekitRequired");
+    }
+
+    private normalizeAttendanceUserId(userId: string): string {
+        const normalized = userId.trim();
+        if (!normalized) {
+            return "";
+        }
+
+        return normalized.includes("@") ? normalized.toLowerCase() : normalized;
+    }
+
+    private getNotetakerAttendanceKey(spaceName: string, userId: string): string {
+        return `${spaceName}::${this.normalizeAttendanceUserId(userId)}`;
+    }
+
+    private buildNotetakerActorFromSocket(socket: Socket): NotetakerActorPayload | undefined {
+        const socketData = socket.getUserData();
+
+        let userId = "";
+        if (socketData.token) {
+            try {
+                userId = jwtTokenManager.verifyJWTToken(socketData.token, true).identifier;
+            } catch {
+                const decoded = Jwt.decode(socketData.token) as { identifier?: string } | null;
+                if (typeof decoded?.identifier === "string") {
+                    userId = decoded.identifier;
+                }
+            }
+        }
+
+        if (!userId) {
+            userId = socketData.userUuid;
+        }
+
+        const normalizedUserId = this.normalizeAttendanceUserId(userId);
+        if (!normalizedUserId) {
+            return undefined;
+        }
+
+        return {
+            userId: normalizedUserId,
+            displayName: socketData.name,
+            email: normalizedUserId.includes("@") ? normalizedUserId : undefined,
+            tags: socketData.tags ?? [],
+        };
+    }
+
+    private async reportNotetakerAttendanceEvent(
+        spaceName: string,
+        actor: NotetakerActorPayload,
+        eventType: "join" | "leave" | "heartbeat"
+    ): Promise<void> {
+        if (!aiNotetakerApi.isAvailable()) {
+            return;
+        }
+
+        try {
+            await aiNotetakerApi.reportAttendanceEvent(spaceName, actor, eventType);
+        } catch (error) {
+            console.warn("Failed to report AI notetaker attendance event", {
+                spaceName,
+                eventType,
+                actorUserId: actor.userId,
+                error,
+            });
+        }
+    }
+
+    private async reportNotetakerAttendanceForSocket(
+        socket: Socket,
+        spaceName: string,
+        eventType: "join" | "leave"
+    ): Promise<void> {
+        if (!this.isMeetingSpace(spaceName)) {
+            return;
+        }
+
+        const actor = this.buildNotetakerActorFromSocket(socket);
+        if (!actor) {
+            return;
+        }
+
+        const attendanceKey = this.getNotetakerAttendanceKey(spaceName, actor.userId);
+        if (eventType === "leave") {
+            this.notetakerAttendanceRoster.delete(attendanceKey);
+        } else {
+            this.notetakerAttendanceRoster.set(attendanceKey, {
+                spaceName,
+                actor,
+                lastObservedAtMs: Date.now(),
+            });
+        }
+
+        await this.reportNotetakerAttendanceEvent(spaceName, actor, eventType);
+    }
+
+    private async reconcileNotetakerAttendance(): Promise<void> {
+        if (!aiNotetakerApi.isAvailable()) {
+            return;
+        }
+
+        if (this.notetakerAttendanceReconciliationInFlight) {
+            return;
+        }
+        this.notetakerAttendanceReconciliationInFlight = true;
+
+        try {
+            const now = Date.now();
+            const currentRoster = new Map<
+                string,
+                { spaceName: string; actor: NotetakerActorPayload; lastObservedAtMs: number }
+            >();
+
+            for (const room of this.rooms.values()) {
+                for (const socket of room.getListenersSnapshot()) {
+                    const socketData = socket.getUserData();
+                    if (socketData.disconnecting) {
+                        continue;
+                    }
+
+                    const actor = this.buildNotetakerActorFromSocket(socket);
+                    if (!actor) {
+                        continue;
+                    }
+
+                    for (const spaceName of socketData.spaces) {
+                        if (!this.isMeetingSpace(spaceName)) {
+                            continue;
+                        }
+
+                        const attendanceKey = this.getNotetakerAttendanceKey(spaceName, actor.userId);
+                        if (!currentRoster.has(attendanceKey)) {
+                            currentRoster.set(attendanceKey, {
+                                spaceName,
+                                actor,
+                                lastObservedAtMs: now,
+                            });
+                        }
+                    }
+                }
+            }
+
+            const updates: Promise<void>[] = [];
+            for (const { spaceName, actor } of currentRoster.values()) {
+                updates.push(this.reportNotetakerAttendanceEvent(spaceName, actor, "heartbeat"));
+            }
+
+            for (const [attendanceKey, previousEntry] of this.notetakerAttendanceRoster.entries()) {
+                if (currentRoster.has(attendanceKey)) {
+                    continue;
+                }
+
+                if (now - previousEntry.lastObservedAtMs < NOTETAKER_ATTENDANCE_LEAVE_GRACE_MS) {
+                    currentRoster.set(attendanceKey, previousEntry);
+                    continue;
+                }
+
+                updates.push(this.reportNotetakerAttendanceEvent(previousEntry.spaceName, previousEntry.actor, "leave"));
+            }
+
+            if (updates.length > 0) {
+                await Promise.allSettled(updates);
+            }
+
+            this.notetakerAttendanceRoster.clear();
+            for (const [attendanceKey, entry] of currentRoster.entries()) {
+                this.notetakerAttendanceRoster.set(attendanceKey, entry);
+            }
+        } finally {
+            this.notetakerAttendanceReconciliationInFlight = false;
+        }
+    }
+
+    public async triggerNotetakerAttendanceReconciliation(): Promise<void> {
+        if (!aiNotetakerApi.isAvailable()) {
+            return;
+        }
+
+        await this.reconcileNotetakerAttendance();
+    }
+
     private async emitProfileVariable(socket: Socket, name: string, value: unknown): Promise<void> {
         const socketData = socket.getUserData();
         if (!socketData.backConnection || socketData.disconnecting) {
@@ -631,6 +839,7 @@ export class SocketManager implements ZoneEventListener {
         socketData.joinSpacesPromise.set(spaceName, joinPromise);
 
         await joinPromise;
+        void this.reportNotetakerAttendanceForSocket(client, spaceName, "join");
 
         // We are done joining the space
         // We could still receive an abort message afterwards (because the client could send the abort while we
@@ -647,6 +856,7 @@ export class SocketManager implements ZoneEventListener {
                 console.error("Error while unregistering user from space after abort", error);
                 Sentry.captureException(error);
             });
+            void this.reportNotetakerAttendanceForSocket(client, spaceName, "leave");
         });
     }
 
@@ -988,6 +1198,7 @@ export class SocketManager implements ZoneEventListener {
 
             if (space) {
                 try {
+                    void this.reportNotetakerAttendanceForSocket(socket, spaceName, "leave");
                     socketData.joinSpacesPromise.delete(spaceName);
 
                     await space.forwarder.unregisterUser(socket);

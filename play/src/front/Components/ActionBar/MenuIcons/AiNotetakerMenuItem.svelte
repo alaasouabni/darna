@@ -25,12 +25,15 @@
         };
     });
 
+    $: currentMeetingSpace = $livekitMeetingRoomSpaceNameStore ?? undefined;
+
     function isSessionRunning() {
         const state = $notetakerRuntimeStateStore;
-        return state === "starting" || state === "active" || state === "idle-warning" || state === "stopping";
+        return state === "starting" || state === "active" || state === "idle-warning";
     }
 
     function onAiNotetakerClick() {
+        void notetakerControls.refreshCurrentSession(currentMeetingSpace);
         openModal(AiNotetakerQuickControlModal, {});
     }
 
@@ -56,7 +59,7 @@
         tooltipTitle={tooltip}
         tooltipDesc={$notetakerCanManageStore
             ? "Start or stop AI notes for this meeting room"
-            : "You can view notes but cannot start/stop for this room."}
+            : "View controls. Starting may be restricted by role; stop can be allowed if starter leaves."}
         state={buttonState}
         dataTestId="aiNotetakerButton"
         media="./static/images/screensharing.mp4"

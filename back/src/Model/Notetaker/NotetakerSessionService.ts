@@ -27,6 +27,7 @@ import { notetakerPersistenceService } from "./NotetakerPersistenceService";
 import type {
     NotetakerActor,
     NotetakerAuditEventType,
+    NotetakerSessionStopReason,
     NotetakerParticipantSnapshot,
     NotetakerSession,
     NotetakerSessionConfig,
@@ -38,7 +39,7 @@ import type {
     TranscriptSegmentInput,
 } from "./NotetakerTypes";
 
-type StopReason = "manual_stop" | "auto_stop" | "room_empty_auto_stop" | "starter_left_auto_stop";
+type RuntimeStopReason = "manual_stop" | "auto_stop" | "room_empty_auto_stop" | "starter_left_auto_stop";
 
 interface StartSessionInput {
     spaceName: string;
@@ -53,11 +54,34 @@ interface PresenceUpdateInput {
     markSpeechDetected?: boolean;
 }
 
+interface AttendanceEventInput {
+    spaceName: string;
+    actor: NotetakerActor;
+    eventType: "join" | "leave" | "heartbeat";
+    occurredAt?: Date;
+}
+
 interface StopSessionInput {
     sessionId: string;
     actor?: NotetakerActor;
-    reason?: StopReason;
+    reason?: RuntimeStopReason;
     languageHint?: string;
+}
+
+interface ShareSessionInput {
+    sessionId: string;
+    actor: NotetakerActor;
+    userIds: string[];
+}
+
+interface NotetakerShareCandidate {
+    userId: string;
+    displayName?: string;
+    email?: string;
+    tags: string[];
+    joinedAt?: Date;
+    lastSeenAt?: Date;
+    isCurrentSessionParticipant?: boolean;
 }
 
 interface FinalizedArtifactRuntimePayload {
@@ -236,6 +260,9 @@ export class NotetakerSessionService {
                 roomId: input.roomId,
                 spaceName: input.spaceName,
                 startedByUserId: input.startedBy.userId,
+                ownerUserId: input.startedBy.userId,
+                sharedWithUserIds: [],
+                sharingStatus: "private_pending",
                 startedAt: now,
                 status: "starting",
                 visibilityPolicy: "participants-only",
@@ -385,10 +412,53 @@ export class NotetakerSessionService {
         });
     }
 
+    public async recordAttendanceEvent(input: AttendanceEventInput): Promise<{ handled: boolean; sessionId?: string }> {
+        return this.runSerialized(async () => {
+            const session = await this.getActiveSessionForSpace(input.spaceName, { allowSystemBypass: true });
+            if (!session || !ACTIVE_SESSION_STATUSES.includes(session.status)) {
+                return { handled: false };
+            }
+
+            const eventTimestamp = input.occurredAt ?? new Date();
+            if (input.eventType === "leave") {
+                const participant = session.participants.find(
+                    (candidate) =>
+                        this.normalizeShareRecipientId(candidate.userId) === this.normalizeShareRecipientId(input.actor.userId)
+                );
+                if (!participant) {
+                    return { handled: true, sessionId: session.id };
+                }
+
+                participant.lastSeenAt = eventTimestamp;
+                participant.leftAt = eventTimestamp;
+                this.pushAuditEvent(session, "participant_left", input.actor.userId, {
+                    source: "server_attendance_event",
+                });
+            } else {
+                const isNew = await this.touchParticipant(session, input.actor, false, eventTimestamp);
+                if (isNew || input.eventType === "join") {
+                    this.pushAuditEvent(session, "participant_joined", input.actor.userId, {
+                        source: "server_attendance_event",
+                        eventType: input.eventType,
+                    });
+                }
+            }
+
+            this.cacheSession(session);
+            await this.persistSession(session);
+            return {
+                handled: true,
+                sessionId: session.id,
+            };
+        });
+    }
+
     public async markParticipantLeft(sessionId: string, actor: NotetakerActor): Promise<NotetakerSession> {
         return this.runSerialized(async () => {
             const session = await this.getSessionOrThrow(sessionId);
-            const participant = session.participants.find((candidate) => candidate.userId === actor.userId);
+            const participant = session.participants.find(
+                (candidate) => this.normalizeShareRecipientId(candidate.userId) === this.normalizeShareRecipientId(actor.userId)
+            );
             if (!participant) {
                 return session;
             }
@@ -426,12 +496,213 @@ export class NotetakerSessionService {
             const config = await this.getConfig();
 
             if (input.actor) {
-                this.assertCanManageSession(config, input.actor);
                 await this.touchParticipant(session, input.actor, false);
+                this.assertCanStopSession(config, session, input.actor);
             }
 
             const reason = input.reason ?? "manual_stop";
             return this.stopSessionInternal(session, reason, input.actor?.userId, input.languageHint);
+        });
+    }
+
+    public async shareSession(input: ShareSessionInput): Promise<NotetakerSession> {
+        return this.runSerialized(async () => {
+            const session = await this.getSessionOrThrow(input.sessionId);
+            const config = await this.getConfig();
+            this.assertCanManageSharing(config, session, input.actor);
+            const ownerUserId = this.normalizeShareRecipientId(this.getOwnerUserId(session));
+            const normalizedShareIds = Array.from(
+                new Set(
+                    input.userIds
+                        .map((userId) => this.normalizeShareRecipientId(userId))
+                        .filter((userId) => userId.length > 0 && userId !== ownerUserId)
+                )
+            ).sort((left, right) => left.localeCompare(right));
+
+            const sharingChanged =
+                normalizedShareIds.length !== session.sharedWithUserIds.length ||
+                normalizedShareIds.some((userId, index) => session.sharedWithUserIds[index] !== userId);
+
+            if (!sharingChanged) {
+                return session;
+            }
+
+            session.sharedWithUserIds = normalizedShareIds;
+            if (normalizedShareIds.length === 0) {
+                session.sharingStatus = "private_pending";
+                session.sharedAt = undefined;
+                session.sharedByUserId = undefined;
+                this.pushAuditEvent(session, "sharing_cleared", input.actor.userId);
+            } else {
+                session.sharingStatus = "shared";
+                session.sharedAt = new Date();
+                session.sharedByUserId = input.actor.userId;
+                this.pushAuditEvent(session, "sharing_updated", input.actor.userId, {
+                    recipientCount: normalizedShareIds.length,
+                });
+            }
+
+            this.cacheSession(session);
+            await this.persistSession(session);
+            return session;
+        });
+    }
+
+    public async removeSelfFromSharedSession(sessionId: string, actor: NotetakerActor): Promise<void> {
+        await this.runSerialized(async () => {
+            const session = await this.getSessionOrThrow(sessionId);
+            const config = await this.getConfig();
+
+            const actorUserId = this.normalizeShareRecipientId(actor.userId);
+            const ownerUserId = this.getOwnerUserId(session);
+
+            if (actorUserId === ownerUserId) {
+                throw new Error("Session owner cannot remove themselves from their own library.");
+            }
+
+            if (!this.canReadSession(config, session, actor)) {
+                throw new Error("You are not authorized to update this AI notes sharing.");
+            }
+
+            if (!session.sharedWithUserIds.includes(actorUserId)) {
+                return;
+            }
+
+            session.sharedWithUserIds = session.sharedWithUserIds.filter((userId) => userId !== actorUserId);
+
+            if (session.sharedWithUserIds.length === 0) {
+                session.sharingStatus = "private_pending";
+                session.sharedAt = undefined;
+                session.sharedByUserId = undefined;
+                this.pushAuditEvent(session, "sharing_cleared", actor.userId, {
+                    reason: "recipient_self_removed",
+                });
+            } else {
+                this.pushAuditEvent(session, "sharing_updated", actor.userId, {
+                    recipientCount: session.sharedWithUserIds.length,
+                    removedSelf: true,
+                });
+            }
+
+            this.cacheSession(session);
+            await this.persistSession(session);
+        });
+    }
+
+    public async getSessionShareCandidates(sessionId: string, actor: NotetakerActor): Promise<NotetakerShareCandidate[]> {
+        const session = await this.getSessionOrThrow(sessionId);
+        const config = await this.getConfig();
+        this.assertCanManageSharing(config, session, actor);
+        const ownerUserId = this.normalizeShareRecipientId(this.getOwnerUserId(session));
+        const candidateByUserId = new Map<string, NotetakerShareCandidate>();
+        const addCandidate = (
+            userId: string,
+            displayName?: string,
+            email?: string,
+            tags: string[] = [],
+            joinedAt?: Date,
+            lastSeenAt?: Date,
+            options: { currentSession?: boolean } = {}
+        ): void => {
+            const normalizedUserId = this.normalizeShareRecipientId(userId);
+            if (!normalizedUserId || normalizedUserId === ownerUserId) {
+                return;
+            }
+
+            const existing = candidateByUserId.get(normalizedUserId);
+            if (!existing) {
+                candidateByUserId.set(normalizedUserId, {
+                    userId: normalizedUserId,
+                    displayName,
+                    email,
+                    tags: this.normalizeTags(tags),
+                    joinedAt,
+                    lastSeenAt,
+                    isCurrentSessionParticipant: options.currentSession === true,
+                });
+                return;
+            }
+
+            existing.displayName = existing.displayName || displayName;
+            existing.email = existing.email || email;
+            existing.tags = this.normalizeTags([...existing.tags, ...tags]);
+            if (options.currentSession && joinedAt) {
+                existing.joinedAt = joinedAt;
+            } else if (!existing.joinedAt || (joinedAt && joinedAt.getTime() > existing.joinedAt.getTime())) {
+                existing.joinedAt = joinedAt;
+            }
+            if (!existing.lastSeenAt || (lastSeenAt && lastSeenAt.getTime() > existing.lastSeenAt.getTime())) {
+                existing.lastSeenAt = lastSeenAt;
+            }
+            existing.isCurrentSessionParticipant = existing.isCurrentSessionParticipant || options.currentSession === true;
+        };
+
+        for (const participant of session.participants) {
+            addCandidate(
+                participant.userId,
+                participant.displayName,
+                participant.email,
+                participant.tags,
+                participant.joinedAt,
+                participant.lastSeenAt,
+                { currentSession: true }
+            );
+        }
+
+        const relatedSessions = await notetakerPersistenceService.listSessions(session.spaceName);
+        for (const relatedSession of relatedSessions) {
+            if (relatedSession.id === session.id) {
+                continue;
+            }
+            this.normalizeSession(relatedSession);
+            for (const participant of relatedSession.participants) {
+                addCandidate(
+                    participant.userId,
+                    participant.displayName,
+                    participant.email,
+                    participant.tags,
+                    participant.joinedAt,
+                    participant.lastSeenAt
+                );
+            }
+        }
+
+        for (const sharedUserId of session.sharedWithUserIds) {
+            addCandidate(sharedUserId);
+        }
+
+        return Array.from(candidateByUserId.values()).sort((left, right) => {
+            if (left.isCurrentSessionParticipant !== right.isCurrentSessionParticipant) {
+                return left.isCurrentSessionParticipant ? -1 : 1;
+            }
+
+            const leftSeenAt = left.lastSeenAt?.getTime() ?? 0;
+            const rightSeenAt = right.lastSeenAt?.getTime() ?? 0;
+            if (leftSeenAt !== rightSeenAt) {
+                return rightSeenAt - leftSeenAt;
+            }
+
+            return left.userId.localeCompare(right.userId);
+        });
+    }
+
+    public async getSessionShares(sessionId: string, actor: NotetakerActor): Promise<NotetakerShareCandidate[]> {
+        const session = await this.getSessionOrThrow(sessionId);
+        const config = await this.getConfig();
+        this.assertCanManageSharing(config, session, actor);
+
+        const participantsById = new Map(session.participants.map((participant) => [participant.userId, participant]));
+
+        return session.sharedWithUserIds.map((userId) => {
+            const participant = participantsById.get(userId);
+            return {
+                userId,
+                displayName: participant?.displayName,
+                email: participant?.email,
+                tags: participant?.tags ?? [],
+                joinedAt: participant?.joinedAt,
+                lastSeenAt: participant?.lastSeenAt,
+            };
         });
     }
 
@@ -440,15 +711,11 @@ export class NotetakerSessionService {
             const session = await this.getSessionOrThrow(sessionId);
             const config = await this.getConfig();
 
-            const isStarter = session.startedByUserId === actor.userId;
+            const isOwner = this.getOwnerUserId(session) === this.normalizeShareRecipientId(actor.userId);
             const isAdminOverride = this.isAdminReadOverride(config, actor);
 
-            if (!this.canReadSession(config, session, actor) && !isAdminOverride) {
+            if (!isOwner && !isAdminOverride) {
                 throw new Error("You are not authorized to delete this AI notetaker session.");
-            }
-
-            if (!isStarter && !isAdminOverride) {
-                this.assertCanManageSession(config, actor);
             }
 
             if (ACTIVE_SESSION_STATUSES.includes(session.status)) {
@@ -596,14 +863,10 @@ export class NotetakerSessionService {
     ): Promise<NotetakerSession[]> {
         const config = await this.getConfig();
 
-        let sessions: NotetakerSession[];
-        if (!options.allowSystemBypass && options.actor && !this.isAdminReadOverride(config, options.actor)) {
-            sessions = await notetakerPersistenceService.listSessionsByUser(options.actor.userId);
-        } else {
-            sessions = await notetakerPersistenceService.listSessions(options.spaceName);
-        }
+        const sessions = await notetakerPersistenceService.listSessions(options.spaceName);
 
         for (const session of sessions) {
+            this.normalizeSession(session);
             this.cacheSession(session);
         }
 
@@ -649,7 +912,7 @@ export class NotetakerSessionService {
 
     private async stopSessionInternal(
         session: NotetakerSession,
-        reason: StopReason,
+        reason: RuntimeStopReason,
         actorUserId?: string,
         languageHint?: string
     ): Promise<NotetakerSession> {
@@ -665,8 +928,14 @@ export class NotetakerSessionService {
             await this.refreshSummary(session, true, languageHint);
             this.setSessionStatus(session, "stopped");
             session.stoppedAt = new Date();
+            session.stopActorUserId = actorUserId;
+            session.stopReason = this.toSessionStopReason(reason);
             await this.safeClearActiveSession(session.spaceName, session.id);
             this.pushAuditEvent(session, reason, actorUserId);
+
+            if (reason === "manual_stop" && actorUserId && actorUserId === this.getOwnerUserId(session)) {
+                this.pushAuditEvent(session, "sharing_prompted_on_owner_stop", actorUserId);
+            }
 
             const config = await this.getConfig();
             if (config.emailDigestEnabled) {
@@ -676,6 +945,8 @@ export class NotetakerSessionService {
             this.setSessionStatus(session, "failed");
             session.errorMessage = error instanceof Error ? error.message : "Unexpected error while stopping session";
             session.stoppedAt = new Date();
+            session.stopActorUserId = actorUserId;
+            session.stopReason = this.toSessionStopReason(reason);
             await this.safeClearActiveSession(session.spaceName, session.id);
             this.pushAuditEvent(session, "error", actorUserId, {
                 operation: "stop_session",
@@ -1392,13 +1663,13 @@ export class NotetakerSessionService {
     private async getSessionFromCacheOrPersistence(sessionId: string): Promise<NotetakerSession | undefined> {
         const cached = this.sessionsById.get(sessionId);
         if (cached) {
-            cached.audioArtifacts = cached.audioArtifacts ?? [];
+            this.normalizeSession(cached);
             return cached;
         }
 
         const persisted = await notetakerPersistenceService.getSession(sessionId);
         if (persisted) {
-            persisted.audioArtifacts = persisted.audioArtifacts ?? [];
+            this.normalizeSession(persisted);
             this.cacheSession(persisted);
             return persisted;
         }
@@ -1425,15 +1696,19 @@ export class NotetakerSessionService {
     private async touchParticipant(
         session: NotetakerSession,
         actor: NotetakerActor,
-        isLeaving: boolean
+        isLeaving: boolean,
+        referenceTime: Date = new Date()
     ): Promise<boolean> {
-        const now = new Date();
+        const now = referenceTime;
         const tags = this.normalizeTags(actor.tags);
-        const existing = session.participants.find((participant) => participant.userId === actor.userId);
+        const normalizedActorUserId = this.normalizeShareRecipientId(actor.userId);
+        const existing = session.participants.find(
+            (participant) => this.normalizeShareRecipientId(participant.userId) === normalizedActorUserId
+        );
 
         if (!existing) {
             const participant: NotetakerParticipantSnapshot = {
-                userId: actor.userId,
+                userId: normalizedActorUserId || actor.userId,
                 displayName: actor.displayName,
                 email: actor.email,
                 tags,
@@ -1492,6 +1767,39 @@ export class NotetakerSessionService {
         }
     }
 
+    private assertCanManageSharing(
+        config: NotetakerSessionConfig,
+        session: NotetakerSession,
+        actor: NotetakerActor
+    ): void {
+        if (this.isAdminReadOverride(config, actor)) {
+            return;
+        }
+
+        if (this.normalizeShareRecipientId(actor.userId) !== this.getOwnerUserId(session)) {
+            throw new Error("Only the session owner can manage sharing.");
+        }
+    }
+
+    private assertCanStopSession(config: NotetakerSessionConfig, session: NotetakerSession, actor: NotetakerActor): void {
+        if (this.isAdminReadOverride(config, actor)) {
+            return;
+        }
+
+        const ownerUserId = this.getOwnerUserId(session);
+        if (this.normalizeShareRecipientId(actor.userId) === ownerUserId) {
+            return;
+        }
+
+        if (!this.isParticipantActive(session, actor.userId)) {
+            throw new Error("Only active meeting participants can stop this AI notes session.");
+        }
+
+        if (this.isParticipantActive(session, ownerUserId)) {
+            throw new Error("Only the starter can stop this session while they are still present.");
+        }
+    }
+
     private canReadSession(config: NotetakerSessionConfig, session: NotetakerSession, actor?: NotetakerActor): boolean {
         if (!actor) {
             return false;
@@ -1501,11 +1809,72 @@ export class NotetakerSessionService {
             return true;
         }
 
-        return session.participants.some((participant) => participant.userId === actor.userId);
+        const actorUserId = this.normalizeShareRecipientId(actor.userId);
+
+        if (actorUserId === this.getOwnerUserId(session)) {
+            return true;
+        }
+
+        return session.sharedWithUserIds.includes(actorUserId);
     }
 
     private isAdminReadOverride(config: NotetakerSessionConfig, actor: NotetakerActor): boolean {
         return config.allowAdminReadAll && actor.tags.includes("admin");
+    }
+
+    private getOwnerUserId(session: NotetakerSession): string {
+        return this.normalizeShareRecipientId(session.ownerUserId || session.startedByUserId);
+    }
+
+    private isParticipantActive(session: NotetakerSession, userId: string, referenceTime: Date = new Date()): boolean {
+        const normalizedUserId = this.normalizeShareRecipientId(userId);
+        return this.getActiveParticipants(session, referenceTime).some(
+            (participant) => this.normalizeShareRecipientId(participant.userId) === normalizedUserId
+        );
+    }
+
+    private getActiveParticipants(
+        session: NotetakerSession,
+        referenceTime: Date = new Date()
+    ): NotetakerParticipantSnapshot[] {
+        const referenceEpoch = referenceTime.getTime();
+        return session.participants.filter((participant) => {
+            if (participant.leftAt) {
+                return false;
+            }
+
+            return referenceEpoch - participant.lastSeenAt.getTime() <= AI_NOTETAKER_PARTICIPANT_TIMEOUT_MS;
+        });
+    }
+
+    private normalizeSession(session: NotetakerSession): void {
+        session.ownerUserId = session.ownerUserId || session.startedByUserId;
+        const normalizedOwnerUserId = this.normalizeShareRecipientId(session.ownerUserId);
+        session.ownerUserId = normalizedOwnerUserId || session.ownerUserId;
+        session.audioArtifacts = session.audioArtifacts ?? [];
+        session.sharedWithUserIds = Array.from(
+            new Set(
+                (session.sharedWithUserIds ?? [])
+                    .map((userId) => this.normalizeShareRecipientId(userId))
+                    .filter((userId) => userId.length > 0 && userId !== session.ownerUserId)
+            )
+        ).sort((left, right) => left.localeCompare(right));
+
+        if (session.sharedWithUserIds.length > 0) {
+            session.sharingStatus = "shared";
+        } else {
+            session.sharingStatus = "private_pending";
+            session.sharedAt = undefined;
+            session.sharedByUserId = undefined;
+        }
+    }
+
+    private toSessionStopReason(reason: RuntimeStopReason): NotetakerSessionStopReason {
+        if (reason === "auto_stop") {
+            return "idle_auto_stop";
+        }
+
+        return reason;
     }
 
     private normalizeTags(tags: string[] | undefined): string[] {
@@ -1514,6 +1883,15 @@ export class NotetakerSessionService {
         }
 
         return Array.from(new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)));
+    }
+
+    private normalizeShareRecipientId(userId: string): string {
+        const normalized = userId.trim();
+        if (!normalized) {
+            return "";
+        }
+
+        return normalized.includes("@") ? normalized.toLowerCase() : normalized;
     }
 
     private normalizeConfig(config: NotetakerSessionConfig): NotetakerSessionConfig {
@@ -1692,13 +2070,7 @@ export class NotetakerSessionService {
             }
 
             let sessionChanged = false;
-            const currentlyActiveParticipants = session.participants.filter((participant) => {
-                if (participant.leftAt) {
-                    return false;
-                }
-
-                return now.getTime() - participant.lastSeenAt.getTime() <= AI_NOTETAKER_PARTICIPANT_TIMEOUT_MS;
-            });
+            const currentlyActiveParticipants = this.getActiveParticipants(session, now);
 
             if (ACTIVE_SESSION_STATUSES.includes(session.status) && currentlyActiveParticipants.length === 0) {
                 await this.stopSessionInternal(session, "room_empty_auto_stop", undefined);
@@ -1707,7 +2079,7 @@ export class NotetakerSessionService {
 
             if (config.starterMustStay && ACTIVE_SESSION_STATUSES.includes(session.status)) {
                 const starterPresent = currentlyActiveParticipants.some(
-                    (participant) => participant.userId === session.startedByUserId
+                    (participant) => participant.userId === this.getOwnerUserId(session)
                 );
                 if (!starterPresent) {
                     await this.stopSessionInternal(session, "starter_left_auto_stop", undefined);
@@ -1760,6 +2132,7 @@ export class NotetakerSessionService {
         }
 
         for (const session of sessions) {
+            this.normalizeSession(session);
             if (ACTIVE_SESSION_STATUSES.includes(session.status)) {
                 continue;
             }
@@ -1830,6 +2203,7 @@ export class NotetakerSessionService {
         let retainedAudioBytes = 0;
 
         for (const session of sessions) {
+            this.normalizeSession(session);
             let sessionChanged = false;
 
             if (session.stoppedAt) {

@@ -23,6 +23,13 @@ export interface NotetakerSessionPayload {
     roomId?: string;
     spaceName: string;
     startedByUserId: string;
+    ownerUserId: string;
+    sharedWithUserIds: string[];
+    sharingStatus: "private_pending" | "shared";
+    sharedAt?: string;
+    sharedByUserId?: string;
+    stopActorUserId?: string;
+    stopReason?: "manual_stop" | "idle_auto_stop" | "room_empty_auto_stop" | "starter_left_auto_stop";
     startedAt: string;
     stoppedAt?: string;
     status: "starting" | "active" | "idle-warning" | "stopping" | "stopped" | "failed";
@@ -68,6 +75,16 @@ export interface NotetakerSessionPayload {
     lastSummaryRefreshAt?: string;
     lastSummaryRefreshSegmentCount: number;
     errorMessage?: string;
+}
+
+export interface NotetakerShareCandidatePayload {
+    userId: string;
+    displayName?: string;
+    email?: string;
+    tags: string[];
+    joinedAt?: string;
+    lastSeenAt?: string;
+    isCurrentSessionParticipant?: boolean;
 }
 
 class AiNotetakerApi {
@@ -150,6 +167,19 @@ class AiNotetakerApi {
         return response.data.session;
     }
 
+    public async reportAttendanceEvent(
+        spaceName: string,
+        actor: NotetakerActorPayload,
+        eventType: "join" | "leave" | "heartbeat"
+    ): Promise<{ handled: boolean; sessionId?: string }> {
+        const response = await this.getAxios().post("/ai-notes/attendance/event", {
+            spaceName,
+            actor,
+            eventType,
+        });
+        return response.data;
+    }
+
     public async stopSession(payload: {
         sessionId: string;
         actor: NotetakerActorPayload;
@@ -160,6 +190,54 @@ class AiNotetakerApi {
             reason: payload.reason,
         });
         return response.data.session;
+    }
+
+    public async getSessionShareCandidates(
+        sessionId: string,
+        actor: NotetakerActorPayload
+    ): Promise<NotetakerShareCandidatePayload[]> {
+        const response = await this.getAxios().get(`/ai-notes/${sessionId}/share-candidates`, {
+            params: {
+                actorUserId: actor.userId,
+                actorDisplayName: actor.displayName,
+                actorEmail: actor.email,
+                actorTags: actor.tags.join(","),
+            },
+        });
+        return response.data.candidates;
+    }
+
+    public async getSessionShares(
+        sessionId: string,
+        actor: NotetakerActorPayload
+    ): Promise<NotetakerShareCandidatePayload[]> {
+        const response = await this.getAxios().get(`/ai-notes/${sessionId}/shares`, {
+            params: {
+                actorUserId: actor.userId,
+                actorDisplayName: actor.displayName,
+                actorEmail: actor.email,
+                actorTags: actor.tags.join(","),
+            },
+        });
+        return response.data.sharedWith;
+    }
+
+    public async shareSession(
+        sessionId: string,
+        actor: NotetakerActorPayload,
+        userIds: string[]
+    ): Promise<NotetakerSessionPayload> {
+        const response = await this.getAxios().post(`/ai-notes/${sessionId}/share`, {
+            actor,
+            userIds,
+        });
+        return response.data.session;
+    }
+
+    public async removeSelfFromSessionSharing(sessionId: string, actor: NotetakerActorPayload): Promise<void> {
+        await this.getAxios().post(`/ai-notes/${sessionId}/remove-self`, {
+            actor,
+        });
     }
 
     public async getSession(sessionId: string, actor: NotetakerActorPayload): Promise<NotetakerSessionPayload> {

@@ -1,7 +1,9 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
-    import { closeModal } from "svelte-modals";
+    import { closeModal, openModal } from "svelte-modals";
     import Popup from "../Modal/Popup.svelte";
+    import AiNotetakerShareSessionModal from "./AiNotetakerShareSessionModal.svelte";
+    import { localUserStore } from "../../Connection/LocalUserStore";
     import { livekitMeetingRoomSpaceNameStore } from "../../Stores/GameStore";
     import {
         notetakerCanManageStore,
@@ -14,22 +16,18 @@
     } from "../../Stores/NotetakerStore";
 
     export let isOpen: boolean;
-
-    type PanelTab = "current" | "history";
+    export let focusSessionId: string | undefined = undefined;
 
     let selectedSessionId: string | undefined;
     let selectedSessionIds = new Set<string>();
     let summaryRefreshPoller: ReturnType<typeof setInterval> | undefined;
-    let panelTab: PanelTab = "history";
     let selectionMode = false;
     let wasOpen = false;
-    let lastCurrentRoomKey: string | undefined;
+    type SessionFilter = "all" | "owned" | "shared";
+    let sessionFilter: SessionFilter = "all";
+    const currentUserId = localUserStore.getLocalUser()?.uuid ?? undefined;
 
     $: currentMeetingSpace = $livekitMeetingRoomSpaceNameStore ?? undefined;
-
-    $: if (!currentMeetingSpace && panelTab === "current") {
-        panelTab = "history";
-    }
 
     $: if (isOpen && !wasOpen) {
         wasOpen = true;
@@ -41,32 +39,29 @@
         wasOpen = false;
     }
 
-    $: if (isOpen && panelTab === "current") {
-        const currentRoomKey = currentMeetingSpace ?? "__none__";
-        if (lastCurrentRoomKey !== currentRoomKey) {
-            lastCurrentRoomKey = currentRoomKey;
-            void notetakerControls.refreshCurrentSession(currentMeetingSpace);
-            void notetakerControls.refreshSessions(getSessionsSpaceName());
-        }
-    }
+    $: allSessions = [...$notetakerSessionsStore].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+    $: ownedSessions = allSessions.filter((session) => isOwnedByCurrentUser(session));
+    $: sharedWithMeSessions = allSessions.filter((session) => !isOwnedByCurrentUser(session));
+    $: hasOwnedSessions = ownedSessions.length > 0;
+    $: orderedSessions =
+        sessionFilter === "owned" ? ownedSessions : sessionFilter === "shared" ? sharedWithMeSessions : allSessions;
+    $: visibleOwnedSessions = orderedSessions.filter((session) => isOwnedByCurrentUser(session));
 
-    $: if (panelTab !== "current") {
-        lastCurrentRoomKey = undefined;
-    }
+    $: selectedSession = selectedSessionId !== undefined ? orderedSessions.find((session) => session.id === selectedSessionId) : undefined;
 
-    $: selectedSession =
-        selectedSessionId !== undefined
-            ? $notetakerSessionsStore.find((session) => session.id === selectedSessionId)
-            : undefined;
+    $: displayedSession = selectedSession ?? $notetakerSessionStore ?? orderedSessions[0];
 
-    $: displayedSession = selectedSession ?? $notetakerSessionStore ?? $notetakerSessionsStore[0];
-
-    $: if (selectedSessionId && !$notetakerSessionsStore.some((session) => session.id === selectedSessionId)) {
+    $: if (selectedSessionId && !orderedSessions.some((session) => session.id === selectedSessionId)) {
         selectedSessionId = undefined;
     }
 
-    $: if (!selectedSessionId && $notetakerSessionsStore.length > 0) {
-        selectedSessionId = $notetakerSessionsStore[0].id;
+    $: if (!selectedSessionId && orderedSessions.length > 0) {
+        selectedSessionId = orderedSessions[0].id;
+    }
+
+    $: if (focusSessionId && orderedSessions.some((session) => session.id === focusSessionId)) {
+        selectedSessionId = focusSessionId;
+        focusSessionId = undefined;
     }
 
     $: {
@@ -131,19 +126,7 @@
     }
 
     function getSessionsSpaceName(): string | undefined {
-        return panelTab === "current" ? currentMeetingSpace : undefined;
-    }
-
-    function switchPanelTab(tab: PanelTab): void {
-        if (panelTab === tab) {
-            return;
-        }
-
-        panelTab = tab;
-        selectionMode = false;
-        selectedSessionId = undefined;
-        selectedSessionIds = new Set();
-        void notetakerControls.refreshSessions(getSessionsSpaceName());
+        return undefined;
     }
 
     function selectSession(session: NotetakerSession): void {
@@ -152,6 +135,22 @@
 
     function isRunning(state: string): boolean {
         return state === "starting" || state === "active" || state === "idle-warning" || state === "stopping";
+    }
+
+    function getSessionOwnerUserId(session: NotetakerSession): string {
+        return session.ownerUserId ?? session.startedByUserId;
+    }
+
+    function isOwnedByCurrentUser(session: NotetakerSession): boolean {
+        if (!currentUserId) {
+            return false;
+        }
+
+        return getSessionOwnerUserId(session) === currentUserId;
+    }
+
+    function getSessionOwnerLabel(session: NotetakerSession): string {
+        return isOwnedByCurrentUser(session) ? "You" : getSessionOwnerUserId(session);
     }
 
     function formatSessionTime(session: NotetakerSession): string {
@@ -183,6 +182,32 @@
             minute: "2-digit",
         });
         return `${started} -> ${stopped}`;
+    }
+
+    function getSessionTitle(session: NotetakerSession): string {
+        const summary = getPreferredSummary(session)?.summaryMarkdown?.trim();
+        if (summary && summary.toLowerCase() !== "no transcript content was captured for this session.") {
+            const headline = summary.replace(/\s+/g, " ").slice(0, 54).trim();
+            if (headline.length > 0) {
+                const started = new Date(session.startedAt).toLocaleString([], {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                });
+
+                return `${headline}${summary.length > headline.length ? "..." : ""} (${started})`;
+            }
+        }
+
+        const started = new Date(session.startedAt).toLocaleString([], {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+
+        return `Discussion (${started})`;
     }
 
     function formatDurationFromMs(totalMs: number): string {
@@ -288,6 +313,38 @@
         return "bg-warning/20 text-warning border border-warning/40";
     }
 
+    function sharingStatusLabel(session: NotetakerSession): string {
+        const sharedCount = session.sharedWithUserIds?.length ?? 0;
+        if (sharedCount === 0) {
+            if (isOwnedByCurrentUser(session) && !isRunning(session.status)) {
+                return "Not shared yet";
+            }
+            return "Private";
+        }
+
+        return sharedCount === 1 ? "Shared with 1" : `Shared with ${sharedCount}`;
+    }
+
+    function sharingStatusClasses(session: NotetakerSession): string {
+        if ((session.sharedWithUserIds?.length ?? 0) === 0 && isOwnedByCurrentUser(session) && !isRunning(session.status)) {
+            return "bg-warning/20 text-warning border border-warning/40";
+        }
+
+        return (session.sharedWithUserIds?.length ?? 0) > 0
+            ? "bg-secondary/20 text-secondary border border-secondary/40"
+            : "bg-white/10 text-white border border-white/20";
+    }
+
+    function ownershipLabel(session: NotetakerSession): string {
+        return isOwnedByCurrentUser(session) ? "Initiated by you" : "Shared with you";
+    }
+
+    function ownershipClasses(session: NotetakerSession): string {
+        return isOwnedByCurrentUser(session)
+            ? "bg-success/20 text-success border border-success/40"
+            : "bg-secondary/20 text-secondary border border-secondary/40";
+    }
+
     function getFinalizedAtLabel(session: NotetakerSession): string | undefined {
         const finalSummary = getFinalSummary(session);
         if (!finalSummary) {
@@ -347,7 +404,7 @@
     }
 
     function selectAllSessions(): void {
-        selectedSessionIds = new Set($notetakerSessionsStore.map((session) => session.id));
+        selectedSessionIds = new Set(visibleOwnedSessions.map((session) => session.id));
     }
 
     function clearSelection(): void {
@@ -355,11 +412,15 @@
     }
 
     async function deleteSelectedSessions(): Promise<void> {
-        if (selectedSessionIds.size === 0 || !$notetakerCanManageStore) {
+        if (selectedSessionIds.size === 0 || !$notetakerCanManageStore || !hasOwnedSessions) {
             return;
         }
 
-        const targetIds = Array.from(selectedSessionIds);
+        const ownedSessionIds = new Set(ownedSessions.map((session) => session.id));
+        const targetIds = Array.from(selectedSessionIds).filter((sessionId) => ownedSessionIds.has(sessionId));
+        if (targetIds.length === 0) {
+            return;
+        }
         const shouldDelete = window.confirm(`Delete ${targetIds.length} AI notes session(s) permanently?`);
         if (!shouldDelete) {
             return;
@@ -375,11 +436,11 @@
     }
 
     async function deleteAllSessions(): Promise<void> {
-        if ($notetakerSessionsStore.length === 0 || !$notetakerCanManageStore) {
+        if (ownedSessions.length === 0 || !$notetakerCanManageStore) {
             return;
         }
 
-        const targetIds = $notetakerSessionsStore.map((session) => session.id);
+        const targetIds = ownedSessions.map((session) => session.id);
         const shouldDelete = window.confirm(`Delete all ${targetIds.length} AI notes session(s) in this room?`);
         if (!shouldDelete) {
             return;
@@ -392,7 +453,7 @@
     }
 
     function deleteDisplayedSession(): void {
-        if (!displayedSession || !$notetakerCanManageStore) {
+        if (!displayedSession || !$notetakerCanManageStore || !isOwnedByCurrentUser(displayedSession)) {
             return;
         }
 
@@ -407,6 +468,33 @@
         selectedSessionId = undefined;
     }
 
+    async function removeDisplayedSessionFromMyLibrary(): Promise<void> {
+        if (!displayedSession || isOwnedByCurrentUser(displayedSession)) {
+            return;
+        }
+
+        const shouldRemove = window.confirm("Remove this shared discussion from your library?");
+        if (!shouldRemove) {
+            return;
+        }
+
+        const removed = await notetakerControls.removeSessionFromMyLibrary(displayedSession.id);
+        if (!removed) {
+            return;
+        }
+
+        selectedSessionIds.delete(displayedSession.id);
+        selectedSessionIds = new Set(selectedSessionIds);
+        selectedSessionId = undefined;
+    }
+
+    function openShareDialog(session: NotetakerSession): void {
+        openModal(AiNotetakerShareSessionModal, {
+            session,
+            showOwnerStopMessage: false,
+        });
+    }
+
     function refreshPanel(): void {
         void notetakerControls.refreshCurrentSession(currentMeetingSpace);
         void notetakerControls.refreshSessions(getSessionsSpaceName());
@@ -414,7 +502,7 @@
 
 </script>
 
-<Popup {isOpen} maxWidthClass="sm:max-w-[920px]">
+<Popup {isOpen} maxWidthClass="sm:max-w-[1200px]">
     <h1 slot="title" class="text-2xl font-bold">AI Notes Library</h1>
     <div slot="content" class="w-full px-1">
         <div class="rounded-xl bg-dark-500/50 p-4">
@@ -431,9 +519,7 @@
                             </div>
                         {/if}
                     </div>
-                    <div class="text-xs opacity-70 mt-2">
-                        Showing: {panelTab === "current" ? "Current room sessions" : "All discussions"}
-                    </div>
+                    <div class="text-xs opacity-70 mt-2">Showing: All discussions</div>
                     {#if currentMeetingSpace}
                         <div class="text-xs opacity-70 mt-1">Current room: {currentMeetingSpace}</div>
                     {/if}
@@ -448,45 +534,45 @@
             {/if}
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-[330px_minmax(0,1fr)] mt-4 lg:h-[54vh] lg:min-h-[380px]">
+        <div class="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)] mt-4 lg:h-[52vh] lg:min-h-[360px]">
             <div class="rounded-xl bg-dark-500/50 p-4 min-h-0 flex flex-col">
                 <div class="shrink-0">
-                    <div class="font-semibold">Sessions ({$notetakerSessionsStore.length})</div>
-                    <div class="text-xs opacity-75 mt-1">Browse current room notes or your full history.</div>
-                    <div class="flex gap-2 mt-3">
-                        <button
-                            class="btn text-xs flex-1 {panelTab === 'current' ? 'bg-secondary' : ''}"
-                            disabled={!currentMeetingSpace}
-                            on:click={() => switchPanelTab('current')}
+                    <div class="font-semibold">
+                        Discussions ({orderedSessions.length})
+                        {#if sessionFilter !== "all"}
+                            <span class="opacity-70">/ {$notetakerSessionsStore.length} total</span>
+                        {/if}
+                    </div>
+                    <div class="text-xs opacity-75 mt-1">All sessions you initiated or that were shared with you.</div>
+                    <div class="mt-3">
+                        <label class="text-[11px] opacity-70 uppercase tracking-wide" for="ai-notes-filter"
+                            >View</label
                         >
-                            Current room
-                        </button>
-                        <button
-                            class="btn text-xs flex-1 {panelTab === 'history' ? 'bg-secondary' : ''}"
-                            on:click={() => switchPanelTab('history')}
+                        <select
+                            id="ai-notes-filter"
+                            class="w-full mt-1 p-2 rounded-lg border border-white/20 text-white ai-notes-filter-select"
+                            bind:value={sessionFilter}
                         >
-                            All discussions
-                        </button>
+                            <option value="all" style="color: rgb(15 23 42);">All discussions</option>
+                            <option value="owned" style="color: rgb(15 23 42);">Initiated by you</option>
+                            <option value="shared" style="color: rgb(15 23 42);">Shared with you</option>
+                        </select>
                     </div>
                 </div>
 
-                {#if panelTab === 'current' && !currentMeetingSpace}
-                    <div class="text-xs text-warning mt-2">Join a meeting room to view room-specific sessions.</div>
-                {/if}
-
-                {#if $notetakerCanManageStore}
+                {#if $notetakerCanManageStore && hasOwnedSessions}
                     <div class="flex flex-wrap items-center gap-2 mt-3">
                         <button
                             class="btn text-xs"
                             on:click={toggleSelectionMode}
-                            disabled={$notetakerLoadingStore || $notetakerSessionsStore.length === 0}
+                            disabled={$notetakerLoadingStore || visibleOwnedSessions.length === 0}
                         >
                             {selectionMode ? 'Exit selection' : 'Selection mode'}
                         </button>
                         <button
                             class="btn text-xs ml-auto"
                             on:click={deleteAllSessions}
-                            disabled={$notetakerLoadingStore || $notetakerSessionsStore.length === 0}
+                            disabled={$notetakerLoadingStore || ownedSessions.length === 0}
                         >
                             Delete all
                         </button>
@@ -494,7 +580,7 @@
 
                     {#if selectionMode}
                         <div class="flex flex-wrap gap-2 mt-2 rounded-lg bg-dark-600/50 p-2">
-                            <button class="btn text-xs" on:click={selectAllSessions} disabled={$notetakerSessionsStore.length === 0}
+                            <button class="btn text-xs" on:click={selectAllSessions} disabled={visibleOwnedSessions.length === 0}
                                 >Select all</button
                             >
                             <button class="btn text-xs" on:click={clearSelection} disabled={selectedSessionIds.size === 0}>Clear</button>
@@ -509,13 +595,11 @@
                     {/if}
                 {/if}
 
-                {#if $notetakerSessionsStore.length === 0}
-                    <div class="text-sm opacity-75 mt-3">
-                        {panelTab === "current" ? "No sessions found for this room yet." : "No discussions found yet."}
-                    </div>
+                {#if orderedSessions.length === 0}
+                    <div class="text-sm opacity-75 mt-3">No discussions found for this filter yet.</div>
                 {:else}
-                    <div class="space-y-2 overflow-y-auto pr-1 mt-3 flex-1 min-h-0">
-                        {#each $notetakerSessionsStore as session (session.id)}
+                    <div class="space-y-3 overflow-y-auto pr-1 mt-3 flex-1 min-h-0">
+                        {#each orderedSessions as session (session.id)}
                             <button
                                 class="w-full text-left rounded-lg p-3 border border-white/10 hover:bg-dark-600/60 transition-colors {displayedSession?.id ===
                                 session.id
@@ -524,7 +608,7 @@
                                 on:click={() => selectSession(session)}
                             >
                                 <div class="flex items-start gap-2">
-                                    {#if $notetakerCanManageStore && selectionMode}
+                                    {#if $notetakerCanManageStore && selectionMode && isOwnedByCurrentUser(session)}
                                         <input
                                             type="checkbox"
                                             class="mt-1"
@@ -534,12 +618,18 @@
                                         />
                                     {/if}
                                     <div class="min-w-0 flex-1">
-                                        <div class="flex flex-wrap items-center justify-between gap-2">
-                                            <div class="font-semibold text-sm truncate">{session.spaceName}</div>
+                                        <div class="font-semibold text-sm truncate">{getSessionTitle(session)}</div>
+                                        <div class="text-[11px] opacity-70 mt-1 truncate">{session.spaceName}</div>
+                                        <div class="flex flex-wrap items-center gap-2 mt-2">
                                             <div
                                                 class="inline-flex items-center rounded-full px-2 py-1 text-[10px] {outputStateClasses(computeSessionOutputState(session).tone)}"
                                             >
                                                 {computeSessionOutputState(session).label}
+                                            </div>
+                                            <div
+                                                class="inline-flex items-center rounded-full px-2 py-1 text-[10px] {ownershipClasses(session)}"
+                                            >
+                                                {ownershipLabel(session)}
                                             </div>
                                         </div>
                                         <div class="text-xs opacity-75 mt-1">{formatSessionTimeCompact(session)}</div>
@@ -557,13 +647,27 @@
                         <div class="flex flex-wrap items-start justify-between gap-3">
                             <div>
                                 <div class="text-xs opacity-70 uppercase tracking-wide">Selected session</div>
-                                <div class="font-semibold text-base">{displayedSession.spaceName}</div>
+                                <div class="font-semibold text-base">{getSessionTitle(displayedSession)}</div>
                                 <div class="text-xs opacity-75 mt-1">{formatSessionTime(displayedSession)}</div>
+                                <div class="text-xs opacity-75 mt-1">Room: {displayedSession.spaceName}</div>
+                                <div class="text-xs opacity-75 mt-1">Started by: {getSessionOwnerLabel(displayedSession)}</div>
                             </div>
-                            <div
-                                class="inline-flex items-center rounded-full px-2 py-1 text-[11px] {outputStateClasses(computeSessionOutputState(displayedSession).tone)}"
-                            >
-                                {computeSessionOutputState(displayedSession).label}
+                            <div class="flex flex-wrap items-center gap-2">
+                                <div
+                                    class="inline-flex items-center rounded-full px-2 py-1 text-[11px] {outputStateClasses(computeSessionOutputState(displayedSession).tone)}"
+                                >
+                                    {computeSessionOutputState(displayedSession).label}
+                                </div>
+                                <div
+                                    class="inline-flex items-center rounded-full px-2 py-1 text-[11px] {ownershipClasses(displayedSession)}"
+                                >
+                                    {ownershipLabel(displayedSession)}
+                                </div>
+                                <div
+                                    class="inline-flex items-center rounded-full px-2 py-1 text-[11px] {sharingStatusClasses(displayedSession)}"
+                                >
+                                    {sharingStatusLabel(displayedSession)}
+                                </div>
                             </div>
                         </div>
                         <div class="text-xs opacity-80 mt-3">{computeSessionOutputState(displayedSession).description}</div>
@@ -571,6 +675,11 @@
                             <div class="text-xs opacity-70 mt-1">Finalized at: {getFinalizedAtLabel(displayedSession)}</div>
                         {:else if !isRunning(displayedSession.status)}
                             <div class="text-xs opacity-70 mt-1">This panel refreshes automatically while processing.</div>
+                        {/if}
+                        {#if isOwnedByCurrentUser(displayedSession) && (displayedSession.sharedWithUserIds?.length ?? 0) === 0 && !isRunning(displayedSession.status)}
+                            <div class="text-xs text-warning mt-1">
+                                This session is still private. Share it when you are ready.
+                            </div>
                         {/if}
                     </div>
 
@@ -638,15 +747,29 @@
                     <div class="rounded-lg bg-dark-600/35 border border-white/10 p-3">
                         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                             <div class="font-semibold">Exports and actions</div>
-                            {#if $notetakerCanManageStore}
-                                <button
-                                    class="btn text-xs bg-danger/80 hover:bg-danger disabled:opacity-50"
-                                    disabled={!$notetakerCanManageStore}
-                                    on:click={deleteDisplayedSession}
-                                >
-                                    Delete session
-                                </button>
-                            {/if}
+                            <div class="flex flex-wrap items-center gap-2">
+                                {#if isOwnedByCurrentUser(displayedSession)}
+                                    <button class="btn text-xs" on:click={() => openShareDialog(displayedSession)}>
+                                        {(displayedSession.sharedWithUserIds?.length ?? 0) > 0 ? "Edit sharing" : "Share session"}
+                                    </button>
+                                    {#if $notetakerCanManageStore}
+                                        <button
+                                            class="btn text-xs bg-danger/80 hover:bg-danger disabled:opacity-50"
+                                            disabled={!$notetakerCanManageStore}
+                                            on:click={deleteDisplayedSession}
+                                        >
+                                            Delete session
+                                        </button>
+                                    {/if}
+                                {:else}
+                                    <button class="btn text-xs" on:click={removeDisplayedSessionFromMyLibrary}>
+                                        Remove from my library
+                                    </button>
+                                {/if}
+                            </div>
+                        </div>
+                        <div class="text-xs opacity-75 mb-2">
+                            Visibility: {sharingStatusLabel(displayedSession)}. {#if isOwnedByCurrentUser(displayedSession)}You can manage recipients any time.{:else}Only the starter can update sharing. You can remove this discussion from your own library.{/if}
                         </div>
                         {#if !isFinalOutputReady(displayedSession)}
                             <div class="text-xs opacity-75 mb-2">Current export is partial until output status becomes Ready.</div>
@@ -679,3 +802,16 @@
         <button class="btn flex-1 justify-center" on:click={refreshPanel}>Refresh</button>
     </svelte:fragment>
 </Popup>
+
+<style>
+    .ai-notes-filter-select {
+        background-color: rgba(15, 23, 42, 0.72);
+        color: rgb(241 245 249);
+        color-scheme: dark;
+    }
+
+    .ai-notes-filter-select option {
+        background-color: rgb(248 250 252);
+        color: rgb(15 23 42);
+    }
+</style>

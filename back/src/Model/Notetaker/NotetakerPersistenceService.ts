@@ -48,6 +48,7 @@ interface SerializedNotetakerSession
     extends Omit<
         NotetakerSession,
         | "startedAt"
+        | "sharedAt"
         | "stoppedAt"
         | "lastSpeechAt"
         | "idleWarningAt"
@@ -60,6 +61,7 @@ interface SerializedNotetakerSession
         | "audioArtifacts"
     > {
     startedAt: string;
+    sharedAt?: string;
     stoppedAt?: string;
     lastSpeechAt?: string;
     idleWarningAt?: string;
@@ -244,6 +246,7 @@ export class NotetakerPersistenceService {
         return {
             ...session,
             startedAt: session.startedAt.toISOString(),
+            sharedAt: session.sharedAt?.toISOString(),
             stoppedAt: session.stoppedAt?.toISOString(),
             lastSpeechAt: session.lastSpeechAt?.toISOString(),
             idleWarningAt: session.idleWarningAt?.toISOString(),
@@ -283,6 +286,7 @@ export class NotetakerPersistenceService {
             return {
                 ...parsed,
                 startedAt: new Date(parsed.startedAt),
+                sharedAt: parsed.sharedAt ? new Date(parsed.sharedAt) : undefined,
                 stoppedAt: parsed.stoppedAt ? new Date(parsed.stoppedAt) : undefined,
                 lastSpeechAt: parsed.lastSpeechAt ? new Date(parsed.lastSpeechAt) : undefined,
                 idleWarningAt: parsed.idleWarningAt ? new Date(parsed.idleWarningAt) : undefined,

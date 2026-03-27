@@ -1,11 +1,13 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
+    import { localUserStore } from "../../Connection/LocalUserStore";
     import {
         notetakerCanManageStore,
         notetakerControls,
         notetakerLoadingStore,
         notetakerRuntimeStateStore,
         notetakerSessionStore,
+        notetakerStatusStore,
     } from "../../Stores/NotetakerStore";
 
     let now = Date.now();
@@ -42,6 +44,57 @@
     $: minutes = Math.floor(secondsLeft / 60);
     $: seconds = secondsLeft % 60;
     $: countdown = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+    $: currentUser = localUserStore.getLocalUser();
+    $: currentUserIdentifiers = collectCurrentUserIdentifiers(currentUser);
+    $: statusUserIdentifiers = collectStatusUserIdentifiers(
+        $notetakerStatusStore.viewerUserId,
+        $notetakerStatusStore.viewerEmail
+    );
+    $: viewerIdentifiers = Array.from(new Set([...statusUserIdentifiers, ...currentUserIdentifiers]));
+    $: ownerUserId = $notetakerSessionStore?.ownerUserId ?? $notetakerSessionStore?.startedByUserId;
+    $: isCurrentUserOwner =
+        typeof $notetakerSessionStore?.viewerIsOwner === "boolean"
+            ? $notetakerSessionStore.viewerIsOwner
+            : Boolean(ownerUserId) && viewerIdentifiers.some((identifier) => idsMatch(identifier, ownerUserId));
+
+    function normalizeUserId(value: string | undefined): string | undefined {
+        if (!value) {
+            return undefined;
+        }
+
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+
+        return trimmed.includes("@") ? trimmed.toLowerCase() : trimmed;
+    }
+
+    function idsMatch(left: string | undefined, right: string | undefined): boolean {
+        const normalizedLeft = normalizeUserId(left);
+        const normalizedRight = normalizeUserId(right);
+        return Boolean(normalizedLeft) && Boolean(normalizedRight) && normalizedLeft === normalizedRight;
+    }
+
+    function collectCurrentUserIdentifiers(
+        user: ReturnType<typeof localUserStore.getLocalUser> | undefined | null
+    ): string[] {
+        if (!user) {
+            return [];
+        }
+
+        const normalized = [normalizeUserId(user.uuid), normalizeUserId(user.email ?? undefined)].filter(
+            (value): value is string => Boolean(value)
+        );
+        return Array.from(new Set(normalized));
+    }
+
+    function collectStatusUserIdentifiers(userId?: string, email?: string): string[] {
+        const normalized = [normalizeUserId(userId), normalizeUserId(email)].filter(
+            (value): value is string => Boolean(value)
+        );
+        return Array.from(new Set(normalized));
+    }
 </script>
 
 {#if shouldDisplay}
@@ -50,11 +103,11 @@
             {#if $notetakerRuntimeStateStore === "idle-warning"}
                 <div class="font-semibold text-sm">AI notes: no speech detected.</div>
                 <div class="text-xs opacity-80 mt-1">Auto-stop in {countdown}.</div>
-                {#if $notetakerCanManageStore}
+                {#if isCurrentUserOwner}
                     <div class="mt-2 flex gap-2 justify-end">
                         <button
                             class="btn btn-secondary text-sm"
-                            disabled={$notetakerLoadingStore}
+                            disabled={$notetakerLoadingStore || !$notetakerCanManageStore}
                             on:click={() => void notetakerControls.keepRunning()}
                         >
                             Keep running
@@ -67,6 +120,8 @@
                             Stop now
                         </button>
                     </div>
+                {:else}
+                    <div class="text-xs opacity-75 mt-2">Waiting for the starter to decide.</div>
                 {/if}
             {:else if $notetakerRuntimeStateStore === "starting"}
                 <div class="font-semibold text-sm">AI notes are starting...</div>

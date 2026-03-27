@@ -46,12 +46,31 @@ interface NotetakerParticipant {
     leftAt?: string;
 }
 
+export interface NotetakerShareCandidate {
+    userId: string;
+    displayName?: string;
+    email?: string;
+    tags: string[];
+    joinedAt?: string;
+    lastSeenAt?: string;
+    isCurrentSessionParticipant?: boolean;
+}
+
 export interface NotetakerSession {
     id: string;
     roomId?: string;
     spaceName: string;
     status: "starting" | "active" | "idle-warning" | "stopping" | "stopped" | "failed";
     startedByUserId: string;
+    ownerUserId: string;
+    sharedWithUserIds: string[];
+    sharingStatus: "private_pending" | "shared";
+    sharedAt?: string;
+    sharedByUserId?: string;
+    viewerIsOwner?: boolean;
+    viewerCanStop?: boolean;
+    stopActorUserId?: string;
+    stopReason?: "manual_stop" | "idle_auto_stop" | "room_empty_auto_stop" | "starter_left_auto_stop";
     startedAt: string;
     stoppedAt?: string;
     idleWarningDeadlineAt?: string;
@@ -78,6 +97,8 @@ interface NotetakerStatus {
     inMeetingRoom: boolean;
     meetingSpaces: string[];
     canManage: boolean;
+    viewerUserId?: string;
+    viewerEmail?: string;
     config?: NotetakerConfig;
     mistral?: {
         configured: boolean;
@@ -115,6 +136,23 @@ function getAuthHeaders(): Record<string, string> {
     return {
         Authorization: authToken,
     };
+}
+
+function upsertSessionInStores(session: NotetakerSession): void {
+    sessionsStoreInternal.update((sessions) => {
+        const existingIndex = sessions.findIndex((candidate) => candidate.id === session.id);
+        if (existingIndex >= 0) {
+            const next = [...sessions];
+            next[existingIndex] = session;
+            return next;
+        }
+        return [session, ...sessions];
+    });
+
+    const currentSession = get(currentSessionStore);
+    if (currentSession?.id === session.id) {
+        currentSessionStore.set(session);
+    }
 }
 
 function clearIdleWarningMessage(): void {
@@ -160,7 +198,7 @@ function maybeStartSummaryFollowUp(session: NotetakerSession | null | undefined)
     summaryFollowUpPoller = setInterval(() => {
         attempts += 1;
         void refreshCurrentSession(session.spaceName);
-        void refreshSessions(session.spaceName);
+        void refreshSessions();
 
         const currentSession = get(currentSessionStore);
         const listedSession = get(sessionsStoreInternal).find((candidate) => candidate.id === session.id);
@@ -281,7 +319,7 @@ async function refreshCurrentSession(spaceName?: string): Promise<void> {
     }
 }
 
-async function refreshSessions(spaceName?: string): Promise<void> {
+async function refreshSessions(_spaceName?: string): Promise<void> {
     if (!AI_NOTETAKER_ENABLED) {
         sessionsStoreInternal.set([]);
         return;
@@ -290,9 +328,6 @@ async function refreshSessions(spaceName?: string): Promise<void> {
     try {
         const response = await axiosToPusher.get<{ sessions: NotetakerSession[] }>("notetaker/sessions", {
             headers: getAuthHeaders(),
-            params: {
-                spaceName,
-            },
         });
         sessionsStoreInternal.set(response.data.sessions);
         notetakerLastErrorStoreInternal.set(null);
@@ -366,7 +401,7 @@ async function startSession(spaceName?: string): Promise<void> {
         ensureHeartbeat();
         stopSummaryFollowUpPoller();
         syncTranscriptionRecorder();
-        void refreshSessions(spaceName);
+        void refreshSessions();
         notetakerLastErrorStoreInternal.set(null);
     } catch (error) {
         const message = "Failed to start AI notes";
@@ -378,10 +413,10 @@ async function startSession(spaceName?: string): Promise<void> {
     }
 }
 
-async function stopSession(): Promise<void> {
+async function stopSession(): Promise<NotetakerSession | undefined> {
     const session = get(currentSessionStore);
     if (!session) {
-        return;
+        return undefined;
     }
 
     notetakerLoadingStoreInternal.set(true);
@@ -401,13 +436,15 @@ async function stopSession(): Promise<void> {
         ensureHeartbeat();
         syncTranscriptionRecorder();
         maybeStartSummaryFollowUp(response.data.session);
-        void refreshSessions(session.spaceName);
+        void refreshSessions();
         notetakerLastErrorStoreInternal.set(null);
+        return response.data.session;
     } catch (error) {
         const message = "Failed to stop AI notes";
         warningMessageStore.addWarningMessage(message, { closable: true });
         notetakerLastErrorStoreInternal.set(message);
         console.error(message, error);
+        return undefined;
     } finally {
         notetakerLoadingStoreInternal.set(false);
     }
@@ -435,7 +472,7 @@ async function keepRunning(): Promise<void> {
         ensureHeartbeat();
         syncTranscriptionRecorder();
         maybeStartSummaryFollowUp(response.data.session);
-        void refreshSessions(session.spaceName);
+        void refreshSessions();
         notetakerLastErrorStoreInternal.set(null);
     } catch (error) {
         const message = "Failed to keep AI notes running";
@@ -478,7 +515,7 @@ async function deleteSessions(sessionIds: string[]): Promise<void> {
             stopTranscriptionRecorder();
         }
 
-        await refreshSessions(currentMeetingSpace);
+        await refreshSessions();
         if (currentMeetingSpace) {
             await refreshCurrentSession(currentMeetingSpace);
         }
@@ -501,6 +538,103 @@ async function deleteSessions(sessionIds: string[]): Promise<void> {
 
 async function deleteSession(sessionId: string): Promise<void> {
     await deleteSessions([sessionId]);
+}
+
+async function removeSessionFromMyLibrary(sessionId: string): Promise<boolean> {
+    notetakerLoadingStoreInternal.set(true);
+    try {
+        await axiosToPusher.post(
+            `notetaker/session/${sessionId}/remove-self`,
+            {},
+            {
+                headers: getAuthHeaders(),
+            }
+        );
+
+        sessionsStoreInternal.update((sessions) => sessions.filter((session) => session.id !== sessionId));
+        if (get(currentSessionStore)?.id === sessionId) {
+            currentSessionStore.set(null);
+        }
+        notetakerLastErrorStoreInternal.set(null);
+        return true;
+    } catch (error) {
+        const message = "Failed to remove shared AI notes session from your library";
+        warningMessageStore.addWarningMessage(message, { closable: true });
+        notetakerLastErrorStoreInternal.set(message);
+        console.error(message, error);
+        return false;
+    } finally {
+        notetakerLoadingStoreInternal.set(false);
+    }
+}
+
+async function getSessionShareCandidates(sessionId: string): Promise<NotetakerShareCandidate[]> {
+    try {
+        const response = await axiosToPusher.get<{ candidates: NotetakerShareCandidate[] }>(
+            `notetaker/session/${sessionId}/share-candidates`,
+            {
+                headers: getAuthHeaders(),
+            }
+        );
+
+        notetakerLastErrorStoreInternal.set(null);
+        return response.data.candidates;
+    } catch (error) {
+        const message = "Failed to load AI notes sharing candidates";
+        warningMessageStore.addWarningMessage(message, { closable: true });
+        notetakerLastErrorStoreInternal.set(message);
+        console.error(message, error);
+        return [];
+    }
+}
+
+async function getSessionShares(sessionId: string): Promise<NotetakerShareCandidate[]> {
+    try {
+        const response = await axiosToPusher.get<{ sharedWith: NotetakerShareCandidate[] }>(
+            `notetaker/session/${sessionId}/shares`,
+            {
+                headers: getAuthHeaders(),
+            }
+        );
+
+        notetakerLastErrorStoreInternal.set(null);
+        return response.data.sharedWith;
+    } catch (error) {
+        const message = "Failed to load AI notes sharing list";
+        warningMessageStore.addWarningMessage(message, { closable: true });
+        notetakerLastErrorStoreInternal.set(message);
+        console.error(message, error);
+        return [];
+    }
+}
+
+async function updateSessionSharing(sessionId: string, userIds: string[]): Promise<NotetakerSession | undefined> {
+    notetakerLoadingStoreInternal.set(true);
+    try {
+        const response = await axiosToPusher.post<{ session: NotetakerSession }>(
+            "notetaker/share",
+            {
+                sessionId,
+                userIds,
+            },
+            {
+                headers: getAuthHeaders(),
+            }
+        );
+
+        const updatedSession = response.data.session;
+        upsertSessionInStores(updatedSession);
+        notetakerLastErrorStoreInternal.set(null);
+        return updatedSession;
+    } catch (error) {
+        const message = "Failed to update AI notes sharing";
+        warningMessageStore.addWarningMessage(message, { closable: true });
+        notetakerLastErrorStoreInternal.set(message);
+        console.error(message, error);
+        return undefined;
+    } finally {
+        notetakerLoadingStoreInternal.set(false);
+    }
 }
 
 async function exportSession(sessionId: string, format: "markdown" | "text"): Promise<void> {
@@ -628,11 +762,16 @@ function bootstrapNotetaker(): void {
         }
 
         void refreshCurrentSession(normalizedSpace);
-        void refreshSessions(normalizedSpace);
+        void refreshSessions();
     });
 
     inLivekitStore.subscribe((inLivekit) => {
         if (inLivekit) {
+            const selectedMeetingSpace = get(livekitMeetingRoomSpaceNameStore) ?? undefined;
+            if (selectedMeetingSpace) {
+                void refreshCurrentSession(selectedMeetingSpace);
+                void refreshSessions();
+            }
             syncTranscriptionRecorder();
             return;
         }
@@ -659,7 +798,7 @@ function bootstrapNotetaker(): void {
             void refreshStatus();
             if (selectedMeetingSpace) {
                 void refreshCurrentSession(selectedMeetingSpace);
-                void refreshSessions(selectedMeetingSpace);
+                void refreshSessions();
             }
         }, 8_000);
     }
@@ -721,6 +860,10 @@ export const notetakerControls = {
     keepRunning,
     deleteSession,
     deleteSessions,
+    removeSessionFromMyLibrary,
+    getSessionShareCandidates,
+    getSessionShares,
+    updateSessionSharing,
     exportSession,
     downloadRecording,
 };

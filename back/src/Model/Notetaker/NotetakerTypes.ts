@@ -4,6 +4,14 @@ export type NotetakerPermissionPolicy = "all_users" | "selected_roles";
 
 export type NotetakerSessionVisibilityPolicy = "participants-only";
 
+export type NotetakerSessionSharingStatus = "private_pending" | "shared";
+
+export type NotetakerSessionStopReason =
+    | "manual_stop"
+    | "idle_auto_stop"
+    | "room_empty_auto_stop"
+    | "starter_left_auto_stop";
+
 export type NotetakerAuditEventType =
     | "start"
     | "participant_joined"
@@ -20,6 +28,9 @@ export type NotetakerAuditEventType =
     | "auto_stop"
     | "room_empty_auto_stop"
     | "starter_left_auto_stop"
+    | "sharing_updated"
+    | "sharing_cleared"
+    | "sharing_prompted_on_owner_stop"
     | "error";
 
 export interface TranscriptSegmentInput {
@@ -107,6 +118,13 @@ export interface NotetakerSession {
     roomId?: string;
     spaceName: string;
     startedByUserId: string;
+    ownerUserId: string;
+    sharedWithUserIds: string[];
+    sharingStatus: NotetakerSessionSharingStatus;
+    sharedAt?: Date;
+    sharedByUserId?: string;
+    stopActorUserId?: string;
+    stopReason?: NotetakerSessionStopReason;
     startedAt: Date;
     stoppedAt?: Date;
     status: NotetakerSessionStatus;

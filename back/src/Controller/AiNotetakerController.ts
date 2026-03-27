@@ -65,10 +65,21 @@ interface StopSessionBody {
     actor?: NotetakerActorBody;
 }
 
+interface ShareSessionBody {
+    actor?: NotetakerActorBody;
+    userIds?: string[];
+}
 
 interface PresenceUpdateBody {
     participant?: NotetakerActorBody;
     markSpeechDetected?: boolean;
+}
+
+interface AttendanceEventBody {
+    spaceName?: string;
+    eventType?: "join" | "leave" | "heartbeat";
+    actor?: NotetakerActorBody;
+    at?: string;
 }
 
 interface ActorQuery {
@@ -84,6 +95,7 @@ export class AiNotetakerController {
         this.getConfig();
         this.updateConfig();
         this.startSession();
+        this.reportAttendanceEvent();
         this.updatePresence();
         this.markParticipantLeft();
         this.keepRunning();
@@ -93,6 +105,10 @@ export class AiNotetakerController {
         this.exportRecording();
         this.getActiveSessionForSpace();
         this.listSessions();
+        this.getSessionShareCandidates();
+        this.getSessionShares();
+        this.shareSession();
+        this.removeSelfSessionShare();
         this.deleteSession();
     }
 
@@ -433,6 +449,195 @@ export class AiNotetakerController {
                     allowSystemBypass: false,
                 });
                 res.status(200).json({ sessions });
+            }
+        );
+    }
+
+    private reportAttendanceEvent(): void {
+        this.app.post(
+            "/ai-notes/attendance/event",
+            validateAdminTokenMiddleware,
+            requireFeatureEnabledMiddleware,
+            async (req: Request<unknown, unknown, AttendanceEventBody>, res: Response) => {
+                const actor = this.parseActor(req.body.actor);
+                if (!actor) {
+                    res.status(400).json({ message: "actor.userId is required" });
+                    return;
+                }
+
+                if (!req.body.spaceName || req.body.spaceName.trim().length === 0) {
+                    res.status(400).json({ message: "spaceName is required" });
+                    return;
+                }
+
+                const eventType = req.body.eventType;
+                if (eventType !== "join" && eventType !== "leave" && eventType !== "heartbeat") {
+                    res.status(400).json({ message: "eventType must be one of join, leave, heartbeat" });
+                    return;
+                }
+
+                let occurredAt: Date | undefined;
+                if (typeof req.body.at === "string" && req.body.at.trim().length > 0) {
+                    const parsedAt = new Date(req.body.at);
+                    if (!Number.isNaN(parsedAt.getTime())) {
+                        occurredAt = parsedAt;
+                    }
+                }
+
+                try {
+                    const result = await notetakerSessionService.recordAttendanceEvent({
+                        spaceName: req.body.spaceName.trim(),
+                        actor,
+                        eventType,
+                        occurredAt,
+                    });
+                    res.status(200).json(result);
+                } catch (error) {
+                    res.status(500).json({
+                        message: error instanceof Error ? error.message : "Failed to process attendance event",
+                    });
+                }
+            }
+        );
+    }
+
+    private getSessionShareCandidates(): void {
+        this.app.get(
+            "/ai-notes/:sessionId/share-candidates",
+            validateAdminTokenMiddleware,
+            requireFeatureEnabledMiddleware,
+            async (req: Request<{ sessionId: string }, unknown, unknown, ActorQuery>, res: Response) => {
+                const actor = this.parseActorFromQuery(req.query);
+                if (!actor) {
+                    res.status(400).json({ message: "actorUserId query parameter is required" });
+                    return;
+                }
+
+                try {
+                    const candidates = await notetakerSessionService.getSessionShareCandidates(req.params.sessionId, actor);
+                    res.status(200).json({ candidates });
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : "Unable to fetch sharing candidates";
+                    if (message.includes("not found")) {
+                        res.status(404).json({ message });
+                        return;
+                    }
+                    if (message.includes("Only the session owner")) {
+                        res.status(403).json({ message });
+                        return;
+                    }
+
+                    res.status(500).json({ message });
+                }
+            }
+        );
+    }
+
+    private getSessionShares(): void {
+        this.app.get(
+            "/ai-notes/:sessionId/shares",
+            validateAdminTokenMiddleware,
+            requireFeatureEnabledMiddleware,
+            async (req: Request<{ sessionId: string }, unknown, unknown, ActorQuery>, res: Response) => {
+                const actor = this.parseActorFromQuery(req.query);
+                if (!actor) {
+                    res.status(400).json({ message: "actorUserId query parameter is required" });
+                    return;
+                }
+
+                try {
+                    const sharedWith = await notetakerSessionService.getSessionShares(req.params.sessionId, actor);
+                    res.status(200).json({ sharedWith });
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : "Unable to fetch sharing details";
+                    if (message.includes("not found")) {
+                        res.status(404).json({ message });
+                        return;
+                    }
+                    if (message.includes("Only the session owner")) {
+                        res.status(403).json({ message });
+                        return;
+                    }
+
+                    res.status(500).json({ message });
+                }
+            }
+        );
+    }
+
+    private shareSession(): void {
+        this.app.post(
+            "/ai-notes/:sessionId/share",
+            validateAdminTokenMiddleware,
+            requireFeatureEnabledMiddleware,
+            async (req: Request<{ sessionId: string }, unknown, ShareSessionBody>, res: Response) => {
+                const actor = this.parseActor(req.body.actor);
+                if (!actor) {
+                    res.status(400).json({ message: "actor.userId is required" });
+                    return;
+                }
+
+                if (!Array.isArray(req.body.userIds)) {
+                    res.status(400).json({ message: "userIds must be an array" });
+                    return;
+                }
+
+                try {
+                    const session = await notetakerSessionService.shareSession({
+                        sessionId: req.params.sessionId,
+                        actor,
+                        userIds: req.body.userIds,
+                    });
+                    res.status(200).json({ session });
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : "Unable to update session sharing";
+                    if (message.includes("not found")) {
+                        res.status(404).json({ message });
+                        return;
+                    }
+                    if (message.includes("Only the session owner")) {
+                        res.status(403).json({ message });
+                        return;
+                    }
+
+                    res.status(500).json({ message });
+                }
+            }
+        );
+    }
+
+    private removeSelfSessionShare(): void {
+        this.app.post(
+            "/ai-notes/:sessionId/remove-self",
+            validateAdminTokenMiddleware,
+            requireFeatureEnabledMiddleware,
+            async (req: Request<{ sessionId: string }, unknown, { actor?: NotetakerActorBody }>, res: Response) => {
+                const actor = this.parseActor(req.body.actor);
+                if (!actor) {
+                    res.status(400).json({ message: "actor.userId is required" });
+                    return;
+                }
+
+                try {
+                    await notetakerSessionService.removeSelfFromSharedSession(req.params.sessionId, actor);
+                    res.status(204).send();
+                } catch (error) {
+                    const message =
+                        error instanceof Error ? error.message : "Unable to remove shared session from library";
+                    if (message.includes("not found")) {
+                        res.status(404).json({ message });
+                        return;
+                    }
+                    if (
+                        message.includes("not authorized") ||
+                        message.includes("cannot remove themselves from their own library")
+                    ) {
+                        res.status(403).json({ message });
+                        return;
+                    }
+
+                    res.status(500).json({ message });
+                }
             }
         );
     }
