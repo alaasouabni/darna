@@ -21,6 +21,7 @@
 
     let wasOpen = false;
     let controlsRefreshPoller: ReturnType<typeof setInterval> | undefined;
+    let openRefreshRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastRequestedSpaceWhileOpen: string | undefined;
     let primaryActionDisabled = true;
 
@@ -78,11 +79,13 @@
         wasOpen = true;
         void notetakerControls.refreshStatus();
         void notetakerControls.refreshCurrentSession(effectiveMeetingSpace);
+        scheduleOpenRefreshRetry();
         lastRequestedSpaceWhileOpen = effectiveMeetingSpace;
     }
 
     $: if (!isOpen && wasOpen) {
         wasOpen = false;
+        clearOpenRefreshRetry();
         lastRequestedSpaceWhileOpen = undefined;
     }
 
@@ -101,6 +104,7 @@
     }
 
     onDestroy(() => {
+        clearOpenRefreshRetry();
         stopControlsRefreshPoller();
     });
 
@@ -293,6 +297,26 @@
 
         clearInterval(controlsRefreshPoller);
         controlsRefreshPoller = undefined;
+    }
+
+    function scheduleOpenRefreshRetry(): void {
+        clearOpenRefreshRetry();
+        openRefreshRetryTimer = setTimeout(() => {
+            if (!isOpen) {
+                return;
+            }
+            void notetakerControls.refreshStatus();
+            void notetakerControls.refreshCurrentSession(effectiveMeetingSpace);
+        }, 1200);
+    }
+
+    function clearOpenRefreshRetry(): void {
+        if (!openRefreshRetryTimer) {
+            return;
+        }
+
+        clearTimeout(openRefreshRetryTimer);
+        openRefreshRetryTimer = undefined;
     }
 
     async function onPrimaryActionClick(): Promise<void> {

@@ -27,17 +27,16 @@
 
     $: currentMeetingSpace = $livekitMeetingRoomSpaceNameStore ?? undefined;
 
-    function isSessionRunning() {
-        const state = $notetakerRuntimeStateStore;
-        return state === "starting" || state === "active" || state === "idle-warning";
-    }
+    $: runtimeState = $notetakerRuntimeStateStore;
+    $: isSessionRunning = runtimeState === "starting" || runtimeState === "active" || runtimeState === "idle-warning";
 
-    function onAiNotetakerClick() {
-        void notetakerControls.refreshCurrentSession(currentMeetingSpace);
+    async function onAiNotetakerClick() {
+        await notetakerControls.refreshStatus();
+        await notetakerControls.refreshCurrentSession(currentMeetingSpace);
         openModal(AiNotetakerQuickControlModal, {});
     }
 
-    $: tooltip = isSessionRunning()
+    $: tooltip = isSessionRunning
         ? "Open AI notes controls (active)"
         : $notetakerCanManageStore
         ? "Open AI notes controls"
@@ -45,7 +44,7 @@
 
     $: buttonState = $notetakerLoadingStore
         ? "disabled"
-        : isSessionRunning()
+        : isSessionRunning
         ? "active"
         : $notetakerCanManageStore
         ? "normal"
