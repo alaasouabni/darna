@@ -39,6 +39,10 @@ interface NotetakerActorBody {
     userId?: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags?: unknown;
 }
 
@@ -86,6 +90,10 @@ interface ActorQuery {
     actorUserId?: string;
     actorDisplayName?: string;
     actorEmail?: string;
+    actorColor?: string;
+    actorAvatarUrl?: string;
+    actorWokaId?: string;
+    actorCharacterTextureIds?: string | string[];
     actorTags?: string | string[];
 }
 
@@ -683,6 +691,10 @@ export class AiNotetakerController {
             userId: actorBody.userId,
             displayName: actorBody.displayName,
             email: actorBody.email,
+            color: actorBody.color,
+            avatarUrl: actorBody.avatarUrl,
+            wokaId: actorBody.wokaId,
+            characterTextureIds: this.parseCharacterTextureIds(actorBody.characterTextureIds),
             tags: this.parseTags(actorBody.tags),
         };
     }
@@ -696,6 +708,10 @@ export class AiNotetakerController {
             userId: query.actorUserId,
             displayName: query.actorDisplayName,
             email: query.actorEmail,
+            color: query.actorColor,
+            avatarUrl: query.actorAvatarUrl,
+            wokaId: query.actorWokaId,
+            characterTextureIds: this.parseCharacterTextureIds(query.actorCharacterTextureIds),
             tags: this.parseTags(query.actorTags),
         };
     }
@@ -710,6 +726,27 @@ export class AiNotetakerController {
                 .split(",")
                 .map((tag) => tag.trim())
                 .filter((tag) => tag.length > 0);
+        }
+
+        return [];
+    }
+
+    private parseCharacterTextureIds(rawTextureIds: unknown): string[] {
+        if (Array.isArray(rawTextureIds)) {
+            return Array.from(
+                new Set(rawTextureIds.map((textureId) => String(textureId).trim()).filter((textureId) => textureId.length > 0))
+            );
+        }
+
+        if (typeof rawTextureIds === "string") {
+            return Array.from(
+                new Set(
+                    rawTextureIds
+                        .split(",")
+                        .map((textureId) => textureId.trim())
+                        .filter((textureId) => textureId.length > 0)
+                )
+            );
         }
 
         return [];

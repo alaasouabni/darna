@@ -693,11 +693,16 @@ export class AiNotetakerController extends BaseHttpController {
         }
 
         const normalizedEmail = res.userIdentifier.includes("@") ? res.userIdentifier : undefined;
+        const avatar = socketManager.getUserNotetakerAvatar(res.userIdentifier);
 
         return {
             userId: res.userIdentifier,
             displayName: res.username,
             email: normalizedEmail,
+            color: avatar?.color,
+            avatarUrl: avatar?.avatarUrl,
+            wokaId: avatar?.wokaId,
+            characterTextureIds: avatar?.characterTextureIds,
             tags: res.tags ?? [],
         };
     }

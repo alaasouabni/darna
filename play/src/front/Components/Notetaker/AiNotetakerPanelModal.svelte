@@ -3,6 +3,7 @@
     import { closeModal, openModal } from "svelte-modals";
     import Popup from "../Modal/Popup.svelte";
     import AiNotetakerShareSessionModal from "./AiNotetakerShareSessionModal.svelte";
+    import AiNotetakerTranscriptTimeline from "./AiNotetakerTranscriptTimeline.svelte";
     import { localUserStore } from "../../Connection/LocalUserStore";
     import { livekitMeetingRoomSpaceNameStore } from "../../Stores/GameStore";
     import {
@@ -726,20 +727,12 @@
                             {:else if displayedSession.segments.length === 0}
                                 <div class="text-sm opacity-80">No transcript segments yet.</div>
                             {:else}
-                                {#if !isFinalOutputReady(displayedSession)}
-                                    <div class="text-xs opacity-75 mb-2">Partial transcript while processing. Final version will appear when status is Ready.</div>
-                                {/if}
-                                <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
-                                    {#each displayedSession.segments as segment (segment.id)}
-                                        <div class="rounded-lg bg-dark-600/60 p-2 text-sm">
-                                            <div class="flex flex-wrap items-center justify-between gap-2">
-                                                <div class="font-semibold">{segment.speakerLabel ?? "Unknown speaker"}</div>
-                                                <div class="text-xs opacity-70">{formatSegmentTimestamp(displayedSession, segment)}</div>
-                                            </div>
-                                            <div class="opacity-90 mt-1">{segment.text}</div>
-                                        </div>
-                                    {/each}
-                                </div>
+                                <AiNotetakerTranscriptTimeline
+                                    session={displayedSession}
+                                    isFinalOutputReady={isFinalOutputReady(displayedSession)}
+                                    getTimestampLabel={(segment) => formatSegmentTimestamp(displayedSession, segment)}
+                                    showHeader={false}
+                                />
                             {/if}
                         </div>
                     </details>

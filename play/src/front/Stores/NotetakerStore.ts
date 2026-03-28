@@ -40,6 +40,10 @@ interface NotetakerParticipant {
     userId: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags: string[];
     joinedAt: string;
     lastSeenAt: string;
@@ -50,6 +54,10 @@ export interface NotetakerShareCandidate {
     userId: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags: string[];
     joinedAt?: string;
     lastSeenAt?: string;

@@ -89,6 +89,10 @@ export interface NotetakerParticipantSnapshot {
     userId: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags: string[];
     joinedAt: Date;
     lastSeenAt: Date;
@@ -147,6 +151,10 @@ export interface NotetakerActor {
     userId: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags: string[];
 }
 

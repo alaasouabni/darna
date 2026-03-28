@@ -54,6 +54,7 @@ import type { AxiosResponse } from "axios";
 import axios, { isAxiosError } from "axios";
 import type { WebSocket } from "uWebSockets.js";
 import { AbortError } from "@workadventure/shared-utils/src/Abort/AbortError";
+import { Color } from "@workadventure/shared-utils";
 import { PusherRoom } from "../models/PusherRoom";
 import type { SocketData, BackConnection } from "../models/Websocket/SocketData";
 
@@ -411,9 +412,14 @@ export class SocketManager implements ZoneEventListener {
 
     private getSocketsByUserUuid(userUuid: string): Socket[] {
         const sockets: Socket[] = [];
+        const normalizedTargetUserUuid = this.normalizeAttendanceUserId(userUuid);
+        if (!normalizedTargetUserUuid) {
+            return sockets;
+        }
+
         for (const room of this.rooms.values()) {
             for (const listener of room.getListenersSnapshot()) {
-                if (listener.getUserData().userUuid === userUuid) {
+                if (this.normalizeAttendanceUserId(listener.getUserData().userUuid) === normalizedTargetUserUuid) {
                     sockets.push(listener);
                 }
             }
@@ -488,6 +494,49 @@ export class SocketManager implements ZoneEventListener {
         return `${spaceName}::${this.normalizeAttendanceUserId(userId)}`;
     }
 
+    public getUserNotetakerAvatar(
+        userUuid: string
+    ): { color?: string; avatarUrl?: string; wokaId?: string; characterTextureIds?: string[] } | null {
+        const sockets = this.getSocketsByUserUuid(userUuid);
+        for (const socket of sockets) {
+            const socketData = socket.getUserData();
+            const avatar = this.extractNotetakerAvatarFromTextures(socketData.characterTextures);
+            const color = Color.getColorByString(socketData.name);
+            if (color || avatar.avatarUrl || avatar.wokaId || (avatar.characterTextureIds?.length ?? 0) > 0) {
+                return {
+                    color,
+                    ...avatar,
+                };
+            }
+        }
+
+        return null;
+    }
+
+    private extractNotetakerAvatarFromTextures(
+        textures: CharacterTextureMessage[] | undefined
+    ): { avatarUrl?: string; wokaId?: string; characterTextureIds?: string[] } {
+        if (!textures || textures.length === 0) {
+            return {};
+        }
+
+        const firstWithUrl = textures.find((texture) => typeof texture.url === "string" && texture.url.length > 0);
+        const firstWithId = textures.find((texture) => typeof texture.id === "string" && texture.id.length > 0);
+        const characterTextureIds = Array.from(
+            new Set(
+                textures
+                    .map((texture) => texture.id)
+                    .filter((textureId): textureId is string => typeof textureId === "string" && textureId.length > 0)
+            )
+        );
+
+        return {
+            avatarUrl: firstWithUrl?.url,
+            wokaId: firstWithId?.id,
+            characterTextureIds,
+        };
+    }
+
     private buildNotetakerActorFromSocket(socket: Socket): NotetakerActorPayload | undefined {
         const socketData = socket.getUserData();
 
@@ -512,10 +561,16 @@ export class SocketManager implements ZoneEventListener {
             return undefined;
         }
 
+        const avatar = this.extractNotetakerAvatarFromTextures(socketData.characterTextures);
+
         return {
             userId: normalizedUserId,
             displayName: socketData.name,
             email: normalizedUserId.includes("@") ? normalizedUserId : undefined,
+            color: Color.getColorByString(socketData.name),
+            avatarUrl: avatar.avatarUrl,
+            wokaId: avatar.wokaId,
+            characterTextureIds: avatar.characterTextureIds,
             tags: socketData.tags ?? [],
         };
     }

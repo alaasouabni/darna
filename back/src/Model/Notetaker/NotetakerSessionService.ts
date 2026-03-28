@@ -78,6 +78,10 @@ interface NotetakerShareCandidate {
     userId: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags: string[];
     joinedAt?: Date;
     lastSeenAt?: Date;
@@ -599,6 +603,10 @@ export class NotetakerSessionService {
             userId: string,
             displayName?: string,
             email?: string,
+            color?: string,
+            avatarUrl?: string,
+            wokaId?: string,
+            characterTextureIds: string[] = [],
             tags: string[] = [],
             joinedAt?: Date,
             lastSeenAt?: Date,
@@ -615,6 +623,10 @@ export class NotetakerSessionService {
                     userId: normalizedUserId,
                     displayName,
                     email,
+                    color: this.normalizeColor(color),
+                    avatarUrl,
+                    wokaId,
+                    characterTextureIds: this.normalizeCharacterTextureIds(characterTextureIds),
                     tags: this.normalizeTags(tags),
                     joinedAt,
                     lastSeenAt,
@@ -625,6 +637,12 @@ export class NotetakerSessionService {
 
             existing.displayName = existing.displayName || displayName;
             existing.email = existing.email || email;
+            existing.color = existing.color || this.normalizeColor(color);
+            existing.avatarUrl = existing.avatarUrl || avatarUrl;
+            existing.wokaId = existing.wokaId || wokaId;
+            if (!existing.characterTextureIds || existing.characterTextureIds.length === 0) {
+                existing.characterTextureIds = this.normalizeCharacterTextureIds(characterTextureIds);
+            }
             existing.tags = this.normalizeTags([...existing.tags, ...tags]);
             if (options.currentSession && joinedAt) {
                 existing.joinedAt = joinedAt;
@@ -642,6 +660,10 @@ export class NotetakerSessionService {
                 participant.userId,
                 participant.displayName,
                 participant.email,
+                participant.color,
+                participant.avatarUrl,
+                participant.wokaId,
+                participant.characterTextureIds,
                 participant.tags,
                 participant.joinedAt,
                 participant.lastSeenAt,
@@ -660,6 +682,10 @@ export class NotetakerSessionService {
                     participant.userId,
                     participant.displayName,
                     participant.email,
+                    participant.color,
+                    participant.avatarUrl,
+                    participant.wokaId,
+                    participant.characterTextureIds,
                     participant.tags,
                     participant.joinedAt,
                     participant.lastSeenAt
@@ -699,6 +725,10 @@ export class NotetakerSessionService {
                 userId,
                 displayName: participant?.displayName,
                 email: participant?.email,
+                color: participant?.color,
+                avatarUrl: participant?.avatarUrl,
+                wokaId: participant?.wokaId,
+                characterTextureIds: participant?.characterTextureIds,
                 tags: participant?.tags ?? [],
                 joinedAt: participant?.joinedAt,
                 lastSeenAt: participant?.lastSeenAt,
@@ -1711,6 +1741,10 @@ export class NotetakerSessionService {
                 userId: normalizedActorUserId || actor.userId,
                 displayName: actor.displayName,
                 email: actor.email,
+                color: this.normalizeColor(actor.color),
+                avatarUrl: actor.avatarUrl,
+                wokaId: actor.wokaId,
+                characterTextureIds: this.normalizeCharacterTextureIds(actor.characterTextureIds),
                 tags,
                 joinedAt: now,
                 lastSeenAt: now,
@@ -1722,6 +1756,12 @@ export class NotetakerSessionService {
 
         existing.displayName = actor.displayName ?? existing.displayName;
         existing.email = actor.email ?? existing.email;
+        existing.color = this.normalizeColor(actor.color) || existing.color;
+        existing.avatarUrl = actor.avatarUrl ?? existing.avatarUrl;
+        existing.wokaId = actor.wokaId ?? existing.wokaId;
+        if (!existing.characterTextureIds || existing.characterTextureIds.length === 0) {
+            existing.characterTextureIds = this.normalizeCharacterTextureIds(actor.characterTextureIds);
+        }
         existing.tags = tags.length > 0 ? tags : existing.tags;
         existing.lastSeenAt = now;
         existing.leftAt = isLeaving ? now : undefined;
@@ -1851,6 +1891,13 @@ export class NotetakerSessionService {
         session.ownerUserId = session.ownerUserId || session.startedByUserId;
         const normalizedOwnerUserId = this.normalizeShareRecipientId(session.ownerUserId);
         session.ownerUserId = normalizedOwnerUserId || session.ownerUserId;
+        session.participants = session.participants.map((participant) => ({
+            ...participant,
+            userId: this.normalizeShareRecipientId(participant.userId) || participant.userId,
+            color: this.normalizeColor(participant.color),
+            tags: this.normalizeTags(participant.tags),
+            characterTextureIds: this.normalizeCharacterTextureIds(participant.characterTextureIds),
+        }));
         session.audioArtifacts = session.audioArtifacts ?? [];
         session.sharedWithUserIds = Array.from(
             new Set(
@@ -1883,6 +1930,25 @@ export class NotetakerSessionService {
         }
 
         return Array.from(new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)));
+    }
+
+    private normalizeCharacterTextureIds(textureIds: string[] | undefined): string[] {
+        if (!textureIds) {
+            return [];
+        }
+
+        return Array.from(
+            new Set(textureIds.map((textureId) => textureId.trim()).filter((textureId) => textureId.length > 0))
+        );
+    }
+
+    private normalizeColor(color: string | undefined): string | undefined {
+        if (!color) {
+            return undefined;
+        }
+
+        const normalized = color.trim();
+        return normalized.length > 0 ? normalized : undefined;
     }
 
     private normalizeShareRecipientId(userId: string): string {

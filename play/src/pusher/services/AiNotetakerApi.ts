@@ -5,6 +5,10 @@ export interface NotetakerActorPayload {
     userId: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags: string[];
 }
 
@@ -60,6 +64,10 @@ export interface NotetakerSessionPayload {
         userId: string;
         displayName?: string;
         email?: string;
+        color?: string;
+        avatarUrl?: string;
+        wokaId?: string;
+        characterTextureIds?: string[];
         tags: string[];
         joinedAt: string;
         lastSeenAt: string;
@@ -81,6 +89,10 @@ export interface NotetakerShareCandidatePayload {
     userId: string;
     displayName?: string;
     email?: string;
+    color?: string;
+    avatarUrl?: string;
+    wokaId?: string;
+    characterTextureIds?: string[];
     tags: string[];
     joinedAt?: string;
     lastSeenAt?: string;
@@ -201,6 +213,10 @@ class AiNotetakerApi {
                 actorUserId: actor.userId,
                 actorDisplayName: actor.displayName,
                 actorEmail: actor.email,
+                actorColor: actor.color,
+                actorAvatarUrl: actor.avatarUrl,
+                actorWokaId: actor.wokaId,
+                actorCharacterTextureIds: actor.characterTextureIds?.join(","),
                 actorTags: actor.tags.join(","),
             },
         });
@@ -216,6 +232,10 @@ class AiNotetakerApi {
                 actorUserId: actor.userId,
                 actorDisplayName: actor.displayName,
                 actorEmail: actor.email,
+                actorColor: actor.color,
+                actorAvatarUrl: actor.avatarUrl,
+                actorWokaId: actor.wokaId,
+                actorCharacterTextureIds: actor.characterTextureIds?.join(","),
                 actorTags: actor.tags.join(","),
             },
         });
@@ -246,6 +266,10 @@ class AiNotetakerApi {
                 actorUserId: actor.userId,
                 actorDisplayName: actor.displayName,
                 actorEmail: actor.email,
+                actorColor: actor.color,
+                actorAvatarUrl: actor.avatarUrl,
+                actorWokaId: actor.wokaId,
+                actorCharacterTextureIds: actor.characterTextureIds?.join(","),
                 actorTags: actor.tags.join(","),
             },
         });
@@ -263,6 +287,10 @@ class AiNotetakerApi {
                 actorUserId: actor.userId,
                 actorDisplayName: actor.displayName,
                 actorEmail: actor.email,
+                actorColor: actor.color,
+                actorAvatarUrl: actor.avatarUrl,
+                actorWokaId: actor.wokaId,
+                actorCharacterTextureIds: actor.characterTextureIds?.join(","),
                 actorTags: actor.tags.join(","),
             },
             responseType: "text",
@@ -287,6 +315,10 @@ class AiNotetakerApi {
                 actorUserId: actor.userId,
                 actorDisplayName: actor.displayName,
                 actorEmail: actor.email,
+                actorColor: actor.color,
+                actorAvatarUrl: actor.avatarUrl,
+                actorWokaId: actor.wokaId,
+                actorCharacterTextureIds: actor.characterTextureIds?.join(","),
                 actorTags: actor.tags.join(","),
             },
             responseType: "arraybuffer",
@@ -309,6 +341,10 @@ class AiNotetakerApi {
                 actorUserId: actor.userId,
                 actorDisplayName: actor.displayName,
                 actorEmail: actor.email,
+                actorColor: actor.color,
+                actorAvatarUrl: actor.avatarUrl,
+                actorWokaId: actor.wokaId,
+                actorCharacterTextureIds: actor.characterTextureIds?.join(","),
                 actorTags: actor.tags.join(","),
             },
         });
@@ -331,6 +367,10 @@ class AiNotetakerApi {
                 actorUserId: params.actor.userId,
                 actorDisplayName: params.actor.displayName,
                 actorEmail: params.actor.email,
+                actorColor: params.actor.color,
+                actorAvatarUrl: params.actor.avatarUrl,
+                actorWokaId: params.actor.wokaId,
+                actorCharacterTextureIds: params.actor.characterTextureIds?.join(","),
                 actorTags: params.actor.tags.join(","),
                 spaceName: params.spaceName,
                 includeActiveOnly: params.includeActiveOnly,
